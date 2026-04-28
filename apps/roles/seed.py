@@ -37,6 +37,21 @@ CATALOGUE = [
     ("employees", "employees.employee.delete", "Soft-delete employees"),
     ("employees", "employees.employee.add_in_any_campus", "Create employees outside own campus scope"),
     ("employees", "employees.employee.manage_deleted", "View / manage soft-deleted employees"),
+
+    # Module D — Leaves
+    ("leaves", "leaves.type.manage", "Manage leave-type catalogue"),
+    ("leaves", "leaves.session.manage", "Manage academic sessions"),
+    ("leaves", "leaves.allocation.add", "Allocate leaves (HR)"),
+    ("leaves", "leaves.allocation.delete", "Delete unconsumed allocations"),
+    ("leaves", "leaves.application.view_all", "View all leave applications"),
+    ("leaves", "leaves.application.approve_any", "Approve any leave (HR override)"),
+    ("leaves", "leaves.application.override_balance", "Apply force=true past balance"),
+    ("leaves", "leaves.application.backdate_apply", "Apply leaves with from_date in the past"),
+    ("leaves", "leaves.compoff.view_all", "View all comp-off applications"),
+    ("leaves", "leaves.compoff.approve_any", "Approve any comp-off (HR override)"),
+    ("leaves", "leaves.holiday.manage", "Manage the holiday calendar"),
+    ("leaves", "leaves.report.view", "View leave reports for own campuses"),
+    ("leaves", "leaves.report.view_all", "View leave reports across all campuses"),
 ]
 
 

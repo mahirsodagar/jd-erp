@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     "apps.master",
     "apps.leads",
     "apps.employees",
+    "apps.leaves",
 ]
 
 
@@ -137,6 +138,14 @@ CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
 # --- Lead intake API key ------------------------------------------------
 
 LEAD_INTAKE_API_KEY = env("LEAD_INTAKE_API_KEY", default="")
+
+
+# --- Leave module -------------------------------------------------------
+
+LEAVES_EXCLUDE_HOLIDAYS_AND_WEEKENDS = env.bool(
+    "LEAVES_EXCLUDE_HOLIDAYS_AND_WEEKENDS", default=True,
+)
+LEAVES_HR_INBOX = env("LEAVES_HR_INBOX", default="leave@jdinstitute.edu.in")
 
 
 # --- django-axes --------------------------------------------------------
