@@ -10,6 +10,19 @@ CATALOGUE = [
     ("accounts", "accounts.user.view", "View users"),
     ("roles", "roles.role.manage", "Manage roles & permissions"),
     ("audit", "audit.log.view", "View audit logs"),
+
+    # Module B — Lead Management / CRM
+    ("master", "master.campus.manage", "Manage campuses"),
+    ("master", "master.program.manage", "Manage programs"),
+    ("master", "master.source.manage", "Manage lead sources"),
+    ("leads", "leads.lead.create", "Create leads"),
+    ("leads", "leads.lead.view", "View own assigned leads"),
+    ("leads", "leads.lead.view_all", "View all leads (managers)"),
+    ("leads", "leads.lead.edit", "Edit lead fields"),
+    ("leads", "leads.lead.reassign", "Reassign leads to another counselor"),
+    ("leads", "leads.lead.change_status", "Change lead status"),
+    ("leads", "leads.followup.manage", "Add/edit follow-ups"),
+    ("leads", "leads.communication.log", "Log communications"),
 ]
 
 
