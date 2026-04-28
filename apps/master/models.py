@@ -2,9 +2,62 @@ from django.db import models
 from django.utils.text import slugify
 
 
+class Institute(models.Model):
+    """Top-level legal entity. One Institute → many Campuses."""
+
+    name = models.CharField(max_length=160, unique=True)
+    code = models.CharField(max_length=20, unique=True)
+    logo = models.ImageField(
+        upload_to="institute/logos/", blank=True, null=True,
+        help_text="Used on ID cards and printed reports.",
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+
+class State(models.Model):
+    name = models.CharField(max_length=80, unique=True)
+    code = models.CharField(
+        max_length=4, unique=True,
+        help_text="ISO-style state code (e.g. KA, GA, MH).",
+    )
+    is_union_territory = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+
+class City(models.Model):
+    name = models.CharField(max_length=120)
+    state = models.ForeignKey(State, on_delete=models.PROTECT, related_name="cities")
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ("name",)
+        unique_together = (("name", "state"),)
+
+    def __str__(self):
+        return f"{self.name}, {self.state.code}"
+
+
 class Campus(models.Model):
     name = models.CharField(max_length=120, unique=True)
     code = models.CharField(max_length=20, unique=True, help_text="Short code, e.g. BLR, GOA.")
+    institute = models.ForeignKey(
+        Institute, on_delete=models.PROTECT,
+        related_name="campuses", null=True, blank=True,
+        help_text="Parent institute. Optional for legacy data.",
+    )
     city = models.CharField(max_length=80, blank=True)
     state = models.CharField(max_length=80, blank=True)
     is_active = models.BooleanField(default=True)

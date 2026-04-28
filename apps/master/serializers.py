@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Campus, LeadSource, Program
+from .models import Campus, City, Institute, LeadSource, Program, State
 
 
 class CampusSerializer(serializers.ModelSerializer):
@@ -34,6 +34,30 @@ class ProgramSerializer(serializers.ModelSerializer):
             "created_at", "updated_at",
         ]
         read_only_fields = ["id", "campuses", "created_at", "updated_at"]
+
+
+class InstituteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Institute
+        fields = ["id", "name", "code", "logo", "is_active",
+                  "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class StateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = State
+        fields = ["id", "name", "code", "is_union_territory"]
+        read_only_fields = ["id"]
+
+
+class CitySerializer(serializers.ModelSerializer):
+    state_name = serializers.CharField(source="state.name", read_only=True)
+
+    class Meta:
+        model = City
+        fields = ["id", "name", "state", "state_name", "is_active"]
+        read_only_fields = ["id", "state_name"]
 
 
 class LeadSourceSerializer(serializers.ModelSerializer):

@@ -23,6 +23,20 @@ CATALOGUE = [
     ("leads", "leads.lead.change_status", "Change lead status"),
     ("leads", "leads.followup.manage", "Add/edit follow-ups"),
     ("leads", "leads.communication.log", "Log communications"),
+
+    # Module C — Employee Management / HR
+    ("master", "master.institute.manage", "Manage institutes"),
+    ("master", "master.state.manage", "Manage states"),
+    ("master", "master.city.manage", "Manage cities"),
+    ("employees", "employees.master.manage", "Manage departments & designations"),
+    ("employees", "employees.employee.view", "View employees in own campus(es)"),
+    ("employees", "employees.employee.view_all_campuses", "View all employees across campuses"),
+    ("employees", "employees.employee.create", "Create employees"),
+    ("employees", "employees.employee.edit", "Edit employees"),
+    ("employees", "employees.employee.change_status", "Activate / deactivate employees"),
+    ("employees", "employees.employee.delete", "Soft-delete employees"),
+    ("employees", "employees.employee.add_in_any_campus", "Create employees outside own campus scope"),
+    ("employees", "employees.employee.manage_deleted", "View / manage soft-deleted employees"),
 ]
 
 

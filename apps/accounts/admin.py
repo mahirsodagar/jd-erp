@@ -15,8 +15,10 @@ class UserAdmin(DjangoUserAdmin):
         ("Personal", {"fields": ("email", "full_name")}),
         ("Permissions", {"fields": ("is_active", "is_staff", "is_superuser",
                                     "groups", "user_permissions")}),
+        ("Campus access", {"fields": ("campuses",)}),
         ("Dates", {"fields": ("last_login", "date_joined")}),
     )
+    filter_horizontal = ("groups", "user_permissions", "campuses")
     add_fieldsets = (
         (None, {
             "classes": ("wide",),

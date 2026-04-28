@@ -5,8 +5,15 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import HasPerm
 
-from .models import Campus, LeadSource, Program
-from .serializers import CampusSerializer, LeadSourceSerializer, ProgramSerializer
+from .models import Campus, City, Institute, LeadSource, Program, State
+from .serializers import (
+    CampusSerializer,
+    CitySerializer,
+    InstituteSerializer,
+    LeadSourceSerializer,
+    ProgramSerializer,
+    StateSerializer,
+)
 
 
 class _MasterDetailMixin:
@@ -98,6 +105,97 @@ class ProgramDetailView(_MasterDetailMixin, APIView):
     required_perm = "master.program.manage"
     model = Program
     serializer = ProgramSerializer
+
+
+# --- Lead Source --------------------------------------------------------
+
+# --- Institute ----------------------------------------------------------
+
+class InstituteListCreateView(APIView):
+    permission_classes = [IsAuthenticated, HasPerm]
+    required_perm = "master.institute.manage"
+
+    def get(self, request):
+        qs = Institute.objects.all()
+        if request.query_params.get("active") == "1":
+            qs = qs.filter(is_active=True)
+        return Response(InstituteSerializer(qs, many=True).data)
+
+    def post(self, request):
+        s = InstituteSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(s.data, status=status.HTTP_201_CREATED)
+
+
+class InstituteDetailView(_MasterDetailMixin, APIView):
+    permission_classes = [IsAuthenticated, HasPerm]
+    required_perm = "master.institute.manage"
+    model = Institute
+    serializer = InstituteSerializer
+
+
+# --- State --------------------------------------------------------------
+
+class StateListView(APIView):
+    """Read-only for everyone authenticated; CRUD requires perm."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(StateSerializer(State.objects.all(), many=True).data)
+
+
+class StateManageView(APIView):
+    permission_classes = [IsAuthenticated, HasPerm]
+    required_perm = "master.state.manage"
+
+    def post(self, request):
+        s = StateSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(s.data, status=status.HTTP_201_CREATED)
+
+
+class StateDetailView(_MasterDetailMixin, APIView):
+    permission_classes = [IsAuthenticated, HasPerm]
+    required_perm = "master.state.manage"
+    model = State
+    serializer = StateSerializer
+
+
+# --- City ---------------------------------------------------------------
+
+class CityListCreateView(APIView):
+    """List filterable by state; create requires perm."""
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [IsAuthenticated()]
+        from rest_framework.permissions import IsAuthenticated as _IA
+        return [_IA(), HasPerm()]
+
+    required_perm = "master.city.manage"
+
+    def get(self, request):
+        qs = City.objects.select_related("state")
+        if v := request.query_params.get("state"):
+            qs = qs.filter(state_id=v)
+        if request.query_params.get("active") == "1":
+            qs = qs.filter(is_active=True)
+        return Response(CitySerializer(qs, many=True).data)
+
+    def post(self, request):
+        s = CitySerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(s.data, status=status.HTTP_201_CREATED)
+
+
+class CityDetailView(_MasterDetailMixin, APIView):
+    permission_classes = [IsAuthenticated, HasPerm]
+    required_perm = "master.city.manage"
+    model = City
+    serializer = CitySerializer
 
 
 # --- Lead Source --------------------------------------------------------

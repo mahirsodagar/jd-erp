@@ -16,6 +16,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
 
+    campuses = models.ManyToManyField(
+        "master.Campus", related_name="users", blank=True,
+        help_text="Campuses this user can act in. Empty = no campus scope assigned.",
+    )
+
     date_joined = models.DateTimeField(default=timezone.now)
 
     USERNAME_FIELD = "username"

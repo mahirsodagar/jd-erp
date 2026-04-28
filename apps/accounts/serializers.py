@@ -39,16 +39,18 @@ class TenantTokenObtainSerializer(serializers.Serializer):
 
 class UserSerializer(serializers.ModelSerializer):
     roles = serializers.SerializerMethodField()
+    campuses = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
 
     class Meta:
         model = User
         fields = [
             "id", "username", "email", "full_name",
             "is_active", "is_staff", "is_superuser",
+            "campuses",
             "date_joined", "last_login", "roles",
         ]
         read_only_fields = [
-            "id", "is_superuser", "date_joined", "last_login", "roles",
+            "id", "is_superuser", "date_joined", "last_login", "roles", "campuses",
         ]
 
     def get_roles(self, obj):
@@ -60,22 +62,28 @@ class UserCreateSerializer(serializers.ModelSerializer):
     role_ids = serializers.ListField(
         child=serializers.IntegerField(), required=False, write_only=True,
     )
+    campus_ids = serializers.ListField(
+        child=serializers.IntegerField(), required=False, write_only=True,
+    )
 
     class Meta:
         model = User
         fields = [
             "id", "username", "email", "full_name", "is_active", "is_staff",
-            "temporary_password", "role_ids",
+            "temporary_password", "role_ids", "campus_ids",
         ]
         read_only_fields = ["id"]
 
     def create(self, validated_data):
         password = validated_data.pop("temporary_password")
         role_ids = validated_data.pop("role_ids", [])
+        campus_ids = validated_data.pop("campus_ids", [])
         validate_password(password)
         user = User.objects.create_user(password=password, **validated_data)
         if role_ids:
             user.roles.set(role_ids)
+        if campus_ids:
+            user.campuses.set(campus_ids)
         return user
 
 
@@ -83,18 +91,25 @@ class UserUpdateSerializer(serializers.ModelSerializer):
     role_ids = serializers.ListField(
         child=serializers.IntegerField(), required=False, write_only=True,
     )
+    campus_ids = serializers.ListField(
+        child=serializers.IntegerField(), required=False, write_only=True,
+    )
 
     class Meta:
         model = User
-        fields = ["full_name", "email", "is_active", "is_staff", "role_ids"]
+        fields = ["full_name", "email", "is_active", "is_staff",
+                  "role_ids", "campus_ids"]
 
     def update(self, instance, validated_data):
         role_ids = validated_data.pop("role_ids", None)
+        campus_ids = validated_data.pop("campus_ids", None)
         for k, v in validated_data.items():
             setattr(instance, k, v)
         instance.save()
         if role_ids is not None:
             instance.roles.set(role_ids)
+        if campus_ids is not None:
+            instance.campuses.set(campus_ids)
         return instance
 
 

@@ -1,6 +1,27 @@
 from django.contrib import admin
 
-from .models import Campus, LeadSource, Program
+from .models import Campus, City, Institute, LeadSource, Program, State
+
+
+@admin.register(Institute)
+class InstituteAdmin(admin.ModelAdmin):
+    list_display = ("name", "code", "is_active")
+    search_fields = ("name", "code")
+
+
+@admin.register(State)
+class StateAdmin(admin.ModelAdmin):
+    list_display = ("name", "code", "is_union_territory")
+    list_filter = ("is_union_territory",)
+    search_fields = ("name", "code")
+
+
+@admin.register(City)
+class CityAdmin(admin.ModelAdmin):
+    list_display = ("name", "state", "is_active")
+    list_filter = ("state", "is_active")
+    search_fields = ("name",)
+    autocomplete_fields = ("state",)
 
 
 @admin.register(Campus)
