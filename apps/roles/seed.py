@@ -52,6 +52,32 @@ CATALOGUE = [
     ("leaves", "leaves.holiday.manage", "Manage the holiday calendar"),
     ("leaves", "leaves.report.view", "View leave reports for own campuses"),
     ("leaves", "leaves.report.view_all", "View leave reports across all campuses"),
+
+    # Module E.1 — Admissions + new masters
+    ("master", "master.academicyear.manage", "Manage academic years"),
+    ("master", "master.degree.manage", "Manage degrees"),
+    ("master", "master.course.manage", "Manage courses"),
+    ("master", "master.semester.manage", "Manage semesters"),
+    ("master", "master.batch.manage", "Manage batches"),
+
+    ("admissions", "admissions.student.create", "Create students (promote leads)"),
+    ("admissions", "admissions.student.view", "View students in own campus(es)"),
+    ("admissions", "admissions.student.view_all_campuses", "View students across all campuses"),
+    ("admissions", "admissions.student.edit", "Edit student records (HR)"),
+    ("admissions", "admissions.student.promote", "Move students between status / batches"),
+    ("admissions", "admissions.document.manage", "Upload / delete student documents"),
+    ("admissions", "admissions.enrollment.manage", "Create / edit enrollments"),
+
+    # Module E.2 — Fees
+    ("master", "master.feetemplate.manage", "Manage fee templates"),
+    ("fees", "fees.installment.manage", "Create / edit per-student installments"),
+    ("fees", "fees.receipt.create", "Record fee payments"),
+    ("fees", "fees.receipt.view", "View receipts in own campus(es)"),
+    ("fees", "fees.receipt.view_all", "View receipts across all campuses"),
+    ("fees", "fees.receipt.edit", "Correct posted receipts"),
+    ("fees", "fees.receipt.cancel", "Cancel posted receipts"),
+    ("fees", "fees.concession.request", "Raise concession requests"),
+    ("fees", "fees.concession.approve", "Approve / reject concession requests"),
 ]
 
 

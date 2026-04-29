@@ -208,6 +208,44 @@ class LeadCommunicationListCreateView(APIView):
 
 # --- Public intake ------------------------------------------------------
 
+class LeadPromoteView(APIView):
+    """Lead → Student promotion. HR action.
+
+    Creates a Student record, a portal User, and links them. Returns the
+    student id + a one-time temporary password (PA free can't email).
+    """
+    permission_classes = [IsAuthenticated, LeadVisibility]
+
+    def post(self, request, pk):
+        try:
+            lead = Lead.objects.get(pk=pk)
+        except Lead.DoesNotExist:
+            return Response({"detail": "Lead not found."}, status=http.HTTP_404_NOT_FOUND)
+        self.check_object_permissions(request, lead)
+
+        from apps.accounts.permissions import HasPerm
+        from apps.admissions.permissions import has_perm as has_adm_perm
+        if not (request.user.is_superuser
+                or has_adm_perm(request.user, "admissions.student.create")):
+            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
+
+        from apps.admissions.serializers import PromotionResultSerializer
+        from apps.admissions.services import promote_lead_to_student
+        try:
+            student, creds = promote_lead_to_student(lead=lead, actor=request.user)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=http.HTTP_400_BAD_REQUEST)
+
+        body = {
+            "student_id": student.id,
+            "application_form_id": student.application_form_id,
+            "user_id": student.user_account_id,
+            **creds,
+        }
+        return Response(PromotionResultSerializer(body).data,
+                        status=http.HTTP_201_CREATED)
+
+
 class LeadIntakeView(APIView):
     """Public endpoint for automated lead sources (website forms, ad
     platforms, etc.). Auth via static API key, NOT JWT."""

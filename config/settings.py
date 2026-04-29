@@ -39,6 +39,8 @@ INSTALLED_APPS = [
     "apps.leads",
     "apps.employees",
     "apps.leaves",
+    "apps.admissions",
+    "apps.fees",
 ]
 
 

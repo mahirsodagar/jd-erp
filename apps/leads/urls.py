@@ -8,6 +8,7 @@ from .views import (
     LeadHistoryView,
     LeadIntakeView,
     LeadListCreateView,
+    LeadPromoteView,
     LeadReassignView,
     LeadStatusView,
 )
@@ -19,6 +20,7 @@ urlpatterns = [
     path("<int:pk>/", LeadDetailView.as_view(), name="lead-detail"),
     path("<int:pk>/status/", LeadStatusView.as_view(), name="lead-status"),
     path("<int:pk>/reassign/", LeadReassignView.as_view(), name="lead-reassign"),
+    path("<int:pk>/promote/", LeadPromoteView.as_view(), name="lead-promote"),
     path("<int:pk>/history/", LeadHistoryView.as_view(), name="lead-history"),
 
     path("<int:pk>/followups/",

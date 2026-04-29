@@ -5,13 +5,22 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import HasPerm
 
-from .models import Campus, City, Institute, LeadSource, Program, State
+from .models import (
+    AcademicYear, Batch, Campus, City, Course, Degree, FeeTemplate,
+    Institute, LeadSource, Program, Semester, State,
+)
 from .serializers import (
+    AcademicYearSerializer,
+    BatchSerializer,
     CampusSerializer,
     CitySerializer,
+    CourseSerializer,
+    DegreeSerializer,
+    FeeTemplateSerializer,
     InstituteSerializer,
     LeadSourceSerializer,
     ProgramSerializer,
+    SemesterSerializer,
     StateSerializer,
 )
 
@@ -196,6 +205,175 @@ class CityDetailView(_MasterDetailMixin, APIView):
     required_perm = "master.city.manage"
     model = City
     serializer = CitySerializer
+
+
+# --- Academic / cohort masters -----------------------------------------
+#
+# All read-open to any authenticated user (so dropdowns work),
+# CUD requires the relevant manage perm.
+
+class _ListCreateBase(APIView):
+    model = None
+    serializer = None
+    required_perm = ""
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), HasPerm()]
+
+    def get(self, request):
+        qs = self.model.objects.all()
+        if request.query_params.get("active") == "1" and hasattr(self.model, "is_active"):
+            qs = qs.filter(is_active=True)
+        return Response(self.serializer(qs, many=True).data)
+
+    def post(self, request):
+        s = self.serializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(s.data, status=status.HTTP_201_CREATED)
+
+
+class _DetailBase(APIView):
+    model = None
+    serializer = None
+    required_perm = ""
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), HasPerm()]
+
+    def _obj(self, pk):
+        return self.model.objects.get(pk=pk)
+
+    def get(self, request, pk):
+        return Response(self.serializer(self._obj(pk)).data)
+
+    def patch(self, request, pk):
+        obj = self._obj(pk)
+        s = self.serializer(obj, data=request.data, partial=True)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(s.data)
+
+    def delete(self, request, pk):
+        obj = self._obj(pk)
+        if hasattr(obj, "is_active"):
+            obj.is_active = False
+            obj.save(update_fields=["is_active"])
+        else:
+            obj.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class AcademicYearListCreateView(_ListCreateBase):
+    model = AcademicYear
+    serializer = AcademicYearSerializer
+    required_perm = "master.academicyear.manage"
+
+
+class AcademicYearDetailView(_DetailBase):
+    model = AcademicYear
+    serializer = AcademicYearSerializer
+    required_perm = "master.academicyear.manage"
+
+
+class DegreeListCreateView(_ListCreateBase):
+    model = Degree
+    serializer = DegreeSerializer
+    required_perm = "master.degree.manage"
+
+
+class DegreeDetailView(_DetailBase):
+    model = Degree
+    serializer = DegreeSerializer
+    required_perm = "master.degree.manage"
+
+
+class CourseListCreateView(_ListCreateBase):
+    model = Course
+    serializer = CourseSerializer
+    required_perm = "master.course.manage"
+
+    def get(self, request):
+        qs = Course.objects.select_related("program")
+        if v := request.query_params.get("program"):
+            qs = qs.filter(program_id=v)
+        if request.query_params.get("active") == "1":
+            qs = qs.filter(is_active=True)
+        return Response(CourseSerializer(qs, many=True).data)
+
+
+class CourseDetailView(_DetailBase):
+    model = Course
+    serializer = CourseSerializer
+    required_perm = "master.course.manage"
+
+
+class SemesterListCreateView(_ListCreateBase):
+    model = Semester
+    serializer = SemesterSerializer
+    required_perm = "master.semester.manage"
+
+
+class SemesterDetailView(_DetailBase):
+    model = Semester
+    serializer = SemesterSerializer
+    required_perm = "master.semester.manage"
+
+
+class BatchListCreateView(_ListCreateBase):
+    model = Batch
+    serializer = BatchSerializer
+    required_perm = "master.batch.manage"
+
+    def get(self, request):
+        qs = Batch.objects.select_related("program", "campus", "academic_year", "mentor")
+        if v := request.query_params.get("program"):
+            qs = qs.filter(program_id=v)
+        if v := request.query_params.get("campus"):
+            qs = qs.filter(campus_id=v)
+        if v := request.query_params.get("academic_year"):
+            qs = qs.filter(academic_year_id=v)
+        if request.query_params.get("active") == "1":
+            qs = qs.filter(is_active=True)
+        return Response(BatchSerializer(qs, many=True).data)
+
+
+class BatchDetailView(_DetailBase):
+    model = Batch
+    serializer = BatchSerializer
+    required_perm = "master.batch.manage"
+
+
+class FeeTemplateListCreateView(_ListCreateBase):
+    model = FeeTemplate
+    serializer = FeeTemplateSerializer
+    required_perm = "master.feetemplate.manage"
+
+    def get(self, request):
+        qs = FeeTemplate.objects.select_related(
+            "academic_year", "campus", "program", "course",
+        )
+        if v := request.query_params.get("academic_year"):
+            qs = qs.filter(academic_year_id=v)
+        if v := request.query_params.get("campus"):
+            qs = qs.filter(campus_id=v)
+        if v := request.query_params.get("program"):
+            qs = qs.filter(program_id=v)
+        if v := request.query_params.get("course"):
+            qs = qs.filter(course_id=v)
+        if request.query_params.get("active") == "1":
+            qs = qs.filter(is_active=True)
+        return Response(FeeTemplateSerializer(qs, many=True).data)
+
+
+class FeeTemplateDetailView(_DetailBase):
+    model = FeeTemplate
+    serializer = FeeTemplateSerializer
+    required_perm = "master.feetemplate.manage"
 
 
 # --- Lead Source --------------------------------------------------------
