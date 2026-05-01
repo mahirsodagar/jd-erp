@@ -101,3 +101,41 @@ urlpatterns = [
     path("alumni/me/", AlumniMeView.as_view(), name="alumni-me"),
     path("alumni/<int:pk>/", AlumniDetailView.as_view(), name="alumni-detail"),
 ]
+
+
+# === G.4 — Online Tests =============================================
+from .views import (
+    AttemptStartView, AttemptSubmitView, AttemptViewWithQuestions,
+    MyTestsView, ResponseReviewView, TestAttemptsListView, TestCloseView,
+    TestDetailView, TestListCreateView, TestMapView, TestPublishView,
+    TestQuestionDetailView, TestQuestionListCreateView, TestReportView,
+)
+
+urlpatterns += [
+    path("tests/", TestListCreateView.as_view(), name="test-list-create"),
+    path("tests/me/", MyTestsView.as_view(), name="test-me"),
+    path("tests/<int:pk>/", TestDetailView.as_view(), name="test-detail"),
+    path("tests/<int:pk>/publish/", TestPublishView.as_view(),
+         name="test-publish"),
+    path("tests/<int:pk>/close/", TestCloseView.as_view(), name="test-close"),
+    path("tests/<int:pk>/questions/", TestQuestionListCreateView.as_view(),
+         name="test-question-list-create"),
+    path("tests/<int:pk>/map/", TestMapView.as_view(), name="test-map"),
+    path("tests/<int:pk>/attempts/", TestAttemptsListView.as_view(),
+         name="test-attempts"),
+    path("tests/<int:pk>/report/", TestReportView.as_view(),
+         name="test-report"),
+
+    path("questions/<int:pk>/", TestQuestionDetailView.as_view(),
+         name="test-question-detail"),
+
+    path("attempts/<int:pk>/", AttemptViewWithQuestions.as_view(),
+         name="attempt-detail"),
+    path("attempts/<int:pk>/start/", AttemptStartView.as_view(),
+         name="attempt-start"),
+    path("attempts/<int:pk>/submit/", AttemptSubmitView.as_view(),
+         name="attempt-submit"),
+
+    path("responses/<int:pk>/review/", ResponseReviewView.as_view(),
+         name="response-review"),
+]

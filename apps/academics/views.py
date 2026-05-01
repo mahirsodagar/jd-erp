@@ -1194,3 +1194,432 @@ class AlumniMeView(APIView):
             return Response({"detail": "Not in alumni database yet."},
                             status=http.HTTP_404_NOT_FOUND)
         return Response(AlumniRecordSerializer(a).data)
+
+
+# === G.4 — Online Tests =============================================
+
+from .models import Test as _Test  # noqa: E402  (avoid clobbering test import)
+from .models import TestAttempt as _TestAttempt  # noqa: E402
+from .models import TestQuestion as _TestQuestion  # noqa: E402
+from .models import TestResponse as _TestResponse  # noqa: E402
+from .serializers import (  # noqa: E402
+    MapTestSerializer, ReviewResponseSerializer, SubmitAttemptSerializer,
+    TestAttemptSerializer, TestQuestionSerializer,
+    TestQuestionStudentSerializer, TestResponseSerializer, TestSerializer,
+)
+from .test_service import (  # noqa: E402
+    can_attempt_now, map_test_to_students, recompute_total_marks,
+    review_response, submit_attempt, test_report,
+)
+
+
+def _is_test_owner(user, test) -> bool:
+    if user.is_superuser:
+        return True
+    return test.created_by_id == user.id
+
+
+def _student_owns_attempt(user, attempt) -> bool:
+    s = getattr(user, "student", None)
+    return s is not None and attempt.student_id == s.id
+
+
+# --- Test CRUD --------------------------------------------------------
+
+class TestListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        u = request.user
+        qs = _Test.objects.select_related("subject", "program", "academic_year")
+        if not (u.is_superuser or has_perm(u, "academics.test.view_all")):
+            # Faculty default: own tests; others get nothing on this endpoint.
+            qs = qs.filter(created_by=u)
+        params = request.query_params
+        if v := params.get("subject"):
+            qs = qs.filter(subject_id=v)
+        if v := params.get("status"):
+            qs = qs.filter(status=v)
+        return Response(TestSerializer(qs[:500], many=True).data)
+
+    def post(self, request):
+        if not has_perm(request.user, "academics.test.create"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = TestSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        s.save(created_by=request.user)
+        return Response(s.data, status=http.HTTP_201_CREATED)
+
+
+class TestDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _obj(self, pk):
+        try:
+            return _Test.objects.select_related("subject").get(pk=pk)
+        except _Test.DoesNotExist as e:
+            raise Http404 from e
+
+    def get(self, request, pk):
+        return Response(TestSerializer(self._obj(pk)).data)
+
+    def patch(self, request, pk):
+        t = self._obj(pk)
+        if not (_is_test_owner(request.user, t)
+                or has_perm(request.user, "academics.test.manage_any")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        if t.status != _Test.Status.DRAFT:
+            return Response(
+                {"detail": "Only DRAFT tests can be edited."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+        s = TestSerializer(t, data=request.data, partial=True)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(s.data)
+
+    def delete(self, request, pk):
+        t = self._obj(pk)
+        if not (_is_test_owner(request.user, t)
+                or has_perm(request.user, "academics.test.manage_any")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        if t.attempts.exists():
+            return Response(
+                {"detail": "Test has attempts; close it instead of deleting."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+        t.delete()
+        return Response(status=http.HTTP_204_NO_CONTENT)
+
+
+# --- Test status transitions ------------------------------------------
+
+class TestPublishView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            t = _Test.objects.get(pk=pk)
+        except _Test.DoesNotExist as e:
+            raise Http404 from e
+        u = request.user
+        if not (_is_test_owner(u, t) or has_perm(u, "academics.test.publish")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        if t.status != _Test.Status.DRAFT:
+            return Response({"detail": f"Status is {t.status}, expected DRAFT."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        if t.questions.count() == 0:
+            return Response({"detail": "Add at least one question first."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        recompute_total_marks(t)
+        t.status = _Test.Status.PUBLISHED
+        t.save(update_fields=["status", "updated_at"])
+        return Response(TestSerializer(t).data)
+
+
+class TestCloseView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            t = _Test.objects.get(pk=pk)
+        except _Test.DoesNotExist as e:
+            raise Http404 from e
+        u = request.user
+        if not (_is_test_owner(u, t) or has_perm(u, "academics.test.publish")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        if t.status != _Test.Status.PUBLISHED:
+            return Response({"detail": f"Status is {t.status}, expected PUBLISHED."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        t.status = _Test.Status.CLOSED
+        t.save(update_fields=["status", "updated_at"])
+        return Response(TestSerializer(t).data)
+
+
+# --- Question CRUD ----------------------------------------------------
+
+class TestQuestionListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            t = _Test.objects.get(pk=pk)
+        except _Test.DoesNotExist as e:
+            raise Http404 from e
+        u = request.user
+        if not (_is_test_owner(u, t) or has_perm(u, "academics.test.view_all")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        qs = t.questions.all()
+        return Response(TestQuestionSerializer(qs, many=True).data)
+
+    def post(self, request, pk):
+        try:
+            t = _Test.objects.get(pk=pk)
+        except _Test.DoesNotExist as e:
+            raise Http404 from e
+        if t.status != _Test.Status.DRAFT:
+            return Response({"detail": "Only DRAFT tests can take new questions."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        if not (_is_test_owner(request.user, t)
+                or has_perm(request.user, "academics.test.manage_any")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        data = {**request.data, "test": t.id}
+        s = TestQuestionSerializer(data=data)
+        s.is_valid(raise_exception=True)
+        q = s.save()
+        recompute_total_marks(t)
+        return Response(TestQuestionSerializer(q).data,
+                        status=http.HTTP_201_CREATED)
+
+
+class TestQuestionDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _obj(self, pk):
+        try:
+            return _TestQuestion.objects.select_related("test").get(pk=pk)
+        except _TestQuestion.DoesNotExist as e:
+            raise Http404 from e
+
+    def patch(self, request, pk):
+        q = self._obj(pk)
+        if q.test.status != _Test.Status.DRAFT:
+            return Response({"detail": "Only DRAFT tests can be edited."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        if not (_is_test_owner(request.user, q.test)
+                or has_perm(request.user, "academics.test.manage_any")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = TestQuestionSerializer(q, data=request.data, partial=True)
+        s.is_valid(raise_exception=True)
+        s.save()
+        recompute_total_marks(q.test)
+        return Response(s.data)
+
+    def delete(self, request, pk):
+        q = self._obj(pk)
+        if q.test.status != _Test.Status.DRAFT:
+            return Response({"detail": "Only DRAFT tests can be edited."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        if not (_is_test_owner(request.user, q.test)
+                or has_perm(request.user, "academics.test.manage_any")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        t = q.test
+        q.delete()
+        recompute_total_marks(t)
+        return Response(status=http.HTTP_204_NO_CONTENT)
+
+
+# --- Mapping ----------------------------------------------------------
+
+class TestMapView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            t = _Test.objects.get(pk=pk)
+        except _Test.DoesNotExist as e:
+            raise Http404 from e
+        if not (_is_test_owner(request.user, t)
+                or has_perm(request.user, "academics.test.publish")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        if t.status != _Test.Status.PUBLISHED:
+            return Response({"detail": "Test must be PUBLISHED to map."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        s = MapTestSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        d = s.validated_data
+        result = map_test_to_students(
+            test=t, student_ids=d["student_ids"],
+            start_dt=d["start_dt"], end_dt=d["end_dt"],
+        )
+        return Response(result, status=http.HTTP_201_CREATED)
+
+
+class TestAttemptsListView(APIView):
+    """Faculty: see all attempts for a test."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            t = _Test.objects.get(pk=pk)
+        except _Test.DoesNotExist as e:
+            raise Http404 from e
+        if not (_is_test_owner(request.user, t)
+                or has_perm(request.user, "academics.test.view_all")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        qs = t.attempts.select_related("student").all()
+        return Response(TestAttemptSerializer(qs, many=True).data)
+
+
+class TestReportView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            t = _Test.objects.get(pk=pk)
+        except _Test.DoesNotExist as e:
+            raise Http404 from e
+        if not (_is_test_owner(request.user, t)
+                or has_perm(request.user, "academics.test.view_all")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        return Response(test_report(t))
+
+
+# --- Student panel ----------------------------------------------------
+
+class MyTestsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        student = getattr(request.user, "student", None)
+        if student is None:
+            return Response([])
+        qs = _TestAttempt.objects.select_related(
+            "test", "test__subject", "student",
+        ).filter(student=student).order_by("-start_dt")
+        return Response(TestAttemptSerializer(qs, many=True).data)
+
+
+class AttemptViewWithQuestions(APIView):
+    """Student fetches their attempt + question payload (no answer_key)
+    when the window is open."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            attempt = _TestAttempt.objects.select_related(
+                "test", "test__subject", "student",
+            ).get(pk=pk)
+        except _TestAttempt.DoesNotExist as e:
+            raise Http404 from e
+
+        u = request.user
+        is_student = _student_owns_attempt(u, attempt)
+        is_faculty = (u.is_superuser
+                      or _is_test_owner(u, attempt.test)
+                      or has_perm(u, "academics.test.view_all"))
+        if not (is_student or is_faculty):
+            raise Http404
+
+        body = {"attempt": TestAttemptSerializer(attempt).data}
+
+        if is_student:
+            ok, reason = can_attempt_now(attempt)
+            body["window_open"] = ok
+            if not ok:
+                body["window_reason"] = reason
+                # Lock down — don't leak questions outside the window.
+                if attempt.status not in (
+                    _TestAttempt.Status.SUBMITTED,
+                    _TestAttempt.Status.GRADED,
+                ):
+                    return Response(body)
+            body["questions"] = TestQuestionStudentSerializer(
+                attempt.test.questions.all(), many=True,
+            ).data
+            # Their own responses (if any) so they can resume.
+            body["responses"] = TestResponseSerializer(
+                attempt.responses.all(), many=True,
+            ).data
+        else:
+            # Faculty view: full questions + responses.
+            body["questions"] = TestQuestionSerializer(
+                attempt.test.questions.all(), many=True,
+            ).data
+            body["responses"] = TestResponseSerializer(
+                attempt.responses.all(), many=True,
+            ).data
+
+        return Response(body)
+
+
+class AttemptStartView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            attempt = _TestAttempt.objects.select_related("test").get(pk=pk)
+        except _TestAttempt.DoesNotExist as e:
+            raise Http404 from e
+        if not _student_owns_attempt(request.user, attempt):
+            raise Http404
+        ok, reason = can_attempt_now(attempt)
+        if not ok:
+            return Response({"detail": reason},
+                            status=http.HTTP_400_BAD_REQUEST)
+        if attempt.status == _TestAttempt.Status.NOT_STARTED:
+            attempt.started_at = timezone.now()
+            attempt.status = _TestAttempt.Status.IN_PROGRESS
+            attempt.save(update_fields=["started_at", "status", "updated_at"])
+        return Response(TestAttemptSerializer(attempt).data)
+
+
+class AttemptSubmitView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            attempt = _TestAttempt.objects.select_related("test").get(pk=pk)
+        except _TestAttempt.DoesNotExist as e:
+            raise Http404 from e
+        if not _student_owns_attempt(request.user, attempt):
+            raise Http404
+        ok, reason = can_attempt_now(attempt)
+        if not ok:
+            return Response({"detail": reason},
+                            status=http.HTTP_400_BAD_REQUEST)
+        s = SubmitAttemptSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        if attempt.started_at is None:
+            attempt.started_at = timezone.now()
+            attempt.save(update_fields=["started_at"])
+        result = submit_attempt(
+            attempt=attempt, answers=s.validated_data["answers"],
+        )
+        return Response({"attempt": TestAttemptSerializer(attempt).data,
+                         **result})
+
+
+# --- Faculty review of short answers ---------------------------------
+
+class ResponseReviewView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        try:
+            r = _TestResponse.objects.select_related(
+                "attempt__test", "question",
+            ).get(pk=pk)
+        except _TestResponse.DoesNotExist as e:
+            raise Http404 from e
+        u = request.user
+        if not (u.is_superuser
+                or _is_test_owner(u, r.attempt.test)
+                or has_perm(u, "academics.test.review")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = ReviewResponseSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        try:
+            review_response(
+                response=r,
+                marks_awarded=s.validated_data["marks_awarded"],
+                feedback=s.validated_data.get("feedback", ""),
+                reviewed_by=u,
+            )
+        except ValueError as e:
+            return Response({"detail": str(e)},
+                            status=http.HTTP_400_BAD_REQUEST)
+        return Response(TestResponseSerializer(r).data)

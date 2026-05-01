@@ -96,3 +96,54 @@ class AttendanceAdmin(admin.ModelAdmin):
     )
     autocomplete_fields = ("schedule_slot", "student", "marked_by")
     readonly_fields = ("marked_at", "created_at")
+
+
+# G.4 — Tests
+from .models import Test, TestAttempt, TestQuestion, TestResponse  # noqa: E402
+
+
+class TestQuestionInline(admin.TabularInline):
+    model = TestQuestion
+    extra = 0
+    fields = ("sort_order", "type", "description", "options",
+              "answer_key", "marks")
+
+
+@admin.register(Test)
+class TestAdmin(admin.ModelAdmin):
+    list_display = ("name", "subject", "status", "total_marks",
+                    "duration_min", "created_at")
+    list_filter = ("status", "subject")
+    search_fields = ("name", "subject__code")
+    autocomplete_fields = ("subject", "program", "academic_year", "created_by")
+    inlines = (TestQuestionInline,)
+
+
+@admin.register(TestQuestion)
+class TestQuestionAdmin(admin.ModelAdmin):
+    list_display = ("test", "sort_order", "type", "marks")
+    list_filter = ("type",)
+    search_fields = ("description", "test__name")
+    autocomplete_fields = ("test",)
+
+
+@admin.register(TestAttempt)
+class TestAttemptAdmin(admin.ModelAdmin):
+    list_display = ("test", "student", "status",
+                    "start_dt", "end_dt", "submitted_at", "total_score")
+    list_filter = ("status",)
+    search_fields = ("student__student_name",
+                     "student__application_form_id",
+                     "test__name")
+    autocomplete_fields = ("test", "student")
+    readonly_fields = ("started_at", "submitted_at",
+                       "total_score", "created_at", "updated_at")
+
+
+@admin.register(TestResponse)
+class TestResponseAdmin(admin.ModelAdmin):
+    list_display = ("attempt", "question", "marks_awarded",
+                    "is_auto_graded", "reviewed_at")
+    list_filter = ("is_auto_graded", "question__type")
+    autocomplete_fields = ("attempt", "question", "reviewed_by")
+    readonly_fields = ("reviewed_at", "created_at", "updated_at")

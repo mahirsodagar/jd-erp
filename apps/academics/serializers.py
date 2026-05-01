@@ -349,3 +349,145 @@ class AlumniSelfUpdateSerializer(serializers.ModelSerializer):
             "current_status", "workplace", "job_title",
             "linkedin_url", "last_known_email", "last_known_phone",
         ]
+
+
+# === G.4 — Online Tests =============================================
+
+from .models import Test, TestAttempt, TestQuestion, TestResponse  # noqa: E402
+
+
+class TestQuestionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TestQuestion
+        fields = ["id", "test", "description", "type", "options",
+                  "answer_key", "marks", "sort_order"]
+        read_only_fields = ["id"]
+
+    def validate(self, attrs):
+        qtype = attrs.get("type") or getattr(self.instance, "type", "")
+        opts = attrs.get("options") or getattr(self.instance, "options", [])
+        key = attrs.get("answer_key") or getattr(self.instance, "answer_key", "")
+        if qtype == TestQuestion.Type.MCQ:
+            if not isinstance(opts, list) or len(opts) < 2:
+                raise serializers.ValidationError(
+                    {"options": "MCQ needs at least 2 options."}
+                )
+            if not key:
+                raise serializers.ValidationError(
+                    {"answer_key": "MCQ requires an answer_key (option index)."}
+                )
+            try:
+                idx = int(key)
+            except (TypeError, ValueError):
+                raise serializers.ValidationError(
+                    {"answer_key": "MCQ answer_key must be an option index."}
+                )
+            if idx < 0 or idx >= len(opts):
+                raise serializers.ValidationError(
+                    {"answer_key": f"Index out of range (have {len(opts)} options)."}
+                )
+        return attrs
+
+
+class TestQuestionStudentSerializer(serializers.ModelSerializer):
+    """Question shape exposed to students — no answer_key leaked."""
+    class Meta:
+        model = TestQuestion
+        fields = ["id", "description", "type", "options", "marks", "sort_order"]
+        read_only_fields = fields
+
+
+class TestSerializer(serializers.ModelSerializer):
+    subject_name = serializers.CharField(source="subject.name", read_only=True)
+    subject_code = serializers.CharField(source="subject.code", read_only=True)
+    question_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Test
+        fields = ["id", "name", "instructions", "duration_min",
+                  "subject", "subject_name", "subject_code",
+                  "program", "academic_year",
+                  "status", "total_marks", "question_count",
+                  "created_by", "created_at", "updated_at"]
+        read_only_fields = ["id", "subject_name", "subject_code",
+                            "status", "total_marks", "question_count",
+                            "created_by", "created_at", "updated_at"]
+
+    def get_question_count(self, obj):
+        return obj.questions.count()
+
+
+class TestAttemptSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source="student.student_name", read_only=True)
+    application_form_id = serializers.CharField(
+        source="student.application_form_id", read_only=True,
+    )
+    test_name = serializers.CharField(source="test.name", read_only=True)
+    duration_min = serializers.IntegerField(source="test.duration_min", read_only=True)
+    total_marks = serializers.DecimalField(
+        source="test.total_marks", max_digits=5, decimal_places=1, read_only=True,
+    )
+
+    class Meta:
+        model = TestAttempt
+        fields = ["id", "test", "test_name", "duration_min", "total_marks",
+                  "student", "student_name", "application_form_id",
+                  "start_dt", "end_dt",
+                  "started_at", "submitted_at", "status", "total_score",
+                  "created_at", "updated_at"]
+        read_only_fields = ["id", "test_name", "duration_min", "total_marks",
+                            "student_name", "application_form_id",
+                            "started_at", "submitted_at", "status", "total_score",
+                            "created_at", "updated_at"]
+
+
+class MapTestSerializer(serializers.Serializer):
+    student_ids = serializers.ListField(
+        child=serializers.IntegerField(), allow_empty=False,
+    )
+    start_dt = serializers.DateTimeField()
+    end_dt = serializers.DateTimeField()
+
+    def validate(self, attrs):
+        if attrs["end_dt"] <= attrs["start_dt"]:
+            raise serializers.ValidationError(
+                {"end_dt": "end_dt must be after start_dt."}
+            )
+        return attrs
+
+
+class SubmitAnswerSerializer(serializers.Serializer):
+    question = serializers.IntegerField()
+    answer = serializers.CharField(allow_blank=True)
+
+
+class SubmitAttemptSerializer(serializers.Serializer):
+    answers = SubmitAnswerSerializer(many=True)
+
+
+class TestResponseSerializer(serializers.ModelSerializer):
+    question_description = serializers.CharField(
+        source="question.description", read_only=True,
+    )
+    question_type = serializers.CharField(source="question.type", read_only=True)
+    question_marks = serializers.DecimalField(
+        source="question.marks", max_digits=5, decimal_places=1, read_only=True,
+    )
+    student_name = serializers.CharField(
+        source="attempt.student.student_name", read_only=True,
+    )
+
+    class Meta:
+        model = TestResponse
+        fields = ["id", "attempt", "question",
+                  "question_description", "question_type", "question_marks",
+                  "student_name",
+                  "answer", "marks_awarded", "is_auto_graded", "feedback",
+                  "reviewed_by", "reviewed_at",
+                  "created_at", "updated_at"]
+        read_only_fields = fields
+
+
+class ReviewResponseSerializer(serializers.Serializer):
+    marks_awarded = serializers.DecimalField(max_digits=5, decimal_places=1)
+    feedback = serializers.CharField(required=False, allow_blank=True, max_length=2000)

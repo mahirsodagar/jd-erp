@@ -116,6 +116,13 @@ CATALOGUE = [
     ("academics", "academics.certificate.request_for_others", "Raise certificate requests for others"),
     ("academics", "academics.alumni.view_all", "View all alumni records"),
     ("academics", "academics.alumni.manage", "Edit any alumni record"),
+
+    # Module G.4 — Online Tests
+    ("academics", "academics.test.create", "Create / edit tests"),
+    ("academics", "academics.test.publish", "Publish / close / map tests"),
+    ("academics", "academics.test.review", "Review short-answer responses"),
+    ("academics", "academics.test.view_all", "View all tests / attempts / reports"),
+    ("academics", "academics.test.manage_any", "Edit / delete any test"),
 ]
 
 
