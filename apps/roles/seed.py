@@ -108,6 +108,14 @@ CATALOGUE = [
     ("academics", "academics.marks.edit_published", "Edit published marks"),
     ("academics", "academics.transcript.view_any", "View any student's transcript"),
     ("academics", "academics.transcript.view_drafts", "Include unpublished marks in transcripts"),
+
+    # Module G.5 — Certificates + Alumni
+    ("academics", "academics.certificate.issue", "Issue / reject certificates"),
+    ("academics", "academics.certificate.override_eligibility", "Issue ignoring eligibility"),
+    ("academics", "academics.certificate.view_all", "View any student's certificates"),
+    ("academics", "academics.certificate.request_for_others", "Raise certificate requests for others"),
+    ("academics", "academics.alumni.view_all", "View all alumni records"),
+    ("academics", "academics.alumni.manage", "Edit any alumni record"),
 ]
 
 

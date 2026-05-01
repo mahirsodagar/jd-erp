@@ -296,3 +296,121 @@ class MarksEntry(models.Model):
         if not self.total_max:
             return 0.0
         return round((self.total_marks / self.total_max) * 100, 2)
+
+
+# === G.5 — Certificates + Alumni ====================================
+
+class Certificate(models.Model):
+    """Issued document for a student. Six types covered."""
+
+    class Type(models.TextChoices):
+        COMPLETION = "COMPLETION", "Course Completion"
+        PROVISIONAL = "PROVISIONAL", "Provisional"
+        BONAFIDE = "BONAFIDE", "Bonafide"
+        TRANSFER = "TRANSFER", "Transfer"
+        CHARACTER = "CHARACTER", "Character"
+        NO_DUES = "NO_DUES", "No Dues"
+
+    class Status(models.TextChoices):
+        REQUESTED = "REQUESTED", "Requested"
+        ISSUED = "ISSUED", "Issued"
+        REJECTED = "REJECTED", "Rejected"
+        REVOKED = "REVOKED", "Revoked"
+
+    student = models.ForeignKey(
+        "admissions.Student", on_delete=models.PROTECT,
+        related_name="certificates",
+    )
+    enrollment = models.ForeignKey(
+        "admissions.Enrollment", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="certificates",
+        help_text="Source enrollment for context (program / batch).",
+    )
+    type = models.CharField(max_length=20, choices=Type.choices)
+    status = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.REQUESTED,
+    )
+
+    certificate_no = models.CharField(max_length=60, blank=True, db_index=True)
+
+    purpose = models.CharField(max_length=200, blank=True)
+    remarks = models.TextField(blank=True)
+
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="certificates_requested",
+    )
+    requested_on = models.DateTimeField(auto_now_add=True)
+
+    issued_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="certificates_issued",
+    )
+    issued_at = models.DateTimeField(null=True, blank=True)
+
+    # Snapshot for the PDF — stamped at issue time so later edits to
+    # the student / program don't change the artefact.
+    snapshot = models.JSONField(default=dict, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-requested_on",)
+        indexes = [
+            models.Index(fields=["student", "type"]),
+            models.Index(fields=["status", "type"]),
+        ]
+
+    def __str__(self):
+        return f"{self.type} {self.certificate_no or 'pending'} → {self.student_id}"
+
+
+class AlumniRecord(models.Model):
+    """Snapshot of a student at graduation + ongoing alumni profile."""
+
+    class CurrentStatus(models.TextChoices):
+        JOB = "JOB", "Working a job"
+        ENTREPRENEUR = "ENTREPRENEUR", "Entrepreneur"
+        HIGHER_STUDIES = "HIGHER_STUDIES", "Pursuing higher studies"
+        FAMILY_BUSINESS = "FAMILY_BUSINESS", "Family business"
+        UNKNOWN = "UNKNOWN", "Unknown"
+
+    student = models.OneToOneField(
+        "admissions.Student", on_delete=models.PROTECT, related_name="alumni",
+    )
+
+    graduation_year = models.PositiveSmallIntegerField()
+    final_program = models.ForeignKey(
+        "master.Program", on_delete=models.PROTECT, related_name="alumni",
+    )
+    final_batch = models.ForeignKey(
+        "master.Batch", on_delete=models.PROTECT, related_name="alumni",
+    )
+    final_percentage = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True,
+    )
+
+    current_status = models.CharField(
+        max_length=20, choices=CurrentStatus.choices,
+        default=CurrentStatus.UNKNOWN,
+    )
+    workplace = models.CharField(max_length=200, blank=True)
+    job_title = models.CharField(max_length=120, blank=True)
+    linkedin_url = models.URLField(blank=True)
+
+    last_known_email = models.EmailField(blank=True)
+    last_known_phone = models.CharField(max_length=20, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-graduation_year", "student__student_name")
+        indexes = [
+            models.Index(fields=["graduation_year", "final_program"]),
+            models.Index(fields=["current_status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.student.student_name} ({self.graduation_year})"

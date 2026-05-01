@@ -1,4 +1,4 @@
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import status as http
@@ -16,18 +16,26 @@ from .attendance_service import (
     notify_absent_students, roster_for, student_attendance_summary,
     unfreeze_attendance,
 )
+from .cert_service import (
+    build_snapshot, check_eligibility, generate_certificate_no,
+    graduate_enrollment, render_certificate_pdf,
+)
 from .marks_service import (
     build_transcript, grade_submission, publish_marks,
     submission_status_after_save, unpublish_marks,
 )
 from .models import (
-    Assignment, AssignmentSubmission, Attendance, MarksEntry, ScheduleSlot,
+    AlumniRecord, Assignment, AssignmentSubmission, Attendance,
+    Certificate, MarksEntry, ScheduleSlot,
 )
 from .permissions import ScheduleAccess, has_perm
 from .serializers import (
+    AlumniRecordSerializer, AlumniSelfUpdateSerializer,
     AssignmentSerializer, AssignmentSubmissionSerializer,
     AttendanceSerializer, BulkMarkAttendanceSerializer,
-    BulkWeeklyPublishSerializer, FreezeSerializer, MarksEntrySerializer,
+    BulkWeeklyPublishSerializer, CertificateIssueSerializer,
+    CertificateRejectSerializer, CertificateRequestSerializer,
+    CertificateSerializer, FreezeSerializer, MarksEntrySerializer,
     ScheduleSlotSerializer, StudentSubmitSerializer, SubmissionGradeSerializer,
 )
 from .services import bulk_publish_weekly, create_slot, detect_conflicts
@@ -827,3 +835,362 @@ class MyTranscriptView(APIView):
                 status=http.HTTP_400_BAD_REQUEST,
             )
         return Response(build_transcript(student=student, only_published=True))
+
+
+# === G.5 — Certificates + Alumni ====================================
+
+class CertificateListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        u = request.user
+        qs = Certificate.objects.select_related(
+            "student", "enrollment__program", "enrollment__batch",
+            "requested_by", "issued_by",
+        )
+        # Visibility: own / view_all / superuser
+        if not (u.is_superuser or has_perm(u, "academics.certificate.view_all")):
+            student = getattr(u, "student", None)
+            if student is None:
+                return Response([])
+            qs = qs.filter(student=student)
+        params = request.query_params
+        if v := params.get("type"):
+            qs = qs.filter(type=v)
+        if v := params.get("status"):
+            qs = qs.filter(status=v)
+        if v := params.get("student"):
+            qs = qs.filter(student_id=v)
+        return Response(CertificateSerializer(qs[:500], many=True).data)
+
+    def post(self, request):
+        from apps.admissions.models import Enrollment, Student
+        s = CertificateRequestSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        d = s.validated_data
+
+        try:
+            student = Student.objects.get(pk=d["student"])
+        except Student.DoesNotExist:
+            return Response({"student": "Not found."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        enrollment = None
+        if d.get("enrollment"):
+            try:
+                enrollment = Enrollment.objects.get(
+                    pk=d["enrollment"], student=student,
+                )
+            except Enrollment.DoesNotExist:
+                return Response(
+                    {"enrollment": "Not found for this student."},
+                    status=http.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            enrollment = (
+                student.enrollments
+                .order_by("-created_on").first()
+            )
+
+        # Permission: self can request; HR/admin can request for others.
+        u = request.user
+        is_self = (student.user_account_id == u.id)
+        if not is_self and not (
+            u.is_superuser
+            or has_perm(u, "academics.certificate.issue")
+            or has_perm(u, "academics.certificate.request_for_others")
+        ):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+
+        cert = Certificate.objects.create(
+            student=student, enrollment=enrollment,
+            type=d["type"],
+            purpose=d.get("purpose", ""),
+            remarks=d.get("remarks", ""),
+            requested_by=u,
+        )
+        return Response(CertificateSerializer(cert).data,
+                        status=http.HTTP_201_CREATED)
+
+
+class CertificateDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _obj(self, pk):
+        try:
+            return Certificate.objects.select_related(
+                "student", "enrollment__program", "enrollment__batch",
+            ).get(pk=pk)
+        except Certificate.DoesNotExist as e:
+            raise Http404 from e
+
+    def _can_view(self, user, cert: Certificate) -> bool:
+        if user.is_superuser:
+            return True
+        if has_perm(user, "academics.certificate.view_all"):
+            return True
+        return cert.student.user_account_id == user.id
+
+    def get(self, request, pk):
+        cert = self._obj(pk)
+        if not self._can_view(request.user, cert):
+            raise Http404
+        return Response(CertificateSerializer(cert).data)
+
+
+class CertificateEligibilityCheckView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        cert = Certificate.objects.filter(pk=pk).first()
+        if cert is None:
+            raise Http404
+        # Only the requester / HR / superuser sees eligibility.
+        u = request.user
+        if not (u.is_superuser
+                or has_perm(u, "academics.certificate.issue")
+                or cert.student.user_account_id == u.id):
+            raise Http404
+        return Response(check_eligibility(
+            student=cert.student, enrollment=cert.enrollment,
+            cert_type=cert.type,
+        ))
+
+
+class CertificateIssueView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        u = request.user
+        if not has_perm(u, "academics.certificate.issue"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        try:
+            cert = Certificate.objects.select_related(
+                "student", "enrollment__program",
+                "enrollment__batch", "enrollment__academic_year",
+                "student__institute", "student__campus",
+            ).get(pk=pk)
+        except Certificate.DoesNotExist as e:
+            raise Http404 from e
+
+        if cert.status != Certificate.Status.REQUESTED:
+            return Response({"detail": f"Cannot issue from status {cert.status}."},
+                            status=http.HTTP_400_BAD_REQUEST)
+
+        s = CertificateIssueSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+
+        # Eligibility unless override
+        elig = check_eligibility(
+            student=cert.student, enrollment=cert.enrollment,
+            cert_type=cert.type,
+        )
+        if not elig["ok"]:
+            override = s.validated_data.get("override_eligibility", False)
+            if override and not has_perm(u, "academics.certificate.override_eligibility"):
+                return Response(
+                    {"detail": "override_eligibility requires "
+                               "academics.certificate.override_eligibility."},
+                    status=http.HTTP_403_FORBIDDEN,
+                )
+            if not override:
+                return Response(
+                    {"detail": "Eligibility checks failed.",
+                     "reasons": elig["reasons"]},
+                    status=http.HTTP_400_BAD_REQUEST,
+                )
+
+        cert.certificate_no = generate_certificate_no(
+            cert_type=cert.type,
+            institute_code=cert.student.institute.code,
+        )
+        cert.snapshot = build_snapshot(
+            student=cert.student, enrollment=cert.enrollment,
+            cert_type=cert.type,
+        )
+        cert.status = Certificate.Status.ISSUED
+        cert.issued_by = u
+        cert.issued_at = timezone.now()
+        if s.validated_data.get("remarks"):
+            cert.remarks = s.validated_data["remarks"]
+        cert.save()
+        return Response(CertificateSerializer(cert).data)
+
+
+class CertificateRejectView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        u = request.user
+        if not has_perm(u, "academics.certificate.issue"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        try:
+            cert = Certificate.objects.get(pk=pk)
+        except Certificate.DoesNotExist as e:
+            raise Http404 from e
+        if cert.status != Certificate.Status.REQUESTED:
+            return Response({"detail": "Only pending requests can be rejected."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        s = CertificateRejectSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        cert.status = Certificate.Status.REJECTED
+        cert.remarks = s.validated_data["reason"]
+        cert.save(update_fields=["status", "remarks", "updated_at"])
+        return Response(CertificateSerializer(cert).data)
+
+
+class CertificatePdfView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            cert = Certificate.objects.select_related(
+                "student", "enrollment__program", "enrollment__batch",
+                "student__institute", "student__campus",
+            ).get(pk=pk)
+        except Certificate.DoesNotExist as e:
+            raise Http404 from e
+        u = request.user
+        if not (u.is_superuser
+                or has_perm(u, "academics.certificate.view_all")
+                or cert.student.user_account_id == u.id):
+            raise Http404
+        if cert.status != Certificate.Status.ISSUED:
+            return Response(
+                {"detail": f"PDF unavailable; status is {cert.status}."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+        pdf = render_certificate_pdf(cert)
+        resp = HttpResponse(pdf, content_type="application/pdf")
+        resp["Content-Disposition"] = (
+            f'inline; filename="{cert.certificate_no}.pdf"'
+        )
+        return resp
+
+
+class MyCertificatesView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        student = getattr(request.user, "student", None)
+        if student is None:
+            return Response([])
+        qs = Certificate.objects.filter(student=student).order_by("-requested_on")
+        return Response(CertificateSerializer(qs, many=True).data)
+
+
+# --- Graduation flow -------------------------------------------------
+
+class EnrollmentGraduateView(APIView):
+    """HR transitions an enrollment to ALUMNI; an AlumniRecord is
+    auto-created. Lives on academics so the cert/alumni service is
+    co-located, even though the URL is mounted under admissions later
+    if you prefer."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.admissions.models import Enrollment
+        u = request.user
+        if not (u.is_superuser
+                or has_perm(u, "admissions.enrollment.manage")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        try:
+            enr = Enrollment.objects.select_related(
+                "student", "program", "batch", "academic_year",
+            ).get(pk=pk)
+        except Enrollment.DoesNotExist as e:
+            raise Http404 from e
+        if enr.status == Enrollment.Status.ALUMNI:
+            return Response({"detail": "Already an alumnus."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        enr, alumni = graduate_enrollment(enrollment=enr, by_user=u)
+        return Response({
+            "enrollment_id": enr.id,
+            "status": enr.get_status_display(),
+            "alumni": AlumniRecordSerializer(alumni).data,
+        })
+
+
+# --- Alumni ----------------------------------------------------------
+
+class AlumniListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        u = request.user
+        qs = AlumniRecord.objects.select_related(
+            "student", "final_program", "final_batch",
+        )
+        # Default: own record only. HR/admin sees all.
+        if not (u.is_superuser or has_perm(u, "academics.alumni.view_all")):
+            qs = qs.filter(student__user_account=u)
+        params = request.query_params
+        if v := params.get("year"):
+            qs = qs.filter(graduation_year=v)
+        if v := params.get("program"):
+            qs = qs.filter(final_program_id=v)
+        if v := params.get("status"):
+            qs = qs.filter(current_status=v)
+        if q := params.get("search"):
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(student__student_name__icontains=q)
+                | Q(student__application_form_id__icontains=q)
+                | Q(workplace__icontains=q)
+            )
+        return Response(AlumniRecordSerializer(qs[:500], many=True).data)
+
+
+class AlumniDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _obj(self, pk):
+        try:
+            return AlumniRecord.objects.select_related(
+                "student", "final_program", "final_batch",
+            ).get(pk=pk)
+        except AlumniRecord.DoesNotExist as e:
+            raise Http404 from e
+
+    def get(self, request, pk):
+        a = self._obj(pk)
+        u = request.user
+        is_self = (a.student.user_account_id == u.id)
+        if not (u.is_superuser or is_self
+                or has_perm(u, "academics.alumni.view_all")):
+            raise Http404
+        return Response(AlumniRecordSerializer(a).data)
+
+    def patch(self, request, pk):
+        a = self._obj(pk)
+        u = request.user
+        is_self = (a.student.user_account_id == u.id)
+        if u.is_superuser or has_perm(u, "academics.alumni.manage"):
+            s = AlumniRecordSerializer(a, data=request.data, partial=True)
+        elif is_self:
+            s = AlumniSelfUpdateSerializer(a, data=request.data, partial=True)
+        else:
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(AlumniRecordSerializer(a).data)
+
+
+class AlumniMeView(APIView):
+    """Convenience endpoint for the alumni panel."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        student = getattr(request.user, "student", None)
+        if student is None:
+            return Response({"detail": "No student record."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        a = AlumniRecord.objects.filter(student=student).first()
+        if a is None:
+            return Response({"detail": "Not in alumni database yet."},
+                            status=http.HTTP_404_NOT_FOUND)
+        return Response(AlumniRecordSerializer(a).data)

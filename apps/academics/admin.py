@@ -1,8 +1,35 @@
 from django.contrib import admin
 
 from .models import (
-    Assignment, AssignmentSubmission, Attendance, MarksEntry, ScheduleSlot,
+    AlumniRecord, Assignment, AssignmentSubmission, Attendance, Certificate,
+    MarksEntry, ScheduleSlot,
 )
+
+
+@admin.register(Certificate)
+class CertificateAdmin(admin.ModelAdmin):
+    list_display = ("certificate_no", "type", "status", "student",
+                    "issued_at", "requested_on")
+    list_filter = ("status", "type")
+    search_fields = ("certificate_no", "student__student_name",
+                     "student__application_form_id")
+    autocomplete_fields = ("student", "enrollment",
+                           "requested_by", "issued_by")
+    readonly_fields = ("certificate_no", "snapshot",
+                       "requested_by", "requested_on",
+                       "issued_by", "issued_at",
+                       "created_at", "updated_at")
+
+
+@admin.register(AlumniRecord)
+class AlumniRecordAdmin(admin.ModelAdmin):
+    list_display = ("student", "graduation_year", "final_program",
+                    "current_status", "workplace")
+    list_filter = ("current_status", "graduation_year", "final_program")
+    search_fields = ("student__student_name",
+                     "student__application_form_id",
+                     "workplace", "job_title")
+    autocomplete_fields = ("student", "final_program", "final_batch")
 
 
 @admin.register(Assignment)

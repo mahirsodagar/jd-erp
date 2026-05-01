@@ -1,7 +1,8 @@
 from rest_framework import serializers
 
 from .models import (
-    Assignment, AssignmentSubmission, Attendance, MarksEntry, ScheduleSlot,
+    AlumniRecord, Assignment, AssignmentSubmission, Attendance, Certificate,
+    MarksEntry, ScheduleSlot,
 )
 
 
@@ -252,3 +253,99 @@ class MarksEntrySerializer(serializers.ModelSerializer):
 class StudentSubmitSerializer(serializers.Serializer):
     file = serializers.FileField(required=False, allow_null=True)
     text_response = serializers.CharField(required=False, allow_blank=True)
+
+
+# === G.5 — Certificates + Alumni ====================================
+
+class CertificateSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source="student.student_name", read_only=True)
+    application_form_id = serializers.CharField(
+        source="student.application_form_id", read_only=True,
+    )
+    program_name = serializers.CharField(
+        source="enrollment.program.name", read_only=True, default="",
+    )
+    batch_name = serializers.CharField(
+        source="enrollment.batch.name", read_only=True, default="",
+    )
+    requested_by_name = serializers.CharField(
+        source="requested_by.username", read_only=True, default="",
+    )
+    issued_by_name = serializers.CharField(
+        source="issued_by.username", read_only=True, default="",
+    )
+
+    class Meta:
+        model = Certificate
+        fields = [
+            "id", "student", "student_name", "application_form_id",
+            "enrollment", "program_name", "batch_name",
+            "type", "status", "certificate_no",
+            "purpose", "remarks", "snapshot",
+            "requested_by", "requested_by_name", "requested_on",
+            "issued_by", "issued_by_name", "issued_at",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = [
+            "id", "student_name", "application_form_id",
+            "program_name", "batch_name",
+            "status", "certificate_no", "snapshot",
+            "requested_by", "requested_by_name", "requested_on",
+            "issued_by", "issued_by_name", "issued_at",
+            "created_at", "updated_at",
+        ]
+
+
+class CertificateRequestSerializer(serializers.Serializer):
+    student = serializers.IntegerField()
+    enrollment = serializers.IntegerField(required=False, allow_null=True)
+    type = serializers.ChoiceField(choices=Certificate.Type.choices)
+    purpose = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    remarks = serializers.CharField(required=False, allow_blank=True)
+
+
+class CertificateIssueSerializer(serializers.Serializer):
+    remarks = serializers.CharField(required=False, allow_blank=True)
+    override_eligibility = serializers.BooleanField(default=False)
+
+
+class CertificateRejectSerializer(serializers.Serializer):
+    reason = serializers.CharField(min_length=3, max_length=400)
+
+
+class AlumniRecordSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source="student.student_name", read_only=True)
+    application_form_id = serializers.CharField(
+        source="student.application_form_id", read_only=True,
+    )
+    program_name = serializers.CharField(source="final_program.name", read_only=True)
+    batch_name = serializers.CharField(source="final_batch.name", read_only=True)
+
+    class Meta:
+        model = AlumniRecord
+        fields = [
+            "id", "student", "student_name", "application_form_id",
+            "graduation_year",
+            "final_program", "program_name",
+            "final_batch", "batch_name",
+            "final_percentage",
+            "current_status", "workplace", "job_title",
+            "linkedin_url", "last_known_email", "last_known_phone",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = [
+            "id", "student_name", "application_form_id",
+            "program_name", "batch_name",
+            "created_at", "updated_at",
+        ]
+
+
+class AlumniSelfUpdateSerializer(serializers.ModelSerializer):
+    """What an alumnus can update on their own record."""
+
+    class Meta:
+        model = AlumniRecord
+        fields = [
+            "current_status", "workplace", "job_title",
+            "linkedin_url", "last_known_email", "last_known_phone",
+        ]
