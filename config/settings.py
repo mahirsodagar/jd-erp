@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     "apps.notifications",
     "apps.academics",
     "apps.audit_reports",
+    "apps.relieving",
 ]
 
 

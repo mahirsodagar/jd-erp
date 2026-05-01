@@ -140,6 +140,12 @@ CATALOGUE = [
     ("audit", "audit.compliance.flag", "Raise compliance flags"),
     ("audit", "audit.compliance.resolve", "Resolve compliance flags"),
     ("audit", "audit.report.consolidated", "View dashboards / consolidated reports"),
+
+    # Module HR — Relieving (exit workflow + experience letter)
+    ("hr", "hr.relieving.submit_for_others", "Submit relieving on behalf of others"),
+    ("hr", "hr.relieving.view_all", "View all relieving applications"),
+    ("hr", "hr.relieving.finalize", "HR finalizes relieving + generates letters"),
+    ("hr", "hr.relieving.override", "Override approval sequence (skip levels)"),
 ]
 
 
