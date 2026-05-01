@@ -85,6 +85,13 @@ CATALOGUE = [
     ("leads", "leads.report.view", "View lead reports / dashboards"),
     ("notifications", "notifications.template.manage", "Manage notification templates"),
     ("notifications", "notifications.dispatch.view", "View notification dispatch log"),
+
+    # Module G.1 — Course Scheduling
+    ("master", "master.subject.manage", "Manage subjects"),
+    ("master", "master.classroom.manage", "Manage classrooms"),
+    ("master", "master.timeslot.manage", "Manage time slots"),
+    ("academics", "academics.schedule.manage", "Create / edit class schedule"),
+    ("academics", "academics.schedule.view_all", "View schedules across all campuses"),
 ]
 
 

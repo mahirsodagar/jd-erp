@@ -211,6 +211,86 @@ class Batch(models.Model):
         return f"{self.name} — {self.campus.code} {self.academic_year.code}"
 
 
+class Subject(models.Model):
+    """Taught entity. A `Course` ("Year 1 Sem 1") is a container of
+    several Subjects. The same Subject can appear in many Courses."""
+
+    name = models.CharField(max_length=160)
+    code = models.CharField(max_length=30, unique=True)
+    courses = models.ManyToManyField(
+        "master.Course", through="master.CourseSubject",
+        related_name="subjects", blank=True,
+    )
+    credits = models.PositiveSmallIntegerField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return f"{self.name} ({self.code})"
+
+
+class CourseSubject(models.Model):
+    """Through table — controls ordering inside a course."""
+    course = models.ForeignKey("master.Course", on_delete=models.CASCADE)
+    subject = models.ForeignKey(Subject, on_delete=models.CASCADE)
+    sort_order = models.PositiveSmallIntegerField(default=100)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = (("course", "subject"),)
+        ordering = ("course", "sort_order")
+
+
+class Classroom(models.Model):
+    """Physical room. Per-campus."""
+
+    name = models.CharField(max_length=80)
+    code = models.CharField(max_length=20)
+    campus = models.ForeignKey(
+        "master.Campus", on_delete=models.PROTECT, related_name="classrooms",
+    )
+    capacity = models.PositiveSmallIntegerField(null=True, blank=True)
+    description = models.CharField(max_length=200, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("campus", "name")
+        unique_together = (("code", "campus"),)
+
+    def __str__(self):
+        return f"{self.name} ({self.campus.code})"
+
+
+class TimeSlot(models.Model):
+    """Reusable time blocks for scheduling, per academic year (timings
+    can shift year-to-year)."""
+
+    label = models.CharField(max_length=40, help_text="e.g. Slot 1, Forenoon")
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    academic_year = models.ForeignKey(
+        "master.AcademicYear", on_delete=models.PROTECT,
+        related_name="time_slots",
+    )
+    is_active = models.BooleanField(default=True)
+    sort_order = models.PositiveSmallIntegerField(default=100)
+
+    class Meta:
+        ordering = ("academic_year", "sort_order", "start_time")
+        unique_together = (("label", "academic_year"),)
+
+    def __str__(self):
+        # `start_time` / `end_time` may be a `datetime.time` (loaded
+        # from DB) or a plain string (just-assigned). Coerce safely.
+        return f"{self.label} ({self.start_time}-{self.end_time})"
+
+
 class FeeTemplate(models.Model):
     """Fee structure for an enrollment context (PHP `fee_master`).
 

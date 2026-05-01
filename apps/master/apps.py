@@ -9,9 +9,14 @@ class MasterConfig(AppConfig):
     def ready(self):
         from auditlog.registry import auditlog
         from .models import (
-            AcademicYear, Batch, Campus, City, Course, Degree, FeeTemplate,
-            Institute, LeadSource, Program, Semester, State,
+            AcademicYear, Batch, Campus, City, Classroom, Course, CourseSubject,
+            Degree, FeeTemplate, Institute, LeadSource, Program, Semester,
+            State, Subject, TimeSlot,
         )
+        auditlog.register(Subject)
+        auditlog.register(CourseSubject)
+        auditlog.register(Classroom)
+        auditlog.register(TimeSlot)
         auditlog.register(FeeTemplate)
         auditlog.register(Campus)
         auditlog.register(Program)

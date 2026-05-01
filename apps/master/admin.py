@@ -1,9 +1,40 @@
 from django.contrib import admin
 
 from .models import (
-    AcademicYear, Batch, Campus, City, Course, Degree, FeeTemplate,
-    Institute, LeadSource, Program, Semester, State,
+    AcademicYear, Batch, Campus, City, Classroom, Course, CourseSubject,
+    Degree, FeeTemplate, Institute, LeadSource, Program, Semester,
+    State, Subject, TimeSlot,
 )
+
+
+@admin.register(Subject)
+class SubjectAdmin(admin.ModelAdmin):
+    list_display = ("name", "code", "credits", "is_active")
+    list_filter = ("is_active",)
+    search_fields = ("name", "code")
+
+
+@admin.register(CourseSubject)
+class CourseSubjectAdmin(admin.ModelAdmin):
+    list_display = ("course", "subject", "sort_order", "is_active")
+    list_filter = ("is_active",)
+    autocomplete_fields = ("course", "subject")
+
+
+@admin.register(Classroom)
+class ClassroomAdmin(admin.ModelAdmin):
+    list_display = ("name", "code", "campus", "capacity", "is_active")
+    list_filter = ("campus", "is_active")
+    search_fields = ("name", "code")
+    autocomplete_fields = ("campus",)
+
+
+@admin.register(TimeSlot)
+class TimeSlotAdmin(admin.ModelAdmin):
+    list_display = ("label", "start_time", "end_time", "academic_year", "is_active")
+    list_filter = ("academic_year", "is_active")
+    search_fields = ("label",)
+    autocomplete_fields = ("academic_year",)
 
 
 @admin.register(FeeTemplate)

@@ -1,8 +1,9 @@
 from rest_framework import serializers
 
 from .models import (
-    AcademicYear, Batch, Campus, City, Course, Degree, FeeTemplate,
-    Institute, LeadSource, Program, Semester, State,
+    AcademicYear, Batch, Campus, City, Classroom, Course, CourseSubject,
+    Degree, FeeTemplate, Institute, LeadSource, Program, Semester,
+    State, Subject, TimeSlot,
 )
 
 
@@ -112,6 +113,56 @@ class BatchSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "program_name", "campus_name",
                             "academic_year_code", "mentor_name",
                             "created_at", "updated_at"]
+
+
+class SubjectSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Subject
+        fields = ["id", "name", "code", "credits", "is_active",
+                  "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class CourseSubjectSerializer(serializers.ModelSerializer):
+    subject_name = serializers.CharField(source="subject.name", read_only=True)
+    course_name = serializers.CharField(source="course.name", read_only=True)
+
+    class Meta:
+        model = CourseSubject
+        fields = ["id", "course", "course_name", "subject", "subject_name",
+                  "sort_order", "is_active"]
+        read_only_fields = ["id", "course_name", "subject_name"]
+
+
+class ClassroomSerializer(serializers.ModelSerializer):
+    campus_name = serializers.CharField(source="campus.name", read_only=True)
+
+    class Meta:
+        model = Classroom
+        fields = ["id", "name", "code", "campus", "campus_name",
+                  "capacity", "description", "is_active",
+                  "created_at", "updated_at"]
+        read_only_fields = ["id", "campus_name", "created_at", "updated_at"]
+
+
+class TimeSlotSerializer(serializers.ModelSerializer):
+    academic_year_code = serializers.CharField(source="academic_year.code", read_only=True)
+
+    class Meta:
+        model = TimeSlot
+        fields = ["id", "label", "start_time", "end_time",
+                  "academic_year", "academic_year_code",
+                  "is_active", "sort_order"]
+        read_only_fields = ["id", "academic_year_code"]
+
+    def validate(self, attrs):
+        start = attrs.get("start_time") or getattr(self.instance, "start_time", None)
+        end = attrs.get("end_time") or getattr(self.instance, "end_time", None)
+        if start and end and end <= start:
+            raise serializers.ValidationError(
+                {"end_time": "Must be later than start_time."}
+            )
+        return attrs
 
 
 class FeeTemplateSerializer(serializers.ModelSerializer):

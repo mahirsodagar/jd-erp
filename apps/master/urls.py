@@ -10,8 +10,12 @@ from .views import (
     CampusProgramsView,
     CityDetailView,
     CityListCreateView,
+    ClassroomDetailView,
+    ClassroomListCreateView,
     CourseDetailView,
     CourseListCreateView,
+    CourseSubjectDetailView,
+    CourseSubjectListCreateView,
     DegreeDetailView,
     DegreeListCreateView,
     FeeTemplateDetailView,
@@ -27,6 +31,10 @@ from .views import (
     StateDetailView,
     StateListView,
     StateManageView,
+    SubjectDetailView,
+    SubjectListCreateView,
+    TimeSlotDetailView,
+    TimeSlotListCreateView,
 )
 
 urlpatterns = [
@@ -67,4 +75,15 @@ urlpatterns = [
 
     path("fee-templates/", FeeTemplateListCreateView.as_view(), name="fee-template-list-create"),
     path("fee-templates/<int:pk>/", FeeTemplateDetailView.as_view(), name="fee-template-detail"),
+
+    path("subjects/", SubjectListCreateView.as_view(), name="subject-list-create"),
+    path("subjects/<int:pk>/", SubjectDetailView.as_view(), name="subject-detail"),
+    path("course-subjects/", CourseSubjectListCreateView.as_view(), name="course-subject-list-create"),
+    path("course-subjects/<int:pk>/", CourseSubjectDetailView.as_view(), name="course-subject-detail"),
+
+    path("classrooms/", ClassroomListCreateView.as_view(), name="classroom-list-create"),
+    path("classrooms/<int:pk>/", ClassroomDetailView.as_view(), name="classroom-detail"),
+
+    path("time-slots/", TimeSlotListCreateView.as_view(), name="time-slot-list-create"),
+    path("time-slots/<int:pk>/", TimeSlotDetailView.as_view(), name="time-slot-detail"),
 ]

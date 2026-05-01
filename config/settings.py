@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     "apps.admissions",
     "apps.fees",
     "apps.notifications",
+    "apps.academics",
 ]
 
 

@@ -14,6 +14,7 @@ urlpatterns = [
     path("api/leaves/", include("apps.leaves.urls")),
     path("api/admissions/", include("apps.admissions.urls")),
     path("api/fees/", include("apps.fees.urls")),
+    path("api/academics/", include("apps.academics.urls")),
 ]
 
 if settings.DEBUG:
