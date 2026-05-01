@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import ScheduleSlot
+from .models import Attendance, ScheduleSlot
 
 
 class ScheduleSlotSerializer(serializers.ModelSerializer):
@@ -58,3 +58,57 @@ class BulkWeeklyPublishSerializer(serializers.Serializer):
                 {"end_date": "Must be on or after start_date."}
             )
         return attrs
+
+
+# --- G.2 — Attendance --------------------------------------------------
+
+class AttendanceSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source="student.student_name", read_only=True)
+    application_form_id = serializers.CharField(
+        source="student.application_form_id", read_only=True,
+    )
+    marked_by_name = serializers.CharField(
+        source="marked_by.username", read_only=True, default="",
+    )
+
+    class Meta:
+        model = Attendance
+        fields = [
+            "id", "schedule_slot", "student",
+            "student_name", "application_form_id",
+            "status", "note",
+            "marked_by", "marked_by_name", "marked_at", "created_at",
+        ]
+        read_only_fields = [
+            "id", "student_name", "application_form_id",
+            "marked_by", "marked_by_name", "marked_at", "created_at",
+        ]
+
+
+class AttendanceMarkItemSerializer(serializers.Serializer):
+    student = serializers.IntegerField()
+    status = serializers.ChoiceField(choices=Attendance.Status.choices)
+    note = serializers.CharField(required=False, allow_blank=True, max_length=200)
+
+
+class BulkMarkAttendanceSerializer(serializers.Serializer):
+    marks = AttendanceMarkItemSerializer(many=True)
+    notify_absent = serializers.BooleanField(
+        required=False, default=False,
+        help_text="Queue notifications for absent students after marking.",
+    )
+
+
+class FreezeSerializer(serializers.Serializer):
+    note = serializers.CharField(required=False, allow_blank=True, max_length=200)
+
+
+class RosterEntrySerializer(serializers.Serializer):
+    """One row per student in the slot's batch — current attendance
+    status if marked, else None."""
+    student_id = serializers.IntegerField()
+    application_form_id = serializers.CharField()
+    name = serializers.CharField()
+    status = serializers.CharField(allow_null=True)
+    note = serializers.CharField(allow_blank=True)
+    attendance_id = serializers.IntegerField(allow_null=True)

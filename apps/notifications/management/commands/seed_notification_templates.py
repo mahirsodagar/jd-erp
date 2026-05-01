@@ -54,6 +54,20 @@ TEMPLATES = [
     ("manager_overdue_hot_lead_in_crm", "IN_CRM",
      "Overdue hot lead",
      "{name} ({phone}) — over 24h no contact."),
+
+    # G.2 — Attendance absentee notifications
+    ("student_absent_email", "EMAIL",
+     "Absence recorded — {subject} on {date}",
+     "Hi {name},\n\nYou were marked absent for {subject} ({slot}) "
+     "on {date}, batch {batch} ({campus}).\n\nIf this is a mistake "
+     "please contact your batch mentor."),
+    ("student_absent_wa", "WHATSAPP", "",
+     "Hi {name}, you were marked absent for {subject} on {date}."),
+    ("parent_absent_email", "EMAIL",
+     "Absence recorded for {name} — {date}",
+     "Dear Parent,\n\nYour ward {name} was marked absent for "
+     "{subject} ({slot}) on {date}, at our {campus} campus.\n\n"
+     "Please contact the batch mentor if this is unexpected."),
 ]
 
 

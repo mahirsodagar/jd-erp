@@ -10,9 +10,17 @@ from apps.master.models import (
 )
 from apps.employees.models import Employee
 
-from .models import ScheduleSlot
+from .attendance_service import (
+    batch_attendance_summary, bulk_mark, freeze_attendance,
+    notify_absent_students, roster_for, student_attendance_summary,
+    unfreeze_attendance,
+)
+from .models import Attendance, ScheduleSlot
 from .permissions import ScheduleAccess, has_perm
-from .serializers import BulkWeeklyPublishSerializer, ScheduleSlotSerializer
+from .serializers import (
+    AttendanceSerializer, BulkMarkAttendanceSerializer,
+    BulkWeeklyPublishSerializer, FreezeSerializer, ScheduleSlotSerializer,
+)
 from .services import bulk_publish_weekly, create_slot, detect_conflicts
 
 
@@ -239,3 +247,207 @@ class ConflictCheckView(APIView):
             classroom=classroom, time_slot=time_slot, date=date,
         )
         return Response(report)
+
+
+# === G.2 — Attendance ================================================
+
+def _can_mark_attendance(user, slot: ScheduleSlot) -> bool:
+    """Instructor of the slot can mark; otherwise need the perm."""
+    if user.is_superuser:
+        return True
+    emp = getattr(user, "employee", None)
+    if emp is not None and slot.instructor_id == emp.id:
+        return True
+    return has_perm(user, "academics.attendance.mark")
+
+
+class AttendanceRosterView(APIView):
+    """`GET` — returns the slot's roster + each student's current
+    attendance row (or null). `POST` — bulk mark.
+
+    Per-method auth: GET open to any auth user; POST checks
+    `_can_mark_attendance` (instructor-of-slot or perm holder)."""
+    permission_classes = [IsAuthenticated]
+
+    def _slot(self, pk):
+        try:
+            return ScheduleSlot.objects.select_related(
+                "batch", "subject", "time_slot",
+            ).get(pk=pk)
+        except ScheduleSlot.DoesNotExist as e:
+            raise Http404 from e
+
+    def get(self, request, pk):
+        slot = self._slot(pk)
+        existing = {
+            a.student_id: a
+            for a in Attendance.objects.filter(schedule_slot=slot)
+        }
+        rows = []
+        for enr in roster_for(slot):
+            s = enr.student
+            a = existing.get(s.id)
+            rows.append({
+                "student_id": s.id,
+                "application_form_id": s.application_form_id,
+                "name": s.student_name,
+                "status": a.status if a else None,
+                "note": a.note if a else "",
+                "attendance_id": a.id if a else None,
+            })
+        return Response({
+            "schedule_slot_id": slot.id,
+            "date": str(slot.date),
+            "subject": slot.subject.name,
+            "batch": slot.batch.name,
+            "frozen": slot.attendance_frozen,
+            "frozen_at": slot.attendance_frozen_at,
+            "frozen_by": (slot.attendance_frozen_by.username
+                          if slot.attendance_frozen_by_id else None),
+            "roster": rows,
+        })
+
+    def post(self, request, pk):
+        slot = self._slot(pk)
+
+        if not _can_mark_attendance(request.user, slot):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+
+        if slot.attendance_frozen and not has_perm(
+            request.user, "academics.attendance.edit_frozen"
+        ):
+            return Response(
+                {"detail": "Attendance is frozen for this slot. "
+                           "Unfreeze first or use an admin with "
+                           "academics.attendance.edit_frozen."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+
+        s = BulkMarkAttendanceSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+
+        result = bulk_mark(
+            slot=slot, marks=s.validated_data["marks"],
+            marked_by=request.user,
+        )
+
+        notified = 0
+        if s.validated_data.get("notify_absent"):
+            notified = notify_absent_students(slot)
+
+        return Response({**result, "notified_absent": notified},
+                        status=http.HTTP_200_OK)
+
+
+class AttendanceFreezeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            slot = ScheduleSlot.objects.get(pk=pk)
+        except ScheduleSlot.DoesNotExist as e:
+            raise Http404 from e
+        # Same access rule as marking — instructor or perm holder.
+        if not (_can_mark_attendance(request.user, slot)
+                or has_perm(request.user, "academics.attendance.freeze")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        if slot.attendance_frozen:
+            return Response({"detail": "Already frozen."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        freeze_attendance(slot=slot, by_user=request.user)
+        return Response({"frozen": True})
+
+
+class AttendanceUnfreezeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            slot = ScheduleSlot.objects.get(pk=pk)
+        except ScheduleSlot.DoesNotExist as e:
+            raise Http404 from e
+        # Unfreeze is admin-only.
+        if not has_perm(request.user, "academics.attendance.freeze"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        if not slot.attendance_frozen:
+            return Response({"detail": "Not frozen."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        unfreeze_attendance(slot=slot, by_user=request.user)
+        return Response({"frozen": False})
+
+
+# --- Reports ----------------------------------------------------------
+
+class BatchAttendanceReportView(APIView):
+    permission_classes = [IsAuthenticated, ScheduleAccess]
+
+    def get(self, request, pk):
+        try:
+            batch = Batch.objects.get(pk=pk)
+        except Batch.DoesNotExist as e:
+            raise Http404 from e
+        if not (request.user.is_superuser
+                or has_perm(request.user, "academics.attendance.view_report")
+                or request.user.campuses.filter(pk=batch.campus_id).exists()):
+            raise Http404
+        params = request.query_params
+        from_date = parse_date(params.get("from") or "") or None
+        to_date = parse_date(params.get("to") or "") or None
+        rows = batch_attendance_summary(
+            batch=batch, from_date=from_date, to_date=to_date,
+        )
+        return Response({
+            "batch_id": batch.id,
+            "batch_name": batch.name,
+            "from": str(from_date) if from_date else None,
+            "to": str(to_date) if to_date else None,
+            "rows": rows,
+        })
+
+
+class StudentAttendanceReportView(APIView):
+    permission_classes = [IsAuthenticated, ScheduleAccess]
+
+    def get(self, request, pk):
+        from apps.admissions.models import Student
+        try:
+            student = Student.objects.get(pk=pk)
+        except Student.DoesNotExist as e:
+            raise Http404 from e
+        # Self, superuser, or HR with the explicit view_report perm.
+        # Campus assignment alone is NOT enough — otherwise classmates
+        # could see each other.
+        u = request.user
+        is_self = (student.user_account_id == u.id)
+        if not (u.is_superuser or is_self
+                or has_perm(u, "academics.attendance.view_report")):
+            raise Http404
+
+        params = request.query_params
+        from_date = parse_date(params.get("from") or "") or None
+        to_date = parse_date(params.get("to") or "") or None
+        return Response(student_attendance_summary(
+            student=student, from_date=from_date, to_date=to_date,
+        ))
+
+
+class MyAttendanceView(APIView):
+    """Logged-in student fetches their own attendance summary."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        student = getattr(request.user, "student", None)
+        if student is None:
+            return Response(
+                {"detail": "No student record linked to this user."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+        params = request.query_params
+        from_date = parse_date(params.get("from") or "") or None
+        to_date = parse_date(params.get("to") or "") or None
+        return Response(student_attendance_summary(
+            student=student, from_date=from_date, to_date=to_date,
+        ))

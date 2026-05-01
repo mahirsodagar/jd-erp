@@ -43,6 +43,15 @@ class ScheduleSlot(models.Model):
     # Set when classroom-conflict warnings were overridden via force=True.
     classroom_conflict_overridden = models.BooleanField(default=False)
 
+    # Module G.2 — once frozen, attendance edits require
+    # `academics.attendance.edit_frozen`.
+    attendance_frozen = models.BooleanField(default=False)
+    attendance_frozen_at = models.DateTimeField(null=True, blank=True)
+    attendance_frozen_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="frozen_schedule_slots",
+    )
+
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True,
         on_delete=models.SET_NULL, related_name="schedule_slots_created",
@@ -76,3 +85,42 @@ class ScheduleSlot(models.Model):
 
     def __str__(self):
         return f"{self.batch.short_name or self.batch_id} {self.subject.code} {self.date} {self.time_slot.label}"
+
+
+class Attendance(models.Model):
+    """One row per (schedule_slot, student). Created on first mark."""
+
+    class Status(models.TextChoices):
+        PRESENT = "PRESENT", "Present"
+        ABSENT = "ABSENT", "Absent"
+        LATE = "LATE", "Late"
+        ON_DUTY = "ON_DUTY", "On Duty"
+        EXCUSED = "EXCUSED", "Excused"
+
+    schedule_slot = models.ForeignKey(
+        ScheduleSlot, on_delete=models.CASCADE, related_name="attendance_entries",
+    )
+    student = models.ForeignKey(
+        "admissions.Student", on_delete=models.PROTECT,
+        related_name="attendance_entries",
+    )
+    status = models.CharField(max_length=10, choices=Status.choices)
+    note = models.CharField(max_length=200, blank=True)
+
+    marked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="attendance_marked",
+    )
+    marked_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("schedule_slot", "student")
+        unique_together = (("schedule_slot", "student"),)
+        indexes = [
+            models.Index(fields=["student", "status"]),
+            models.Index(fields=["schedule_slot", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.student_id}@{self.schedule_slot_id}: {self.status}"

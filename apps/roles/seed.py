@@ -92,6 +92,12 @@ CATALOGUE = [
     ("master", "master.timeslot.manage", "Manage time slots"),
     ("academics", "academics.schedule.manage", "Create / edit class schedule"),
     ("academics", "academics.schedule.view_all", "View schedules across all campuses"),
+
+    # Module G.2 — Attendance
+    ("academics", "academics.attendance.mark", "Mark attendance (non-instructor)"),
+    ("academics", "academics.attendance.freeze", "Freeze / unfreeze attendance"),
+    ("academics", "academics.attendance.edit_frozen", "Edit attendance after freeze"),
+    ("academics", "academics.attendance.view_report", "View attendance reports across campuses"),
 ]
 
 
