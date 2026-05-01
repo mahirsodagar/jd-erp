@@ -21,6 +21,16 @@ class User(AbstractBaseUser, PermissionsMixin):
         help_text="Campuses this user can act in. Empty = no campus scope assigned.",
     )
 
+    # Module F.3 — counsellor availability for round-robin assignment.
+    is_available = models.BooleanField(
+        default=True,
+        help_text="If False, the round-robin assigner skips this user.",
+    )
+    unavailable_reason = models.CharField(
+        max_length=120, blank=True,
+        help_text="e.g. 'On leave', 'Out of office', 'Disabled by admin'.",
+    )
+
     date_joined = models.DateTimeField(default=timezone.now)
 
     USERNAME_FIELD = "username"

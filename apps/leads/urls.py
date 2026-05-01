@@ -1,5 +1,14 @@
 from django.urls import path
 
+from .reports import (
+    ConversionFunnelView,
+    CounsellorLeaderboardView,
+    CoursewiseRevenueView,
+    DuplicateFrequencyView,
+    LostLeadAnalysisView,
+    SummaryView,
+    TimePerStageView,
+)
 from .views import (
     LeadCommunicationListCreateView,
     LeadDetailView,
@@ -11,10 +20,29 @@ from .views import (
     LeadPromoteView,
     LeadReassignView,
     LeadStatusView,
+    PoolDetailView,
+    PoolListCreateView,
+    PoolMembershipDetailView,
+    PoolMembershipListCreateView,
 )
 
 urlpatterns = [
     path("intake/", LeadIntakeView.as_view(), name="lead-intake"),
+
+    # F.3 — counsellor pools
+    path("pools/", PoolListCreateView.as_view(), name="pool-list-create"),
+    path("pools/<int:pk>/", PoolDetailView.as_view(), name="pool-detail"),
+    path("pool-members/", PoolMembershipListCreateView.as_view(), name="pool-member-list-create"),
+    path("pool-members/<int:pk>/", PoolMembershipDetailView.as_view(), name="pool-member-detail"),
+
+    # F.6 — reports
+    path("reports/funnel/", ConversionFunnelView.as_view(), name="report-funnel"),
+    path("reports/leaderboard/", CounsellorLeaderboardView.as_view(), name="report-leaderboard"),
+    path("reports/time-per-stage/", TimePerStageView.as_view(), name="report-time-per-stage"),
+    path("reports/lost-analysis/", LostLeadAnalysisView.as_view(), name="report-lost"),
+    path("reports/coursewise-revenue/", CoursewiseRevenueView.as_view(), name="report-coursewise"),
+    path("reports/duplicates/", DuplicateFrequencyView.as_view(), name="report-duplicates"),
+    path("reports/summary/", SummaryView.as_view(), name="report-summary"),
 
     path("", LeadListCreateView.as_view(), name="lead-list-create"),
     path("<int:pk>/", LeadDetailView.as_view(), name="lead-detail"),

@@ -4,10 +4,40 @@ from rest_framework import serializers
 from apps.master.models import Campus, LeadSource, Program
 
 from .models import (
+    CounsellorPool, CounsellorPoolMembership,
     Lead, LeadCommunication, LeadFollowup, LeadStatusHistory, LeadUtm,
 )
 
 User = get_user_model()
+
+
+class CounsellorPoolMembershipSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source="user.username", read_only=True)
+    is_available = serializers.BooleanField(source="user.is_available", read_only=True)
+
+    class Meta:
+        model = CounsellorPoolMembership
+        fields = ["id", "pool", "user", "username",
+                  "sort_order", "is_active", "is_available", "created_at"]
+        read_only_fields = ["id", "username", "is_available", "created_at"]
+
+
+class CounsellorPoolSerializer(serializers.ModelSerializer):
+    member_count = serializers.SerializerMethodField()
+    members = CounsellorPoolMembershipSerializer(
+        source="memberships", many=True, read_only=True,
+    )
+
+    class Meta:
+        model = CounsellorPool
+        fields = ["id", "name", "category", "is_active", "pointer",
+                  "member_count", "members",
+                  "created_at", "updated_at"]
+        read_only_fields = ["id", "pointer", "member_count", "members",
+                            "created_at", "updated_at"]
+
+    def get_member_count(self, obj):
+        return obj.memberships.filter(is_active=True).count()
 
 
 class LeadUtmSerializer(serializers.ModelSerializer):
@@ -33,7 +63,13 @@ class _LeadBaseSerializer(serializers.ModelSerializer):
 
 
 class LeadCreateSerializer(_LeadBaseSerializer):
-    """Manual create, used by counselors via the Add Lead form."""
+    """Manual create, used by counselors via the Add Lead form.
+
+    `assign_to` is optional — if omitted, the round-robin assigner picks
+    the next available counsellor from the pool for the program's
+    category (Module F.3). If the pool is empty, the create fails with
+    a clear error from the service layer.
+    """
 
     class Meta:
         model = Lead
@@ -42,6 +78,9 @@ class LeadCreateSerializer(_LeadBaseSerializer):
             "campus", "program", "source", "assign_to",
             "remarks", "city", "state",
         ]
+        extra_kwargs = {
+            "assign_to": {"required": False, "allow_null": True},
+        }
 
 
 class LeadUpdateSerializer(_LeadBaseSerializer):
@@ -76,6 +115,9 @@ class LeadDetailSerializer(serializers.ModelSerializer):
             "assign_to", "assign_to_name",
             "status", "remarks", "city", "state",
             "is_repeated", "duplicate_of",
+            "occurrence_number",
+            "alternative_phone", "alternative_email",
+            "phone_normalized",
             "created_by", "created_by_name",
             "created_at", "updated_at",
             "utm",
@@ -190,9 +232,29 @@ class LeadFollowupSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = LeadFollowup
-        fields = ["id", "lead", "followup_type", "notes", "next_followup_date",
-                  "created_by", "created_by_name", "created_at"]
+        fields = [
+            "id", "lead", "followup_type",
+            "outcome_category", "outcome_disposition",
+            "notes", "next_followup_date",
+            "created_by", "created_by_name", "created_at",
+        ]
         read_only_fields = ["id", "created_by", "created_by_name", "created_at"]
+
+    def validate(self, attrs):
+        from .outcomes import is_valid_disposition
+        cat = attrs.get("outcome_category") or getattr(self.instance, "outcome_category", "")
+        disp = attrs.get("outcome_disposition") or getattr(self.instance, "outcome_disposition", "")
+        if cat and disp and not is_valid_disposition(cat, disp):
+            raise serializers.ValidationError({
+                "outcome_disposition": (
+                    f"'{disp}' is not a valid disposition for category {cat}."
+                )
+            })
+        # Outcome category becomes mandatory once F.4 is rolled out — but
+        # we keep it optional at the serializer level to avoid breaking
+        # legacy clients. The status-progression guard enforces it on
+        # transitions.
+        return attrs
 
 
 class LeadCommunicationSerializer(serializers.ModelSerializer):

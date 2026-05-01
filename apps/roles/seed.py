@@ -78,6 +78,13 @@ CATALOGUE = [
     ("fees", "fees.receipt.cancel", "Cancel posted receipts"),
     ("fees", "fees.concession.request", "Raise concession requests"),
     ("fees", "fees.concession.approve", "Approve / reject concession requests"),
+
+    # Module F — Lead Management Hardening
+    ("leads", "leads.pool.manage", "Manage counsellor pools"),
+    ("leads", "leads.escalation.receive", "Receive escalation alerts (managers)"),
+    ("leads", "leads.report.view", "View lead reports / dashboards"),
+    ("notifications", "notifications.template.manage", "Manage notification templates"),
+    ("notifications", "notifications.dispatch.view", "View notification dispatch log"),
 ]
 
 

@@ -75,11 +75,25 @@ class Campus(models.Model):
 class Program(models.Model):
     """Academic program. Offered at one or more campuses."""
 
+    class Category(models.TextChoices):
+        REGULAR = "REGULAR", "Regular Course (1-4 yrs)"
+        SHORT = "SHORT", "Short Course (3-11 mo)"
+        NEW = "NEW", "Newly launched"
+
     name = models.CharField(max_length=160, unique=True)
     code = models.CharField(max_length=30, unique=True)
     degree_type = models.CharField(
         max_length=40, blank=True,
         help_text="e.g. B.Des, M.Des, Diploma.",
+    )
+    category = models.CharField(
+        max_length=10, choices=Category.choices, default=Category.REGULAR,
+        db_index=True,
+        help_text="Drives which counsellor pool a lead is routed to.",
+    )
+    certification = models.CharField(
+        max_length=20, blank=True,
+        help_text="e.g. BESTIU, BCU, JD.",
     )
     duration_months = models.PositiveSmallIntegerField(null=True, blank=True)
     description = models.TextField(blank=True)

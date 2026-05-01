@@ -8,9 +8,14 @@ from rest_framework.views import APIView
 from apps.accounts.permissions import HasPerm
 
 from .intake_auth import HasIntakeApiKey
-from .models import Lead, LeadCommunication, LeadFollowup
+from .models import (
+    CounsellorPool, CounsellorPoolMembership,
+    Lead, LeadCommunication, LeadFollowup,
+)
 from .permissions import LeadVisibility, can_see_all_leads, filter_visible
 from .serializers import (
+    CounsellorPoolMembershipSerializer,
+    CounsellorPoolSerializer,
     LeadCommunicationSerializer,
     LeadCreateSerializer,
     LeadDetailSerializer,
@@ -21,7 +26,7 @@ from .serializers import (
     StatusChangeSerializer,
     StatusHistorySerializer,
 )
-from .services import change_status, create_lead
+from .services import change_status, create_lead, has_recent_outcome
 
 
 # --- Lead list/create ---------------------------------------------------
@@ -104,6 +109,38 @@ class LeadStatusView(APIView):
     def post(self, request, pk):
         lead = Lead.objects.get(pk=pk)
         self.check_object_permissions(request, lead)
+
+        # F.4 guard — outcome must be logged before stage moves.
+        # Caller can either log a followup first, or pass the outcome
+        # inline as `outcome_category` + `outcome_disposition`.
+        outcome_cat = (request.data.get("outcome_category") or "").upper()
+        outcome_disp = request.data.get("outcome_disposition") or ""
+        if outcome_cat:
+            from .outcomes import is_valid_disposition
+            from .models import LeadFollowup
+            if outcome_disp and not is_valid_disposition(outcome_cat, outcome_disp):
+                return Response(
+                    {"outcome_disposition":
+                     f"'{outcome_disp}' invalid for {outcome_cat}."},
+                    status=http.HTTP_400_BAD_REQUEST,
+                )
+            LeadFollowup.objects.create(
+                lead=lead,
+                followup_type=LeadFollowup.Type.OTHER,
+                outcome_category=outcome_cat,
+                outcome_disposition=outcome_disp,
+                notes=request.data.get("note", ""),
+                created_by=request.user,
+            )
+        elif not has_recent_outcome(lead):
+            return Response(
+                {"detail": "Cannot change status without a logged outcome. "
+                           "Log a follow-up with outcome_category first, or "
+                           "pass `outcome_category` (+ optional "
+                           "`outcome_disposition`) inline."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+
         s = StatusChangeSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         change_status(
@@ -204,6 +241,105 @@ class LeadCommunicationListCreateView(APIView):
         s.is_valid(raise_exception=True)
         s.save(logged_by=request.user)
         return Response(s.data, status=http.HTTP_201_CREATED)
+
+
+# --- Counsellor pools (F.3) -------------------------------------------
+
+class PoolListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        qs = CounsellorPool.objects.prefetch_related("memberships__user")
+        if request.query_params.get("active") == "1":
+            qs = qs.filter(is_active=True)
+        return Response(CounsellorPoolSerializer(qs, many=True).data)
+
+    def post(self, request):
+        u = request.user
+        if not (u.is_superuser
+                or u.roles.filter(permissions__key="leads.pool.manage").exists()):
+            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
+        s = CounsellorPoolSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(s.data, status=http.HTTP_201_CREATED)
+
+
+class PoolDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            pool = CounsellorPool.objects.prefetch_related("memberships__user").get(pk=pk)
+        except CounsellorPool.DoesNotExist as e:
+            raise Http404 from e
+        return Response(CounsellorPoolSerializer(pool).data)
+
+    def patch(self, request, pk):
+        u = request.user
+        if not (u.is_superuser
+                or u.roles.filter(permissions__key="leads.pool.manage").exists()):
+            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
+        try:
+            pool = CounsellorPool.objects.get(pk=pk)
+        except CounsellorPool.DoesNotExist as e:
+            raise Http404 from e
+        s = CounsellorPoolSerializer(pool, data=request.data, partial=True)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(s.data)
+
+
+class PoolMembershipListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        qs = CounsellorPoolMembership.objects.select_related("pool", "user")
+        if v := request.query_params.get("pool"):
+            qs = qs.filter(pool_id=v)
+        if v := request.query_params.get("user"):
+            qs = qs.filter(user_id=v)
+        return Response(CounsellorPoolMembershipSerializer(qs, many=True).data)
+
+    def post(self, request):
+        u = request.user
+        if not (u.is_superuser
+                or u.roles.filter(permissions__key="leads.pool.manage").exists()):
+            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
+        s = CounsellorPoolMembershipSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(s.data, status=http.HTTP_201_CREATED)
+
+
+class PoolMembershipDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        u = request.user
+        if not (u.is_superuser
+                or u.roles.filter(permissions__key="leads.pool.manage").exists()):
+            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
+        try:
+            m = CounsellorPoolMembership.objects.get(pk=pk)
+        except CounsellorPoolMembership.DoesNotExist as e:
+            raise Http404 from e
+        s = CounsellorPoolMembershipSerializer(m, data=request.data, partial=True)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(s.data)
+
+    def delete(self, request, pk):
+        u = request.user
+        if not (u.is_superuser
+                or u.roles.filter(permissions__key="leads.pool.manage").exists()):
+            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
+        try:
+            m = CounsellorPoolMembership.objects.get(pk=pk)
+        except CounsellorPoolMembership.DoesNotExist as e:
+            raise Http404 from e
+        m.delete()
+        return Response(status=http.HTTP_204_NO_CONTENT)
 
 
 # --- Public intake ------------------------------------------------------

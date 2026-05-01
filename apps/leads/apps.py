@@ -9,6 +9,7 @@ class LeadsConfig(AppConfig):
     def ready(self):
         from auditlog.registry import auditlog
         from .models import (
+            CounsellorPool, CounsellorPoolMembership,
             Lead, LeadCommunication, LeadFollowup, LeadStatusHistory, LeadUtm,
         )
         auditlog.register(Lead)
@@ -16,3 +17,5 @@ class LeadsConfig(AppConfig):
         auditlog.register(LeadCommunication)
         auditlog.register(LeadStatusHistory)
         auditlog.register(LeadUtm)
+        auditlog.register(CounsellorPool)
+        auditlog.register(CounsellorPoolMembership)
