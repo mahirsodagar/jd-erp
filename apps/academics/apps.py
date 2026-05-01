@@ -8,6 +8,12 @@ class AcademicsConfig(AppConfig):
 
     def ready(self):
         from auditlog.registry import auditlog
-        from .models import Attendance, ScheduleSlot
+        from .models import (
+            Assignment, AssignmentSubmission, Attendance, MarksEntry,
+            ScheduleSlot,
+        )
         auditlog.register(ScheduleSlot)
         auditlog.register(Attendance)
+        auditlog.register(Assignment)
+        auditlog.register(AssignmentSubmission)
+        auditlog.register(MarksEntry)

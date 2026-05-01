@@ -1,6 +1,41 @@
 from django.contrib import admin
 
-from .models import Attendance, ScheduleSlot
+from .models import (
+    Assignment, AssignmentSubmission, Attendance, MarksEntry, ScheduleSlot,
+)
+
+
+@admin.register(Assignment)
+class AssignmentAdmin(admin.ModelAdmin):
+    list_display = ("title", "subject", "batch", "due_date",
+                    "max_marks", "is_published", "created_at")
+    list_filter = ("is_published", "subject", "batch")
+    search_fields = ("title", "subject__name", "subject__code", "batch__name")
+    autocomplete_fields = ("subject", "batch", "created_by")
+
+
+@admin.register(AssignmentSubmission)
+class AssignmentSubmissionAdmin(admin.ModelAdmin):
+    list_display = ("assignment", "student", "status",
+                    "submitted_at", "grade", "graded_by")
+    list_filter = ("status",)
+    search_fields = ("student__student_name", "student__application_form_id",
+                     "assignment__title")
+    autocomplete_fields = ("assignment", "student", "graded_by")
+    readonly_fields = ("created_at", "updated_at", "graded_at")
+
+
+@admin.register(MarksEntry)
+class MarksEntryAdmin(admin.ModelAdmin):
+    list_display = ("student", "subject", "semester", "batch",
+                    "ia_marks", "ea_marks", "published")
+    list_filter = ("published", "semester", "batch")
+    search_fields = ("student__student_name", "student__application_form_id",
+                     "subject__code")
+    autocomplete_fields = ("student", "subject", "batch", "semester",
+                           "entered_by", "published_by")
+    readonly_fields = ("published_at", "published_by",
+                       "created_at", "updated_at")
 
 
 @admin.register(ScheduleSlot)

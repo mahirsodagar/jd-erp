@@ -98,6 +98,16 @@ CATALOGUE = [
     ("academics", "academics.attendance.freeze", "Freeze / unfreeze attendance"),
     ("academics", "academics.attendance.edit_frozen", "Edit attendance after freeze"),
     ("academics", "academics.attendance.view_report", "View attendance reports across campuses"),
+
+    # Module G.3 — Assignments + Marks
+    ("academics", "academics.assignment.create", "Create / edit assignments"),
+    ("academics", "academics.assignment.grade", "Grade any submission (HOD override)"),
+    ("academics", "academics.assignment.manage_any", "Edit / delete any assignment"),
+    ("academics", "academics.marks.enter", "Enter / edit draft marks"),
+    ("academics", "academics.marks.publish", "Publish / unpublish marks"),
+    ("academics", "academics.marks.edit_published", "Edit published marks"),
+    ("academics", "academics.transcript.view_any", "View any student's transcript"),
+    ("academics", "academics.transcript.view_drafts", "Include unpublished marks in transcripts"),
 ]
 
 

@@ -1,4 +1,5 @@
 from django.http import Http404
+from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import status as http
 from rest_framework.permissions import IsAuthenticated
@@ -15,11 +16,19 @@ from .attendance_service import (
     notify_absent_students, roster_for, student_attendance_summary,
     unfreeze_attendance,
 )
-from .models import Attendance, ScheduleSlot
+from .marks_service import (
+    build_transcript, grade_submission, publish_marks,
+    submission_status_after_save, unpublish_marks,
+)
+from .models import (
+    Assignment, AssignmentSubmission, Attendance, MarksEntry, ScheduleSlot,
+)
 from .permissions import ScheduleAccess, has_perm
 from .serializers import (
+    AssignmentSerializer, AssignmentSubmissionSerializer,
     AttendanceSerializer, BulkMarkAttendanceSerializer,
-    BulkWeeklyPublishSerializer, FreezeSerializer, ScheduleSlotSerializer,
+    BulkWeeklyPublishSerializer, FreezeSerializer, MarksEntrySerializer,
+    ScheduleSlotSerializer, StudentSubmitSerializer, SubmissionGradeSerializer,
 )
 from .services import bulk_publish_weekly, create_slot, detect_conflicts
 
@@ -451,3 +460,370 @@ class MyAttendanceView(APIView):
         return Response(student_attendance_summary(
             student=student, from_date=from_date, to_date=to_date,
         ))
+
+
+# === G.3 — Assignments + Marks ======================================
+
+def _is_assignment_owner(user, assignment) -> bool:
+    """A faculty 'owns' an assignment they created. Used to gate
+    grade/edit. Superusers and `academics.assignment.manage_any` bypass."""
+    if user.is_superuser:
+        return True
+    return assignment.created_by_id == user.id
+
+
+# --- Assignment CRUD --------------------------------------------------
+
+class AssignmentListCreateView(APIView):
+    """Faculty side: list + create assignments. Students use
+    `/api/academics/assignments/me/`."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        u = request.user
+        qs = Assignment.objects.select_related("subject", "batch")
+        params = request.query_params
+        if v := params.get("subject"):
+            qs = qs.filter(subject_id=v)
+        if v := params.get("batch"):
+            qs = qs.filter(batch_id=v)
+        if v := params.get("due_after"):
+            if d := parse_date(v):
+                qs = qs.filter(due_date__date__gte=d)
+        if v := params.get("due_before"):
+            if d := parse_date(v):
+                qs = qs.filter(due_date__date__lte=d)
+
+        # Campus scope: non-admins only see assignments for batches in
+        # their campus(es).
+        if not (u.is_superuser or has_perm(u, "academics.schedule.view_all")):
+            qs = qs.filter(batch__campus__in=u.campuses.all())
+        return Response(AssignmentSerializer(qs[:500], many=True).data)
+
+    def post(self, request):
+        if not has_perm(request.user, "academics.assignment.create"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = AssignmentSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        s.save(created_by=request.user)
+        return Response(s.data, status=http.HTTP_201_CREATED)
+
+
+class AssignmentDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _obj(self, pk):
+        try:
+            return Assignment.objects.select_related("subject", "batch").get(pk=pk)
+        except Assignment.DoesNotExist as e:
+            raise Http404 from e
+
+    def get(self, request, pk):
+        return Response(AssignmentSerializer(self._obj(pk)).data)
+
+    def patch(self, request, pk):
+        a = self._obj(pk)
+        if not (_is_assignment_owner(request.user, a)
+                or has_perm(request.user, "academics.assignment.manage_any")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = AssignmentSerializer(a, data=request.data, partial=True)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(s.data)
+
+    def delete(self, request, pk):
+        a = self._obj(pk)
+        if not (_is_assignment_owner(request.user, a)
+                or has_perm(request.user, "academics.assignment.manage_any")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        a.delete()
+        return Response(status=http.HTTP_204_NO_CONTENT)
+
+
+class AssignmentSubmissionsView(APIView):
+    """Faculty: list all submissions for an assignment."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            a = Assignment.objects.get(pk=pk)
+        except Assignment.DoesNotExist as e:
+            raise Http404 from e
+        u = request.user
+        if not (u.is_superuser or _is_assignment_owner(u, a)
+                or has_perm(u, "academics.assignment.grade")):
+            raise Http404
+        qs = a.submissions.select_related("student", "graded_by").all()
+        return Response(AssignmentSubmissionSerializer(qs, many=True).data)
+
+
+# --- Submission grading -----------------------------------------------
+
+class SubmissionGradeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        try:
+            sub = AssignmentSubmission.objects.select_related(
+                "assignment", "student",
+            ).get(pk=pk)
+        except AssignmentSubmission.DoesNotExist as e:
+            raise Http404 from e
+        u = request.user
+        if not (u.is_superuser
+                or _is_assignment_owner(u, sub.assignment)
+                or has_perm(u, "academics.assignment.grade")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = SubmissionGradeSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        try:
+            grade_submission(
+                submission=sub,
+                grade=s.validated_data["grade"],
+                feedback=s.validated_data.get("feedback", ""),
+                graded_by=u,
+            )
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=http.HTTP_400_BAD_REQUEST)
+        return Response(AssignmentSubmissionSerializer(sub).data)
+
+
+# --- Student-facing assignment endpoints -----------------------------
+
+class MyAssignmentsView(APIView):
+    """List assignments visible to the logged-in student (own batches),
+    each annotated with their submission status."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        student = getattr(request.user, "student", None)
+        if student is None:
+            return Response(
+                {"detail": "No student record linked to this user."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+        from apps.admissions.models import Enrollment
+        batch_ids = list(
+            Enrollment.objects.filter(
+                student=student, status=Enrollment.Status.ACTIVE,
+            ).values_list("batch_id", flat=True)
+        )
+        qs = Assignment.objects.filter(
+            batch_id__in=batch_ids, is_published=True,
+        ).select_related("subject", "batch").order_by("due_date")
+
+        existing = {
+            s.assignment_id: s
+            for s in AssignmentSubmission.objects.filter(
+                student=student, assignment__in=qs,
+            )
+        }
+        rows = []
+        for a in qs:
+            sub = existing.get(a.id)
+            rows.append({
+                "assignment": AssignmentSerializer(a).data,
+                "submission": (AssignmentSubmissionSerializer(sub).data
+                                if sub else None),
+            })
+        return Response(rows)
+
+
+class StudentSubmitView(APIView):
+    """Student uploads / replaces their submission for an assignment."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        student = getattr(request.user, "student", None)
+        if student is None:
+            return Response(
+                {"detail": "No student record linked to this user."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            a = Assignment.objects.get(pk=pk, is_published=True)
+        except Assignment.DoesNotExist as e:
+            raise Http404 from e
+
+        # Roster check.
+        from apps.admissions.models import Enrollment
+        if not Enrollment.objects.filter(
+            student=student, batch=a.batch, status=Enrollment.Status.ACTIVE,
+        ).exists():
+            return Response({"detail": "Not enrolled in this batch."},
+                            status=http.HTTP_403_FORBIDDEN)
+
+        s = StudentSubmitSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+
+        sub, _ = AssignmentSubmission.objects.get_or_create(
+            assignment=a, student=student,
+        )
+        if "file" in s.validated_data and s.validated_data["file"] is not None:
+            sub.file = s.validated_data["file"]
+        if "text_response" in s.validated_data:
+            sub.text_response = s.validated_data["text_response"]
+        sub.submitted_at = timezone.now()
+        sub.status = submission_status_after_save(sub)
+        sub.save()
+        return Response(AssignmentSubmissionSerializer(sub).data,
+                        status=http.HTTP_200_OK)
+
+
+# --- Marks -----------------------------------------------------------
+
+class MarksListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        u = request.user
+        if not (u.is_superuser
+                or has_perm(u, "academics.marks.enter")
+                or has_perm(u, "academics.marks.publish")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        qs = MarksEntry.objects.select_related(
+            "student", "subject", "batch", "semester",
+        )
+        params = request.query_params
+        if v := params.get("student"):
+            qs = qs.filter(student_id=v)
+        if v := params.get("subject"):
+            qs = qs.filter(subject_id=v)
+        if v := params.get("batch"):
+            qs = qs.filter(batch_id=v)
+        if v := params.get("semester"):
+            qs = qs.filter(semester_id=v)
+        if params.get("published") == "1":
+            qs = qs.filter(published=True)
+        elif params.get("published") == "0":
+            qs = qs.filter(published=False)
+        return Response(MarksEntrySerializer(qs[:1000], many=True).data)
+
+    def post(self, request):
+        u = request.user
+        if not has_perm(u, "academics.marks.enter"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = MarksEntrySerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        try:
+            obj = s.save(entered_by=u)
+        except Exception as e:
+            return Response({"detail": str(e)}, status=http.HTTP_400_BAD_REQUEST)
+        return Response(MarksEntrySerializer(obj).data,
+                        status=http.HTTP_201_CREATED)
+
+
+class MarksDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _obj(self, pk):
+        try:
+            return MarksEntry.objects.get(pk=pk)
+        except MarksEntry.DoesNotExist as e:
+            raise Http404 from e
+
+    def get(self, request, pk):
+        u = request.user
+        if not (u.is_superuser or has_perm(u, "academics.marks.enter")
+                or has_perm(u, "academics.marks.publish")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        return Response(MarksEntrySerializer(self._obj(pk)).data)
+
+    def patch(self, request, pk):
+        u = request.user
+        m = self._obj(pk)
+        if m.published:
+            if not has_perm(u, "academics.marks.edit_published"):
+                return Response(
+                    {"detail": "Marks are published; "
+                               "academics.marks.edit_published required."},
+                    status=http.HTTP_400_BAD_REQUEST,
+                )
+        elif not has_perm(u, "academics.marks.enter"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = MarksEntrySerializer(m, data=request.data, partial=True)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(s.data)
+
+
+class MarksPublishView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        u = request.user
+        if not has_perm(u, "academics.marks.publish"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        try:
+            m = MarksEntry.objects.get(pk=pk)
+        except MarksEntry.DoesNotExist as e:
+            raise Http404 from e
+        if m.published:
+            return Response({"detail": "Already published."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        publish_marks(marks=m, by_user=u)
+        return Response(MarksEntrySerializer(m).data)
+
+
+class MarksUnpublishView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        u = request.user
+        if not has_perm(u, "academics.marks.publish"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        try:
+            m = MarksEntry.objects.get(pk=pk)
+        except MarksEntry.DoesNotExist as e:
+            raise Http404 from e
+        if not m.published:
+            return Response({"detail": "Not published."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        unpublish_marks(marks=m, by_user=u)
+        return Response(MarksEntrySerializer(m).data)
+
+
+# --- Transcript -------------------------------------------------------
+
+class StudentTranscriptView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        from apps.admissions.models import Student
+        try:
+            student = Student.objects.get(pk=pk)
+        except Student.DoesNotExist as e:
+            raise Http404 from e
+        u = request.user
+        is_self = (student.user_account_id == u.id)
+        if not (u.is_superuser or is_self
+                or has_perm(u, "academics.transcript.view_any")):
+            raise Http404
+        only_published = not (u.is_superuser
+                              or has_perm(u, "academics.transcript.view_drafts"))
+        return Response(build_transcript(
+            student=student, only_published=only_published,
+        ))
+
+
+class MyTranscriptView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        student = getattr(request.user, "student", None)
+        if student is None:
+            return Response(
+                {"detail": "No student record linked to this user."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+        return Response(build_transcript(student=student, only_published=True))
