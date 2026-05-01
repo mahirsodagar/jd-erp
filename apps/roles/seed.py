@@ -123,6 +123,23 @@ CATALOGUE = [
     ("academics", "academics.test.review", "Review short-answer responses"),
     ("academics", "academics.test.view_all", "View all tests / attempts / reports"),
     ("academics", "academics.test.manage_any", "Edit / delete any test"),
+
+    # Module H — Auditor / Reports
+    ("audit", "audit.faculty_daily.view_all", "View all faculty daily reports"),
+    ("audit", "audit.faculty_daily.submit_for_others", "Submit faculty daily on behalf of others"),
+    ("audit", "audit.admin_daily.view_all", "View all admin daily reports"),
+    ("audit", "audit.course_end.submit", "Submit course-end reports"),
+    ("audit", "audit.course_end.view_all", "View all course-end reports"),
+    ("audit", "audit.course_end.review", "HOD-review course-end reports"),
+    ("audit", "audit.batch_mentor.view_all", "View all batch-mentor reports"),
+    ("audit", "audit.batch_mentor.submit_for_others", "Submit batch-mentor on behalf"),
+    ("audit", "audit.feedback.view_all", "View all student feedback"),
+    ("audit", "audit.self_appraisal.view_all", "View all self-appraisals"),
+    ("audit", "audit.self_appraisal.review", "Auditor reviews self-appraisals"),
+    ("audit", "audit.compliance.view", "View compliance flags"),
+    ("audit", "audit.compliance.flag", "Raise compliance flags"),
+    ("audit", "audit.compliance.resolve", "Resolve compliance flags"),
+    ("audit", "audit.report.consolidated", "View dashboards / consolidated reports"),
 ]
 
 
