@@ -1,5 +1,7 @@
 from django.urls import path
 
+from apps.portal.views import ProvisionParentView
+
 from .views import (
     EnrollmentDetailView,
     EnrollmentListCreateView,
@@ -18,6 +20,7 @@ urlpatterns = [
     path("students/", StudentListView.as_view(), name="student-list"),
     path("students/<int:pk>/", StudentDetailView.as_view(), name="student-detail"),
     path("students/<int:pk>/documents/", StudentDocumentsView.as_view(), name="student-docs"),
+    path("students/<int:pk>/parent/", ProvisionParentView.as_view(), name="student-parent-provision"),
     path("documents/<int:pk>/", StudentDocumentDetailView.as_view(), name="student-doc-detail"),
 
     path("enrollments/", EnrollmentListCreateView.as_view(), name="enrollment-list-create"),

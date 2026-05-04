@@ -199,6 +199,8 @@ class Batch(models.Model):
         on_delete=models.SET_NULL, related_name="mentored_batches",
         help_text="Class / batch mentor.",
     )
+    feedback_link = models.URLField(blank=True)
+    feedback_link_enabled = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

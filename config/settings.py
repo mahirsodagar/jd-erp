@@ -45,6 +45,10 @@ INSTALLED_APPS = [
     "apps.academics",
     "apps.audit_reports",
     "apps.relieving",
+    "apps.common",
+    "apps.courseware",
+    "apps.student_leaves",
+    "apps.portal",
 ]
 
 
@@ -116,6 +120,18 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
     ),
+    "DEFAULT_PAGINATION_CLASS": "apps.common.pagination.StandardPagination",
+    "PAGE_SIZE": 50,
+    "DEFAULT_THROTTLE_CLASSES": (
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ),
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": env("THROTTLE_ANON", default="60/min"),
+        "user": env("THROTTLE_USER", default="2000/hour"),
+        "login": env("THROTTLE_LOGIN", default="10/min"),
+        "lead_intake": env("THROTTLE_LEAD_INTAKE", default="120/hour"),
+    },
 }
 
 SIMPLE_JWT = {
@@ -198,8 +214,8 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-# Photo upload size cap (also enforced in serializer).
-DATA_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
+# Per-request body cap; per-file caps belong in serializers.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 60 * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

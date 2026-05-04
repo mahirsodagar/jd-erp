@@ -136,6 +136,11 @@ class Student(models.Model):
         on_delete=models.SET_NULL, related_name="student",
         help_text="User account used by the student to log into the student panel.",
     )
+    parent_user_account = models.OneToOneField(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="parent_of_student",
+        help_text="User account used by the parent to log into the parent panel.",
+    )
     lead_origin = models.OneToOneField(
         "leads.Lead", null=True, blank=True,
         on_delete=models.SET_NULL, related_name="promoted_student",

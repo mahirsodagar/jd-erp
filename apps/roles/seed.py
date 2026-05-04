@@ -146,6 +146,12 @@ CATALOGUE = [
     ("hr", "hr.relieving.view_all", "View all relieving applications"),
     ("hr", "hr.relieving.finalize", "HR finalizes relieving + generates letters"),
     ("hr", "hr.relieving.override", "Override approval sequence (skip levels)"),
+
+    # Student & Parent Portal
+    ("courseware", "courseware.manage", "Publish / edit / delete courseware topics"),
+    ("student_leaves", "student_leaves.view_all", "View all student leave applications"),
+    ("student_leaves", "student_leaves.decide", "Approve / reject student leaves"),
+    ("admissions", "admissions.parent.manage", "Provision / link parent user accounts"),
 ]
 
 
