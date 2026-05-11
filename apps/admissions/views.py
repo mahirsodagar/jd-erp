@@ -185,7 +185,7 @@ class EnrollmentListCreateView(APIView):
         if not (u.is_superuser or has_perm(u, "admissions.student.view")):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         qs = Enrollment.objects.select_related(
-            "student", "program", "course", "semester",
+            "student", "program", "semester",
             "campus", "batch", "academic_year",
         )
         if not can_view_all_campuses(u):

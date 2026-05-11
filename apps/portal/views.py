@@ -55,8 +55,6 @@ class MeView(APIView):
             "batch_name": e.batch.name,
             "semester_id": e.semester_id,
             "semester_number": e.semester.number,
-            "course_id": e.course_id,
-            "course_name": e.course.name if e.course else None,
             "academic_year": e.academic_year.code,
             "status": e.status,
         }

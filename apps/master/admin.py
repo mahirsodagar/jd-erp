@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from .models import (
-    AcademicYear, Batch, Campus, City, Classroom, Course, CourseSubject,
+    AcademicYear, Batch, Campus, City, Classroom,
     Degree, FeeTemplate, Institute, LeadSource, Program, Semester,
     State, Subject, TimeSlot,
 )
@@ -12,13 +12,6 @@ class SubjectAdmin(admin.ModelAdmin):
     list_display = ("name", "code", "credits", "is_active")
     list_filter = ("is_active",)
     search_fields = ("name", "code")
-
-
-@admin.register(CourseSubject)
-class CourseSubjectAdmin(admin.ModelAdmin):
-    list_display = ("course", "subject", "sort_order", "is_active")
-    list_filter = ("is_active",)
-    autocomplete_fields = ("course", "subject")
 
 
 @admin.register(Classroom)
@@ -40,10 +33,10 @@ class TimeSlotAdmin(admin.ModelAdmin):
 @admin.register(FeeTemplate)
 class FeeTemplateAdmin(admin.ModelAdmin):
     list_display = ("name", "academic_year", "campus", "program",
-                    "course", "total_fee", "is_active")
+                    "total_fee", "is_active")
     list_filter = ("is_active", "academic_year", "campus", "program")
     search_fields = ("name",)
-    autocomplete_fields = ("academic_year", "campus", "program", "course")
+    autocomplete_fields = ("academic_year", "campus", "program")
 
 
 @admin.register(AcademicYear)
@@ -58,14 +51,6 @@ class DegreeAdmin(admin.ModelAdmin):
     list_display = ("name", "code", "is_active")
     list_filter = ("is_active",)
     search_fields = ("name", "code")
-
-
-@admin.register(Course)
-class CourseAdmin(admin.ModelAdmin):
-    list_display = ("name", "code", "program", "duration_months", "is_active")
-    list_filter = ("is_active", "program")
-    search_fields = ("name", "code")
-    autocomplete_fields = ("program",)
 
 
 @admin.register(Semester)

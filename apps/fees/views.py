@@ -299,7 +299,7 @@ class EnrollmentBalanceView(APIView):
     def get(self, request, pk):
         try:
             e = Enrollment.objects.select_related(
-                "student", "campus", "program", "course", "academic_year",
+                "student", "campus", "program", "academic_year",
             ).get(pk=pk)
         except Enrollment.DoesNotExist as exc:
             raise Http404 from exc
@@ -332,7 +332,7 @@ class FeesMeView(_StudentMixin, APIView):
     def get(self, request):
         student = self._student(request)
         enrollments = list(student.enrollments.select_related(
-            "campus", "program", "course", "academic_year", "batch",
+            "campus", "program", "academic_year", "batch",
         ))
         result = []
         for e in enrollments:

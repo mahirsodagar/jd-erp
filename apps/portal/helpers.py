@@ -35,14 +35,14 @@ def resolve_portal_context(user) -> PortalContext | None:
         return None
     enrollment = (student.enrollments
                   .filter(status=Enrollment.Status.ACTIVE)
-                  .select_related("batch", "semester", "course",
+                  .select_related("batch", "semester",
                                    "program", "academic_year")
                   .order_by("-created_on")
                   .first())
     if enrollment is None:
         # Fall back to most recent of any status
         enrollment = (student.enrollments
-                      .select_related("batch", "semester", "course",
+                      .select_related("batch", "semester",
                                        "program", "academic_year")
                       .order_by("-created_on")
                       .first())

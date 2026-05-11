@@ -80,10 +80,6 @@ class Student(models.Model):
     program = models.ForeignKey(
         "master.Program", on_delete=models.PROTECT, related_name="students",
     )
-    course = models.ForeignKey(
-        "master.Course", null=True, blank=True,
-        on_delete=models.SET_NULL, related_name="students",
-    )
     academic_year = models.ForeignKey(
         "master.AcademicYear", on_delete=models.PROTECT, related_name="students",
     )
@@ -229,10 +225,6 @@ class Enrollment(models.Model):
     )
     program = models.ForeignKey(
         "master.Program", on_delete=models.PROTECT, related_name="enrollments",
-    )
-    course = models.ForeignKey(
-        "master.Course", null=True, blank=True,
-        on_delete=models.PROTECT, related_name="enrollments",
     )
     semester = models.ForeignKey(
         "master.Semester", on_delete=models.PROTECT, related_name="enrollments",

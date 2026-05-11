@@ -6,7 +6,7 @@ from rest_framework.views import APIView
 from apps.accounts.permissions import HasPerm
 
 from .models import (
-    AcademicYear, Batch, Campus, City, Classroom, Course, CourseSubject,
+    AcademicYear, Batch, Campus, City, Classroom,
     Degree, FeeTemplate, Institute, LeadSource, Program, Semester,
     State, Subject, TimeSlot,
 )
@@ -16,8 +16,6 @@ from .serializers import (
     CampusSerializer,
     CitySerializer,
     ClassroomSerializer,
-    CourseSerializer,
-    CourseSubjectSerializer,
     DegreeSerializer,
     FeeTemplateSerializer,
     InstituteSerializer,
@@ -297,26 +295,6 @@ class DegreeDetailView(_DetailBase):
     required_perm = "master.degree.manage"
 
 
-class CourseListCreateView(_ListCreateBase):
-    model = Course
-    serializer = CourseSerializer
-    required_perm = "master.course.manage"
-
-    def get(self, request):
-        qs = Course.objects.select_related("program")
-        if v := request.query_params.get("program"):
-            qs = qs.filter(program_id=v)
-        if request.query_params.get("active") == "1":
-            qs = qs.filter(is_active=True)
-        return Response(CourseSerializer(qs, many=True).data)
-
-
-class CourseDetailView(_DetailBase):
-    model = Course
-    serializer = CourseSerializer
-    required_perm = "master.course.manage"
-
-
 class SemesterListCreateView(_ListCreateBase):
     model = Semester
     serializer = SemesterSerializer
@@ -362,26 +340,6 @@ class SubjectListCreateView(_ListCreateBase):
 class SubjectDetailView(_DetailBase):
     model = Subject
     serializer = SubjectSerializer
-    required_perm = "master.subject.manage"
-
-
-class CourseSubjectListCreateView(_ListCreateBase):
-    model = CourseSubject
-    serializer = CourseSubjectSerializer
-    required_perm = "master.subject.manage"
-
-    def get(self, request):
-        qs = CourseSubject.objects.select_related("course", "subject")
-        if v := request.query_params.get("course"):
-            qs = qs.filter(course_id=v)
-        if v := request.query_params.get("subject"):
-            qs = qs.filter(subject_id=v)
-        return Response(CourseSubjectSerializer(qs, many=True).data)
-
-
-class CourseSubjectDetailView(_DetailBase):
-    model = CourseSubject
-    serializer = CourseSubjectSerializer
     required_perm = "master.subject.manage"
 
 
@@ -432,7 +390,7 @@ class FeeTemplateListCreateView(_ListCreateBase):
 
     def get(self, request):
         qs = FeeTemplate.objects.select_related(
-            "academic_year", "campus", "program", "course",
+            "academic_year", "campus", "program",
         )
         if v := request.query_params.get("academic_year"):
             qs = qs.filter(academic_year_id=v)
@@ -440,8 +398,6 @@ class FeeTemplateListCreateView(_ListCreateBase):
             qs = qs.filter(campus_id=v)
         if v := request.query_params.get("program"):
             qs = qs.filter(program_id=v)
-        if v := request.query_params.get("course"):
-            qs = qs.filter(course_id=v)
         if request.query_params.get("active") == "1":
             qs = qs.filter(is_active=True)
         return Response(FeeTemplateSerializer(qs, many=True).data)

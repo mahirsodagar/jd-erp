@@ -24,7 +24,7 @@ class StudentAdmin(admin.ModelAdmin):
         "father_name", "mother_name",
     )
     autocomplete_fields = (
-        "institute", "campus", "program", "course", "academic_year",
+        "institute", "campus", "program", "academic_year",
         "current_city", "current_state", "permanent_city", "permanent_state",
         "user_account", "lead_origin",
     )
@@ -47,7 +47,7 @@ class EnrollmentAdmin(admin.ModelAdmin):
         "batch__name",
     )
     autocomplete_fields = (
-        "student", "program", "course", "semester",
+        "student", "program", "semester",
         "campus", "batch", "academic_year", "entry_user",
     )
     readonly_fields = ("created_on", "updated_on")

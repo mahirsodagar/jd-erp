@@ -143,29 +143,6 @@ class Degree(models.Model):
         return self.name
 
 
-class Course(models.Model):
-    """Specific course/track inside a Program (e.g. "B.Des. Fashion Year 1").
-    Carries the syllabus/semester structure. Used by Student.course_id and
-    Enrollment.course."""
-
-    name = models.CharField(max_length=160)
-    code = models.CharField(max_length=30, unique=True)
-    program = models.ForeignKey(
-        "master.Program", on_delete=models.PROTECT, related_name="courses",
-    )
-    duration_months = models.PositiveSmallIntegerField(null=True, blank=True)
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ("name",)
-        unique_together = (("name", "program"),)
-
-    def __str__(self):
-        return f"{self.name} ({self.code})"
-
-
 class Semester(models.Model):
     """Sem 1..N. Numbered for sorting."""
 
@@ -214,15 +191,13 @@ class Batch(models.Model):
 
 
 class Subject(models.Model):
-    """Taught entity. A `Course` ("Year 1 Sem 1") is a container of
-    several Subjects. The same Subject can appear in many Courses."""
+    """Taught entity. Subjects are stand-alone — the curriculum linkage
+    (which subjects belong to which Program) is implicit via ScheduleSlot
+    (batch → program). Add a `Subject.programs` M2M later if explicit
+    linkage becomes needed."""
 
     name = models.CharField(max_length=160)
     code = models.CharField(max_length=30, unique=True)
-    courses = models.ManyToManyField(
-        "master.Course", through="master.CourseSubject",
-        related_name="subjects", blank=True,
-    )
     credits = models.PositiveSmallIntegerField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -233,18 +208,6 @@ class Subject(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.code})"
-
-
-class CourseSubject(models.Model):
-    """Through table — controls ordering inside a course."""
-    course = models.ForeignKey("master.Course", on_delete=models.CASCADE)
-    subject = models.ForeignKey(Subject, on_delete=models.CASCADE)
-    sort_order = models.PositiveSmallIntegerField(default=100)
-    is_active = models.BooleanField(default=True)
-
-    class Meta:
-        unique_together = (("course", "subject"),)
-        ordering = ("course", "sort_order")
 
 
 class Classroom(models.Model):
@@ -296,9 +259,9 @@ class TimeSlot(models.Model):
 class FeeTemplate(models.Model):
     """Fee structure for an enrollment context (PHP `fee_master`).
 
-    Keyed on (academic_year, campus, program, course). The template
-    holds the headline numbers; per-student installments + receipts
-    live in the `fees` app.
+    Keyed on (academic_year, campus, program). The template holds the
+    headline numbers; per-student installments + receipts live in the
+    `fees` app.
     """
 
     name = models.CharField(max_length=200)
@@ -310,11 +273,6 @@ class FeeTemplate(models.Model):
     )
     program = models.ForeignKey(
         "master.Program", on_delete=models.PROTECT, related_name="fee_templates",
-    )
-    course = models.ForeignKey(
-        "master.Course", null=True, blank=True,
-        on_delete=models.PROTECT, related_name="fee_templates",
-        help_text="Optional — leave blank if the same fee covers the whole program.",
     )
 
     application_fee = models.DecimalField(

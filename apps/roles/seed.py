@@ -56,7 +56,6 @@ CATALOGUE = [
     # Module E.1 — Admissions + new masters
     ("master", "master.academicyear.manage", "Manage academic years"),
     ("master", "master.degree.manage", "Manage degrees"),
-    ("master", "master.course.manage", "Manage courses"),
     ("master", "master.semester.manage", "Manage semesters"),
     ("master", "master.batch.manage", "Manage batches"),
 

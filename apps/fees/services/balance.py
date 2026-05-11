@@ -19,9 +19,8 @@ def _decimal(v) -> Decimal:
 def enrollment_balance(enrollment) -> dict:
     """Headline numbers for an enrollment:
 
-      total_fee        — from the linked FeeTemplate (current rule:
-                          look up the active template by
-                          (academic_year, campus, program, course)).
+      total_fee        — from the active FeeTemplate matching
+                          (academic_year, campus, program).
       concession_total — sum of approved concessions.
       paid_total       — sum of active receipts.
       payable          — total_fee − concession_total.
@@ -33,18 +32,8 @@ def enrollment_balance(enrollment) -> dict:
         academic_year=enrollment.academic_year,
         campus=enrollment.campus,
         program=enrollment.program,
-        course=enrollment.course,
         is_active=True,
     ).first()
-    if tmpl is None:
-        # Fall back: same context but course=None.
-        tmpl = FeeTemplate.objects.filter(
-            academic_year=enrollment.academic_year,
-            campus=enrollment.campus,
-            program=enrollment.program,
-            course__isnull=True,
-            is_active=True,
-        ).first()
     total_fee = _decimal(getattr(tmpl, "total_fee", None))
 
     concession_total = _decimal(
