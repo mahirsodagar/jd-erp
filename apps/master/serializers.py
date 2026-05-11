@@ -8,15 +8,18 @@ from .models import (
 
 
 class CampusSerializer(serializers.ModelSerializer):
+    institute_name = serializers.CharField(source="institute.name", read_only=True, default="")
     program_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Campus
         fields = [
-            "id", "name", "code", "city", "state",
+            "id", "name", "code",
+            "institute", "institute_name",
+            "city", "state",
             "is_active", "program_count", "created_at", "updated_at",
         ]
-        read_only_fields = ["id", "program_count", "created_at", "updated_at"]
+        read_only_fields = ["id", "institute_name", "program_count", "created_at", "updated_at"]
 
     def get_program_count(self, obj):
         return obj.programs.count()

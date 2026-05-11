@@ -40,21 +40,33 @@ class TenantTokenObtainSerializer(serializers.Serializer):
 class UserSerializer(serializers.ModelSerializer):
     roles = serializers.SerializerMethodField()
     campuses = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+    is_student = serializers.SerializerMethodField()
+    is_employee = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = [
             "id", "username", "email", "full_name",
             "is_active", "is_staff", "is_superuser",
+            "is_student", "is_employee",
             "campuses",
             "date_joined", "last_login", "roles",
         ]
         read_only_fields = [
-            "id", "is_superuser", "date_joined", "last_login", "roles", "campuses",
+            "id", "is_superuser", "date_joined", "last_login",
+            "roles", "campuses", "is_student", "is_employee",
         ]
 
     def get_roles(self, obj):
         return list(obj.roles.values_list("name", flat=True))
+
+    def get_is_student(self, obj):
+        # Reverse OneToOne from admissions.Student.user_account
+        return getattr(obj, "student", None) is not None
+
+    def get_is_employee(self, obj):
+        # Reverse OneToOne from employees.Employee.user_account
+        return getattr(obj, "employee", None) is not None
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
