@@ -96,9 +96,29 @@ class UserListCreateView(APIView):
     required_perm = "accounts.user.manage"
 
     def get(self, request):
-        return Response(
-            UserSerializer(User.objects.all().order_by("-id"), many=True).data
-        )
+        # `select_related` on the reverse OneToOne avoids the N+1 the
+        # serializer would otherwise trigger when computing
+        # is_student / is_employee.
+        qs = User.objects.select_related("student", "employee").order_by("-id")
+
+        params = request.query_params
+        if params.get("exclude_students") == "1":
+            qs = qs.filter(student__isnull=True)
+        if params.get("exclude_employees") == "1":
+            qs = qs.filter(employee__isnull=True)
+        if (q := params.get("search")):
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(username__icontains=q)
+                | Q(email__icontains=q)
+                | Q(full_name__icontains=q)
+            )
+        if params.get("active") == "1":
+            qs = qs.filter(is_active=True)
+        elif params.get("active") == "0":
+            qs = qs.filter(is_active=False)
+
+        return Response(UserSerializer(qs, many=True).data)
 
     def post(self, request):
         serializer = UserCreateSerializer(data=request.data)
