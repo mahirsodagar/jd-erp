@@ -5,6 +5,10 @@ from apps.academics.models import (
     TestResponse,
 )
 from apps.admissions.models import Student, StudentDocument
+from apps.common.file_validation import (
+    DOCUMENT_MIMES, IMAGE_MIMES, IMAGE_OR_PDF_MIMES,
+    SecureFileField,
+)
 from apps.courseware.models import CoursewareTopic
 from apps.student_leaves.models import StudentLeaveApplication
 
@@ -92,7 +96,13 @@ class PortalAssignmentSerializer(serializers.ModelSerializer):
 
 
 class SubmitAssignmentSerializer(serializers.Serializer):
-    file = serializers.FileField(required=False)
+    # Content-validated: PDF / Word / Excel / PowerPoint. Size cap 50 MB.
+    # libmagic sniffs the magic bytes; mismatched extensions are rejected.
+    file = SecureFileField(
+        required=False,
+        allowed_mimes=DOCUMENT_MIMES | IMAGE_MIMES,  # docs OR a photo
+        max_size_mb=50,
+    )
     text_response = serializers.CharField(required=False, allow_blank=True,
                                            max_length=8000)
 
@@ -100,10 +110,6 @@ class SubmitAssignmentSerializer(serializers.Serializer):
         if not attrs.get("file") and not attrs.get("text_response"):
             raise serializers.ValidationError(
                 "Provide a file or a text_response.",
-            )
-        if (f := attrs.get("file")) and f.size > 50 * 1024 * 1024:
-            raise serializers.ValidationError(
-                {"file": "Max 50 MB."},
             )
         return attrs
 
