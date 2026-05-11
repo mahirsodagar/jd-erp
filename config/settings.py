@@ -127,11 +127,19 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.UserRateThrottle",
     ),
     "DEFAULT_THROTTLE_RATES": {
+        # Authenticated users: ~100 requests/minute is plenty for normal
+        # SPA traffic (page loads fanout to ~5 endpoints + react-query
+        # dedupes); attackers / runaway scripts trip it long before
+        # they can do damage.
+        "user": env("THROTTLE_USER", default="100/min"),
+        # Anonymous (unauthenticated) callers — same target.
         "anon": env("THROTTLE_ANON", default="60/min"),
-        "user": env("THROTTLE_USER", default="2000/hour"),
+        # Auth-sensitive endpoints (login, refresh) — tight bucket per IP.
         "login": env("THROTTLE_LOGIN", default="10/min"),
-        "lead_intake": env("THROTTLE_LEAD_INTAKE", default="120/hour"),
+        # Password-change per user — tighter than the general user rate.
         "password_change": env("THROTTLE_PASSWORD_CHANGE", default="5/min"),
+        # Public lead intake — per (API key, IP).
+        "lead_intake": env("THROTTLE_LEAD_INTAKE", default="120/hour"),
     },
 }
 
