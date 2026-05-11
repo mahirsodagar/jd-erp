@@ -21,6 +21,7 @@ from apps.academics.models import (
 )
 from apps.academics import test_service as test_svc
 from apps.admissions.models import Student, StudentDocument
+from apps.common.throttles import PasswordChangeThrottle
 from apps.courseware.models import CoursewareMapping, CoursewareTopic
 from apps.master.models import Batch, Subject
 from apps.student_leaves import services as leave_svc
@@ -64,6 +65,7 @@ class MeView(APIView):
 
 class ChangePasswordView(APIView):
     permission_classes = [IsStudentOrParent]
+    throttle_classes = [PasswordChangeThrottle]
 
     def post(self, request):
         s = ChangePasswordSerializer(data=request.data)

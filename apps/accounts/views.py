@@ -14,6 +14,7 @@ from apps.audit.events import (
     record_password_change,
     record_password_reset,
 )
+from apps.common.throttles import LoginRateThrottle, PasswordChangeThrottle
 
 from .permissions import HasPerm
 from .serializers import (
@@ -31,6 +32,7 @@ User = get_user_model()
 class LoginView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
+    throttle_classes = [LoginRateThrottle]
 
     def post(self, request):
         serializer = TenantTokenObtainSerializer(
@@ -52,8 +54,11 @@ class LoginView(APIView):
         )
 
 
-# Use simplejwt's built-in refresh — rotation + blacklist already configured
-RefreshView = TokenRefreshView
+# SimpleJWT's TokenRefreshView (rotation + blacklist already configured),
+# subclassed only to attach the login throttle so refresh shares the same
+# 10/min IP budget as login.
+class RefreshView(TokenRefreshView):
+    throttle_classes = [LoginRateThrottle]
 
 
 class LogoutView(APIView):
@@ -79,6 +84,7 @@ class MeView(APIView):
 
 class ChangePasswordView(APIView):
     permission_classes = [IsAuthenticated]
+    throttle_classes = [PasswordChangeThrottle]
 
     def post(self, request):
         serializer = ChangePasswordSerializer(

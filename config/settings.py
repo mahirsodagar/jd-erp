@@ -131,6 +131,7 @@ REST_FRAMEWORK = {
         "user": env("THROTTLE_USER", default="2000/hour"),
         "login": env("THROTTLE_LOGIN", default="10/min"),
         "lead_intake": env("THROTTLE_LEAD_INTAKE", default="120/hour"),
+        "password_change": env("THROTTLE_PASSWORD_CHANGE", default="5/min"),
     },
 }
 

@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import HasPerm
+from apps.common.throttles import LeadIntakeThrottle
 
 from .intake_auth import HasIntakeApiKey
 from .models import (
@@ -384,10 +385,14 @@ class LeadPromoteView(APIView):
 
 class LeadIntakeView(APIView):
     """Public endpoint for automated lead sources (website forms, ad
-    platforms, etc.). Auth via static API key, NOT JWT."""
+    platforms, etc.). Auth via static API key, NOT JWT.
+
+    Rate-limited per (API key, IP) — 120/hour by default. Override via
+    THROTTLE_LEAD_INTAKE env var."""
 
     authentication_classes = []
     permission_classes = [HasIntakeApiKey]
+    throttle_classes = [LeadIntakeThrottle]
 
     def post(self, request):
         s = LeadIntakeSerializer(data=request.data)
