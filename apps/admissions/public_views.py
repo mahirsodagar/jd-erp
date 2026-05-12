@@ -70,6 +70,10 @@ class PublicApplicationView(APIView):
                 return None
 
         payload = {
+            # Student-overridable placement.
+            "campus": _int_or_none("campus"),
+            "program": _int_or_none("program"),
+            "course": _int_or_none("course"),
             "student_name": request.data.get("student_name"),
             "father_name": request.data.get("father_name", ""),
             "mother_name": request.data.get("mother_name", ""),
@@ -124,22 +128,47 @@ class PublicApplicationView(APIView):
 def _prefill(lead: Lead) -> dict:
     """Minimal payload the public form needs — never leaks lead status,
     history, internal ids beyond what the student already typed."""
-    from apps.master.models import City, State
+    from apps.master.models import Campus, City, Course, Program, State
+    # Programs need their campus links so the form can filter the
+    # Program dropdown by selected Campus.
+    programs = []
+    for p in (
+        Program.objects.filter(is_active=True)
+        .prefetch_related("campuses")
+        .order_by("name")
+    ):
+        programs.append({
+            "id": p.id, "name": p.name, "code": p.code,
+            "campus_ids": list(p.campuses.values_list("id", flat=True)),
+        })
+    courses = list(
+        Course.objects.filter(is_active=True)
+        .values("id", "name", "code", "program").order_by("name")
+    )
     return {
         "name": lead.name,
         "email": lead.email,
         "phone": lead.phone,
+        # Lead's chosen campus / program are the defaults; the form
+        # may let the student change them.
         "campus": {"id": lead.campus_id, "name": lead.campus.name,
                    "code": lead.campus.code},
         "program": {"id": lead.program_id, "name": lead.program.name,
                     "code": lead.program.code},
         "institute": (
             {"id": lead.campus.institute_id,
+             "code": getattr(lead.campus.institute, "code", ""),
              "name": getattr(lead.campus.institute, "name", "")}
             if lead.campus.institute_id else None
         ),
         # Reference data the form needs — bundled here so the form
         # makes a single round-trip and stays unauthenticated.
+        "campuses": list(
+            Campus.objects.filter(is_active=True)
+            .values("id", "name", "code", "institute").order_by("name")
+        ),
+        "programs": programs,
+        "courses": courses,
         "states": list(
             State.objects.values("id", "name", "code").order_by("name")
         ),

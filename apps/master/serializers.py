@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from .models import (
-    AcademicYear, Batch, Campus, City, Classroom,
+    AcademicYear, Batch, Campus, City, Classroom, Course,
     Degree, FeeTemplate, Institute, LeadSource, Program, Semester,
     State, Subject, TimeSlot,
 )
@@ -88,6 +88,17 @@ class SemesterSerializer(serializers.ModelSerializer):
         read_only_fields = ["id"]
 
 
+class CourseSerializer(serializers.ModelSerializer):
+    program_name = serializers.CharField(source="program.name", read_only=True)
+
+    class Meta:
+        model = Course
+        fields = ["id", "name", "code", "program", "program_name",
+                  "duration_months", "is_active",
+                  "created_at", "updated_at"]
+        read_only_fields = ["id", "program_name", "created_at", "updated_at"]
+
+
 class BatchSerializer(serializers.ModelSerializer):
     program_name = serializers.CharField(source="program.name", read_only=True)
     campus_name = serializers.CharField(source="campus.name", read_only=True)
@@ -150,6 +161,7 @@ class FeeTemplateSerializer(serializers.ModelSerializer):
     academic_year_code = serializers.CharField(source="academic_year.code", read_only=True)
     campus_name = serializers.CharField(source="campus.name", read_only=True)
     program_name = serializers.CharField(source="program.name", read_only=True)
+    course_name = serializers.CharField(source="course.name", read_only=True, default="")
 
     class Meta:
         model = FeeTemplate
@@ -158,13 +170,14 @@ class FeeTemplateSerializer(serializers.ModelSerializer):
             "academic_year", "academic_year_code",
             "campus", "campus_name",
             "program", "program_name",
+            "course", "course_name",
             "application_fee", "course_fee", "other_fee", "total_fee",
             "notes", "is_active",
             "created_at", "updated_at",
         ]
         read_only_fields = [
             "id", "academic_year_code", "campus_name", "program_name",
-            "created_at", "updated_at",
+            "course_name", "created_at", "updated_at",
         ]
 
 

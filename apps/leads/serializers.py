@@ -118,6 +118,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
             "occurrence_number",
             "alternative_phone", "alternative_email",
             "phone_normalized",
+            "application_token", "application_token_sent_at",
             "created_by", "created_by_name",
             "created_at", "updated_at",
             "utm",

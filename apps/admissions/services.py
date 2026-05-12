@@ -156,14 +156,48 @@ def submit_application_from_lead(*, lead: Lead, payload: dict) -> tuple[Student,
     if lead.application_token is None:
         raise ValueError("This application link is no longer valid.")
 
-    institute = getattr(lead.campus, "institute", None)
+    # Campus / program / course may be overridden by the form. Resolve
+    # them, then derive Institute from the *chosen* campus so the form's
+    # institute branding stays consistent with the saved record.
+    from apps.master.models import AcademicYear, Campus, Course, Program
+    campus = lead.campus
+    if payload.get("campus"):
+        try:
+            campus = Campus.objects.get(pk=payload["campus"])
+        except Campus.DoesNotExist:
+            raise ValueError("Selected campus does not exist.")
+    program = lead.program
+    if payload.get("program"):
+        try:
+            program = Program.objects.get(pk=payload["program"])
+        except Program.DoesNotExist:
+            raise ValueError("Selected program does not exist.")
+        # Validate program is offered at the chosen campus.
+        if not program.campuses.filter(pk=campus.pk).exists():
+            raise ValueError(
+                f"Program '{program.name}' is not offered at "
+                f"campus '{campus.name}'.",
+            )
+
+    course = None
+    if payload.get("course"):
+        try:
+            course = Course.objects.get(pk=payload["course"])
+        except Course.DoesNotExist:
+            raise ValueError("Selected course does not exist.")
+        if course.program_id != program.id:
+            raise ValueError(
+                f"Course '{course.name}' is not part of "
+                f"program '{program.name}'.",
+            )
+
+    institute = getattr(campus, "institute", None)
     if institute is None:
         raise ValueError(
-            f"Campus '{lead.campus.code}' has no parent Institute set; "
+            f"Campus '{campus.code}' has no parent Institute set; "
             "fix the campus master before accepting applications."
         )
 
-    from apps.master.models import AcademicYear
     acad_year = AcademicYear.objects.filter(is_current=True).first()
     if acad_year is None:
         raise ValueError("No current AcademicYear is set; create one first.")
@@ -179,7 +213,7 @@ def submit_application_from_lead(*, lead: Lead, payload: dict) -> tuple[Student,
         full_name=payload.get("student_name") or lead.name,
         password=temp_password,
     )
-    user.campuses.add(lead.campus)
+    user.campuses.add(campus)
 
     app_id = generate_application_form_id(institute_code=institute.code)
     student = Student.objects.create(
@@ -194,8 +228,9 @@ def submit_application_from_lead(*, lead: Lead, payload: dict) -> tuple[Student,
         nationality=payload.get("nationality") or Student.Nationality.INDIAN,
         blood_group=payload.get("blood_group", ""),
         institute=institute,
-        campus=lead.campus,
-        program=lead.program,
+        campus=campus,
+        program=program,
+        course=course,
         academic_year=acad_year,
         current_address=payload.get("current_address", ""),
         current_city_id=payload.get("current_city"),

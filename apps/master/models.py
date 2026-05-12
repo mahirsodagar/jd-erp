@@ -129,6 +129,28 @@ class AcademicYear(models.Model):
         return self.full_name or self.code
 
 
+class Course(models.Model):
+    """Specific course/track inside a Program (e.g. "B.Des. Fashion Year 1").
+    Used by Student.course and Enrollment.course."""
+
+    name = models.CharField(max_length=160)
+    code = models.CharField(max_length=30, unique=True)
+    program = models.ForeignKey(
+        "master.Program", on_delete=models.PROTECT, related_name="courses",
+    )
+    duration_months = models.PositiveSmallIntegerField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("name",)
+        unique_together = (("name", "program"),)
+
+    def __str__(self):
+        return f"{self.name} ({self.code})"
+
+
 class Degree(models.Model):
     """UG / PG / Diploma / Certificate."""
 
@@ -273,6 +295,11 @@ class FeeTemplate(models.Model):
     )
     program = models.ForeignKey(
         "master.Program", on_delete=models.PROTECT, related_name="fee_templates",
+    )
+    course = models.ForeignKey(
+        "master.Course", null=True, blank=True,
+        on_delete=models.PROTECT, related_name="fee_templates",
+        help_text="Optional — leave blank for program-wide fee.",
     )
 
     application_fee = models.DecimalField(

@@ -24,6 +24,7 @@ class StudentListSerializer(serializers.ModelSerializer):
 class StudentDetailSerializer(serializers.ModelSerializer):
     campus_name = serializers.CharField(source="campus.name", read_only=True)
     program_name = serializers.CharField(source="program.name", read_only=True)
+    course_name = serializers.CharField(source="course.name", read_only=True, default="")
     institute_name = serializers.CharField(source="institute.name", read_only=True)
     academic_year_code = serializers.CharField(source="academic_year.code", read_only=True)
     photo_url = serializers.SerializerMethodField()
@@ -38,6 +39,7 @@ class StudentDetailSerializer(serializers.ModelSerializer):
             "institute", "institute_name",
             "campus", "campus_name",
             "program", "program_name",
+            "course", "course_name",
             "academic_year", "academic_year_code",
             "current_address", "current_city", "current_state", "current_pincode",
             "permanent_address", "permanent_city", "permanent_state", "permanent_pincode",
@@ -52,7 +54,7 @@ class StudentDetailSerializer(serializers.ModelSerializer):
             "id", "application_form_id",
             "user_account", "parent_user_account", "lead_origin",
             "created_by", "created_on", "updated_by", "updated_on",
-            "campus_name", "program_name",
+            "campus_name", "program_name", "course_name",
             "institute_name", "academic_year_code", "photo_url",
         ]
 
@@ -89,7 +91,7 @@ class StudentHRUpdateSerializer(serializers.ModelSerializer):
             "student_name", "father_name", "mother_name",
             "gender", "dob", "category", "study_medium",
             "nationality", "blood_group",
-            "institute", "campus", "program", "academic_year",
+            "institute", "campus", "program", "course", "academic_year",
             "current_address", "current_city", "current_state", "current_pincode",
             "permanent_address", "permanent_city", "permanent_state", "permanent_pincode",
             "student_mobile", "father_mobile", "mother_mobile",
@@ -120,6 +122,7 @@ class EnrollmentSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source="student.student_name", read_only=True)
     student_application_id = serializers.CharField(source="student.application_form_id", read_only=True)
     program_name = serializers.CharField(source="program.name", read_only=True)
+    course_name = serializers.CharField(source="course.name", read_only=True, default="")
     batch_name = serializers.CharField(source="batch.name", read_only=True)
     campus_name = serializers.CharField(source="campus.name", read_only=True)
     academic_year_code = serializers.CharField(source="academic_year.code", read_only=True)
@@ -131,6 +134,7 @@ class EnrollmentSerializer(serializers.ModelSerializer):
             "id",
             "student", "student_name", "student_application_id",
             "program", "program_name",
+            "course", "course_name",
             "semester", "semester_name",
             "campus", "campus_name",
             "batch", "batch_name",
@@ -141,7 +145,7 @@ class EnrollmentSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id", "student_name", "student_application_id",
-            "program_name", "semester_name", "campus_name",
+            "program_name", "course_name", "semester_name", "campus_name",
             "batch_name", "academic_year_code",
             "entry_user", "created_on", "updated_on",
         ]

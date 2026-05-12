@@ -6,7 +6,7 @@ from rest_framework.views import APIView
 from apps.accounts.permissions import HasPerm
 
 from .models import (
-    AcademicYear, Batch, Campus, City, Classroom,
+    AcademicYear, Batch, Campus, City, Classroom, Course,
     Degree, FeeTemplate, Institute, LeadSource, Program, Semester,
     State, Subject, TimeSlot,
 )
@@ -16,6 +16,7 @@ from .serializers import (
     CampusSerializer,
     CitySerializer,
     ClassroomSerializer,
+    CourseSerializer,
     DegreeSerializer,
     FeeTemplateSerializer,
     InstituteSerializer,
@@ -293,6 +294,18 @@ class DegreeDetailView(_DetailBase):
     model = Degree
     serializer = DegreeSerializer
     required_perm = "master.degree.manage"
+
+
+class CourseListCreateView(_ListCreateBase):
+    model = Course
+    serializer = CourseSerializer
+    required_perm = "master.course.manage"
+
+
+class CourseDetailView(_DetailBase):
+    model = Course
+    serializer = CourseSerializer
+    required_perm = "master.course.manage"
 
 
 class SemesterListCreateView(_ListCreateBase):
