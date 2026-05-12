@@ -184,7 +184,7 @@ LEAVES_HR_INBOX = env("LEAVES_HR_INBOX", default="leave@jdinstitute.edu.in")
 # Used to build the public application form URL embedded in SMS/email.
 # Should point at the React app's host root (no trailing slash).
 FRONTEND_BASE_URL = env(
-    "FRONTEND_BASE_URL", default="http://localhost:5173",
+    "FRONTEND_BASE_URL", default="https://jdsd.netlify.app",
 )
 
 

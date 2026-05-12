@@ -99,7 +99,7 @@ def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict
     # On static hosts (Netlify) without SPA fallback rewrites, a `#`-less
     # URL like `/apply/{token}` would 404 on direct hit.
     token = _ensure_token(lead)
-    base = getattr(settings, "FRONTEND_BASE_URL", "http://localhost:5173").rstrip("/")
+    base = getattr(settings, "FRONTEND_BASE_URL", "https://jdsd.netlify.app").rstrip("/")
     long_url = f"{base}/#/apply/{token}"
     short_url = shorten(long_url)
 
