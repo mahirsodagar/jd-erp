@@ -81,13 +81,39 @@ def _dispatch_now(tmpl, recipient, cc, context, ct, oid,
                   scheduled=None) -> NotificationDispatchLog:
     subject = _render(tmpl.subject_template, context)
     body = _render(tmpl.body_template, context)
-    return NotificationDispatchLog.objects.create(
+
+    log = NotificationDispatchLog.objects.create(
         channel=tmpl.channel, template_key=tmpl.key,
         recipient=recipient, cc=cc,
         subject=subject, body=body,
         status=NotificationDispatchLog.Status.QUEUED,
         content_type=ct, object_id=oid, scheduled=scheduled,
     )
+
+    # Real outbound: SMS / EMAIL. Other channels (WhatsApp, in-CRM)
+    # stay queued until a driver lands.
+    Channel = NotificationTemplate.Channel
+    if tmpl.channel == Channel.SMS:
+        from .sms import send_sms
+        ok, payload = send_sms(
+            recipient=recipient, body=body, template_key=tmpl.key,
+        )
+        log.status = (NotificationDispatchLog.Status.SENT if ok
+                      else NotificationDispatchLog.Status.FAILED)
+        log.error = "" if ok else payload
+        log.save(update_fields=["status", "error"])
+    elif tmpl.channel == Channel.EMAIL:
+        from .email import send_email
+        ok, payload = send_email(
+            recipient=recipient, cc=cc, subject=subject, body=body,
+            is_html=False,
+        )
+        log.status = (NotificationDispatchLog.Status.SENT if ok
+                      else NotificationDispatchLog.Status.FAILED)
+        log.error = "" if ok else payload
+        log.save(update_fields=["status", "error"])
+
+    return log
 
 
 def process_due(*, batch_size: int = 200) -> dict:

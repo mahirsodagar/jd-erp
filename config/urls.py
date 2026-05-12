@@ -3,8 +3,13 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
+from apps.admissions.public_views import PublicApplicationView
+
 urlpatterns = [
     path("admin/", admin.site.urls),
+    # Public, no-auth student application form (tokenized).
+    path("api/public/application/<uuid:token>/",
+         PublicApplicationView.as_view(), name="public-application"),
     path("api/", include("apps.accounts.urls")),
     path("api/", include("apps.roles.urls")),
     path("api/audit/", include("apps.audit.urls")),

@@ -24,6 +24,16 @@ class Lead(models.Model):
     )
     alternative_phone = models.CharField(max_length=32, blank=True)
     alternative_email = models.EmailField(blank=True)
+
+    # Self-fill application form token. Generated when staff clicks
+    # "Send application link"; cleared once the student submits the
+    # form. NULL = no pending application link.
+    application_token = models.UUIDField(
+        null=True, blank=True, unique=True, db_index=True,
+        help_text="One-shot token used by the public application form.",
+    )
+    application_token_sent_at = models.DateTimeField(null=True, blank=True)
+
     occurrence_number = models.PositiveSmallIntegerField(
         default=1, db_index=True,
         help_text="1=Primary, 2=Secondary, 3=Tertiary, 4+=Repeated.",

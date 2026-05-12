@@ -27,6 +27,8 @@ Override per environment via env / config.
 
 from __future__ import annotations
 
+import uuid
+
 from django.conf import settings
 from django.utils import timezone
 
@@ -40,12 +42,14 @@ from .models import Lead, LeadCommunication
 _DEFAULT_LINKS = {
     "JDIFT": {
         "label": "JD Institute of Fashion Technology",
-        "app_url": "https://admin.jediiians.com/admission/jdift_application_link.php?sid={phone}",
+        # `short_name` is the variable the DLT fee template expects.
+        "short_name": "JD Institute",
+        # Pre-shortened fee link from PHP — DLT-approved as-is.
         "fee_url": "https://9cfb.short.gy/jdinst",
     },
     "JDSD": {
         "label": "JD School of Design",
-        "app_url": "https://admin.jediiians.com/admission/jdsd_application_link.php?sid={phone}",
+        "short_name": "JD School",
         "fee_url": "https://9cfb.short.gy/jdsd",
     },
 }
@@ -63,35 +67,58 @@ def _institute_config(institute_key: str) -> dict:
 
 # --- Send actions -----------------------------------------------------------
 
+def _ensure_token(lead: Lead) -> uuid.UUID:
+    """Generate or reuse the lead's application token. Reuses the existing
+    one if present so resending gives the same link."""
+    if lead.application_token is None:
+        lead.application_token = uuid.uuid4()
+        lead.application_token_sent_at = timezone.now()
+        lead.save(update_fields=["application_token", "application_token_sent_at"])
+    else:
+        lead.application_token_sent_at = timezone.now()
+        lead.save(update_fields=["application_token_sent_at"])
+    return lead.application_token
+
+
 def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
     """Queue SMS + email with the application form link, log a
     `LeadCommunication` row.
 
-    Returns dict with ids of the dispatch log + communication row.
+    SMS body matches the PHP-side DLT-approved template
+    (template_id `1307167852052800815`), so the only variables are
+    {name} and {url}, and {url} resolves to a `tinyurl.com/...` slug.
     """
+    from apps.notifications.shorten import shorten
+
     cfg = _institute_config(institute_key)
-    url = cfg["app_url"].format(phone=lead.phone, lead_id=lead.id)
     institute_label = cfg["label"]
 
+    # Build the React app URL the student will open, then shorten it to
+    # match the DLT template format (`tinyurl.com/{slug}`).
+    token = _ensure_token(lead)
+    base = getattr(settings, "FRONTEND_BASE_URL", "http://localhost:5173").rstrip("/")
+    long_url = f"{base}/#/apply/{token}"
+    short_url = shorten(long_url)
+
+    # PHP DLT template wording — keep verbatim.
     sms_body = (
-        f"Dear {lead.name}, thank you for selecting {institute_label}. "
-        f"Please complete your application: {url}"
+        f"Dear {lead.name}, Thank you for selecting JD, Your inquiry has "
+        f"been submitted. Please click the link to complete your "
+        f"application - {short_url}"
     )
-    email_subject = f"{institute_label} — Application Link"
+    email_subject = f"JD Student Application Link : {lead.name}"
     email_body = (
+        "Greetings from JD!\n"
         f"Dear {lead.name},\n\n"
-        f"Thank you for selecting {institute_label}. Please click the "
-        f"link below to complete your application:\n\n{url}\n\n"
-        f"With regards,\n{institute_label}"
+        "Thank you for selecting JD, Your inquiry has been submitted.\n\n"
+        f"Please click the link to complete your application - {long_url}\n\n"
+        "With Regards,\nJD"
     )
 
     sms_log = queue_notification(
         template_key="lead.application_link.sms",
         recipient=lead.phone,
-        context={
-            "name": lead.name, "url": url, "institute": institute_label,
-            "lead_id": lead.id,
-        },
+        context={"name": lead.name, "url": short_url},
         related=lead,
     )
     email_log = None
@@ -100,8 +127,8 @@ def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict
             template_key="lead.application_link.email",
             recipient=lead.email,
             context={
-                "name": lead.name, "url": url, "institute": institute_label,
-                "lead_id": lead.id,
+                "name": lead.name, "url": long_url,
+                "institute": institute_label,
             },
             related=lead,
         )
@@ -119,7 +146,8 @@ def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict
         "sms_log_id": getattr(sms_log, "id", None),
         "email_log_id": getattr(email_log, "id", None),
         "communication_id": comm.id,
-        "url": url,
+        "url": long_url,
+        "short_url": short_url,
         "institute": institute_label,
     }
 
@@ -127,11 +155,15 @@ def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict
 def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
     cfg = _institute_config(institute_key)
     url = cfg["fee_url"]
+    short_name = cfg.get("short_name", cfg["label"])
     institute_label = cfg["label"]
 
+    # PHP DLT template wording (template_id 1307168958796572350).
     sms_body = (
-        f"Dear {lead.name}, greetings from {institute_label}. "
-        f"Please click {url} to pay your fees and complete admission."
+        f"Dear student, Greetings of the day! Thank you for choosing "
+        f"{short_name} for your Design/Art/Media course. Click the "
+        f"following link {url} to pay your fees and complete the "
+        f"admission process. Best Regards JD Admissions Team"
     )
 
     sms_log = queue_notification(

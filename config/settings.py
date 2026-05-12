@@ -179,6 +179,55 @@ LEAVES_EXCLUDE_HOLIDAYS_AND_WEEKENDS = env.bool(
 LEAVES_HR_INBOX = env("LEAVES_HR_INBOX", default="leave@jdinstitute.edu.in")
 
 
+# --- Frontend / public links --------------------------------------------
+
+# Used to build the public application form URL embedded in SMS/email.
+# Should point at the React app's host root (no trailing slash).
+FRONTEND_BASE_URL = env(
+    "FRONTEND_BASE_URL", default="http://localhost:5173",
+)
+
+
+# --- SMS — Bulk SMS Gateway India --------------------------------------
+
+# https://www.bulksmsgateway.in — DLT-compliant transactional SMS.
+# Templates MUST be pre-registered with TRAI/DLT operators; the keys
+# below map our notification template_keys to the registered IDs.
+BULK_SMS_USER = env("BULK_SMS_USER", default="")
+BULK_SMS_PASSWORD = env("BULK_SMS_PASSWORD", default="")
+BULK_SMS_SENDER = env("BULK_SMS_SENDER", default="JDEDUC")
+BULK_SMS_TEMPLATE_IDS = {
+    "lead.application_link.sms": env(
+        "DLT_TPL_APPLICATION_LINK", default="1307167852052800815",
+    ),
+    "lead.fee_link.sms": env(
+        "DLT_TPL_FEE_LINK", default="1307168958796572350",
+    ),
+}
+
+
+# --- Email — Django built-in -------------------------------------------
+
+# Default to console backend so dev works with no SMTP. Override per env:
+#   EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+#   EMAIL_HOST=smtp.gmail.com  EMAIL_PORT=587  EMAIL_USE_TLS=True
+#   EMAIL_HOST_USER=…  EMAIL_HOST_PASSWORD=…
+EMAIL_BACKEND = env(
+    "EMAIL_BACKEND",
+    default="django.core.mail.backends.console.EmailBackend",
+)
+EMAIL_HOST = env("EMAIL_HOST", default="localhost")
+EMAIL_PORT = env.int("EMAIL_PORT", default=25)
+EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
+EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=False)
+EMAIL_USE_SSL = env.bool("EMAIL_USE_SSL", default=False)
+DEFAULT_FROM_EMAIL = env(
+    "DEFAULT_FROM_EMAIL",
+    default="JD Communications <admin.a@jdinstitute.edu.in>",
+)
+
+
 # --- django-axes --------------------------------------------------------
 
 AXES_FAILURE_LIMIT = env.int("AXES_FAILURE_LIMIT", default=5)
