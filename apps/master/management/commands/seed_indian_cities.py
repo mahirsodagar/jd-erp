@@ -1,12 +1,12 @@
 """Seed `master.City` from a free public dataset of Indian cities.
 
-Default source is the open-source `Indian-Cities-JSON-Database`:
+Default source is the open-source `Indian-Cities-JSON`:
 
-    https://github.com/nshntarora/Indian-Cities-JSON-Database
+    https://github.com/nshntarora/Indian-Cities-JSON
 
-The repo ships an `indian_cities.json` array of:
+The repo ships a `cities.json` array of:
 
-    [{"city": "Bangalore", "state": "Karnataka", ...}, ...]
+    [{"id": "1", "name": "Mumbai", "state": "Maharashtra"}, ...]
 
 We match each row's `state` field to an existing `master.State` row by
 NAME (case-insensitive). Cities whose state isn't in the DB yet are
@@ -17,7 +17,7 @@ Idempotent: re-running won't create duplicates (uses
 
 Usage:
     python manage.py seed_indian_cities
-    python manage.py seed_indian_cities --from-file indian_cities.json
+    python manage.py seed_indian_cities --from-file cities.json
     python manage.py seed_indian_cities --url https://...
 """
 
@@ -30,7 +30,7 @@ from apps.master.models import City, State
 
 _DEFAULT_URL = (
     "https://raw.githubusercontent.com/nshntarora/"
-    "Indian-Cities-JSON/blob/master/cities.json"
+    "Indian-Cities-JSON/master/cities.json"
 )
 
 
@@ -54,8 +54,8 @@ class Command(BaseCommand):
             help="JSON key holding the state name (default: 'state').",
         )
         parser.add_argument(
-            "--city-key", default="city",
-            help="JSON key holding the city name (default: 'city').",
+            "--city-key", default="name",
+            help="JSON key holding the city name (default: 'name').",
         )
 
     def handle(self, *args, **opts):
