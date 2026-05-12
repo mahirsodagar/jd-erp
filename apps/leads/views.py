@@ -383,6 +383,99 @@ class LeadPromoteView(APIView):
                         status=http.HTTP_201_CREATED)
 
 
+# --- Send Application / Fee / Welcome links ---------------------------
+
+class _SendLinkBase(APIView):
+    """Shared permission gate + lead lookup for the three Send actions."""
+
+    permission_classes = [IsAuthenticated, LeadVisibility]
+    required_perm = "leads.communication.log"
+
+    def _resolve(self, request, pk):
+        try:
+            lead = Lead.objects.select_related("campus", "program").get(pk=pk)
+        except Lead.DoesNotExist:
+            return None, Response(
+                {"detail": "Lead not found."}, status=http.HTTP_404_NOT_FOUND,
+            )
+        self.check_object_permissions(request, lead)
+        if not (request.user.is_superuser
+                or request.user.roles.filter(
+                    permissions__key=self.required_perm,
+                ).exists()):
+            return None, Response(
+                {"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN,
+            )
+        return lead, None
+
+
+class LeadSendApplicationLinkView(_SendLinkBase):
+    """Body: { "institute": "JDIFT" | "JDSD" }"""
+
+    def post(self, request, pk):
+        from .send_links import send_application_link
+
+        lead, err = self._resolve(request, pk)
+        if err:
+            return err
+
+        institute = request.data.get("institute")
+        if not institute:
+            return Response(
+                {"institute": "Required. e.g. 'JDIFT' or 'JDSD'."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            result = send_application_link(
+                lead=lead, institute_key=institute, actor=request.user,
+            )
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=http.HTTP_400_BAD_REQUEST)
+        return Response(result, status=http.HTTP_201_CREATED)
+
+
+class LeadSendFeeLinkView(_SendLinkBase):
+    """Body: { "institute": "JDIFT" | "JDSD" }"""
+
+    def post(self, request, pk):
+        from .send_links import send_fee_link
+
+        lead, err = self._resolve(request, pk)
+        if err:
+            return err
+
+        institute = request.data.get("institute")
+        if not institute:
+            return Response(
+                {"institute": "Required. e.g. 'JDIFT' or 'JDSD'."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            result = send_fee_link(
+                lead=lead, institute_key=institute, actor=request.user,
+            )
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=http.HTTP_400_BAD_REQUEST)
+        return Response(result, status=http.HTTP_201_CREATED)
+
+
+class LeadSendWelcomeView(_SendLinkBase):
+    """No body. Sends welcome email to lead.email."""
+
+    def post(self, request, pk):
+        from .send_links import send_welcome_message
+
+        lead, err = self._resolve(request, pk)
+        if err:
+            return err
+
+        try:
+            result = send_welcome_message(lead=lead, actor=request.user)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=http.HTTP_400_BAD_REQUEST)
+        return Response(result, status=http.HTTP_201_CREATED)
+
+
 class LeadIntakeView(APIView):
     """Public endpoint for automated lead sources (website forms, ad
     platforms, etc.). Auth via static API key, NOT JWT.

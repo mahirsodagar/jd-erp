@@ -19,6 +19,9 @@ from .views import (
     LeadListCreateView,
     LeadPromoteView,
     LeadReassignView,
+    LeadSendApplicationLinkView,
+    LeadSendFeeLinkView,
+    LeadSendWelcomeView,
     LeadStatusView,
     PoolDetailView,
     PoolListCreateView,
@@ -50,6 +53,13 @@ urlpatterns = [
     path("<int:pk>/reassign/", LeadReassignView.as_view(), name="lead-reassign"),
     path("<int:pk>/promote/", LeadPromoteView.as_view(), name="lead-promote"),
     path("<int:pk>/history/", LeadHistoryView.as_view(), name="lead-history"),
+
+    path("<int:pk>/send-application-link/",
+         LeadSendApplicationLinkView.as_view(), name="lead-send-application-link"),
+    path("<int:pk>/send-fee-link/",
+         LeadSendFeeLinkView.as_view(), name="lead-send-fee-link"),
+    path("<int:pk>/send-welcome/",
+         LeadSendWelcomeView.as_view(), name="lead-send-welcome"),
 
     path("<int:pk>/followups/",
          LeadFollowupListCreateView.as_view(), name="lead-followup-list-create"),

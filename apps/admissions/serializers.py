@@ -45,11 +45,12 @@ class StudentDetailSerializer(serializers.ModelSerializer):
             "student_email", "father_email", "mother_email", "institute_email",
             "father_occupation", "mother_occupation",
             "photo", "photo_url",
-            "user_account", "lead_origin",
+            "user_account", "parent_user_account", "lead_origin",
             "created_by", "created_on", "updated_by", "updated_on",
         ]
         read_only_fields = [
-            "id", "application_form_id", "user_account", "lead_origin",
+            "id", "application_form_id",
+            "user_account", "parent_user_account", "lead_origin",
             "created_by", "created_on", "updated_by", "updated_on",
             "campus_name", "program_name",
             "institute_name", "academic_year_code", "photo_url",
