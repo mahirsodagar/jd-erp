@@ -123,43 +123,122 @@ def promote_lead_to_student(*, lead: Lead, actor=None) -> tuple[Student, dict]:
 
 # --- Public application form (student self-fills via tokenized link) ---
 
+_STUDENT_TEXT_FIELDS = (
+    "student_name", "father_name", "mother_name",
+    "blood_group",
+    "current_address", "current_pincode",
+    "permanent_address", "permanent_pincode",
+    "father_mobile", "mother_mobile",
+    "father_email", "mother_email",
+    "father_occupation", "mother_occupation",
+)
+
+
+def _apply_payload_to_student(student: Student, payload: dict,
+                              *, institute, campus, program,
+                              acad_year, lead: Lead) -> None:
+    """Copy form fields into an existing Student. Used on re-submits.
+    Empty/missing values do NOT overwrite existing data — students fill
+    incrementally."""
+    # Placement
+    student.institute = institute
+    student.campus = campus
+    student.program = program
+    student.academic_year = acad_year
+
+    # Free-text fields — only overwrite when the form sent a non-empty value
+    for field in _STUDENT_TEXT_FIELDS:
+        val = payload.get(field)
+        if val not in (None, ""):
+            setattr(student, field, val)
+
+    # Choice fields — same rule
+    if v := payload.get("gender"):
+        student.gender = v
+    if v := payload.get("dob"):
+        student.dob = v
+    if v := payload.get("category"):
+        student.category = v
+    if v := payload.get("study_medium"):
+        student.study_medium = v
+    if v := payload.get("nationality"):
+        student.nationality = v
+    if v := payload.get("student_mobile"):
+        student.student_mobile = v
+    if v := payload.get("student_email"):
+        student.student_email = v
+
+    # FK ids
+    for fk_attr, payload_key in (
+        ("current_city_id", "current_city"),
+        ("current_state_id", "current_state"),
+        ("permanent_city_id", "permanent_city"),
+        ("permanent_state_id", "permanent_state"),
+    ):
+        v = payload.get(payload_key)
+        if v not in (None, "", "null"):
+            setattr(student, fk_attr, v)
+
+    # Mirror name + email onto the linked User account so the portal
+    # login can find them if the student changed their email.
+    if student.user_account_id and payload.get("student_email"):
+        user = student.user_account
+        if user.email != payload["student_email"]:
+            user.email = payload["student_email"]
+            user.save(update_fields=["email"])
+
+    student.lead_origin = lead
+    student.save()
+
+
+def _upsert_documents(student: Student, docs: list[dict]) -> None:
+    """Upsert by (student, header). Re-submits replace fields under the
+    same header rather than appending duplicates."""
+    from .models import StudentDocument
+    for d in docs:
+        header = d.get("header")
+        if not header:
+            continue
+        StudentDocument.objects.update_or_create(
+            student=student, header=header,
+            defaults={
+                "regno_yearpassing": d.get("regno_yearpassing", ""),
+                "school_college": d.get("school_college", ""),
+                "university_board": d.get("university_board", ""),
+                "certificate_no": d.get("certificate_no", ""),
+                "percent_obtained": d.get("percent_obtained") or None,
+            },
+        )
+
+
 @transaction.atomic
 def submit_application_from_lead(*, lead: Lead, payload: dict) -> tuple[Student, dict]:
-    """Create a Student row from the full self-fill application payload.
+    """Create or update the Student tied to this Lead from the self-fill
+    application payload.
 
-    `payload` shape — only the student-supplied fields are listed; FKs
-    (institute / campus / program / academic_year) come from the lead.
+    Re-submits are allowed by default — the student may fill incrementally
+    after counsellor review. The counsellor can close the form for the
+    student by setting `lead.application_locked_for_student=True`; in
+    that case this raises PermissionError.
 
-        {
-            "student_name", "father_name", "mother_name",
-            "gender", "dob", "category", "study_medium",
-            "nationality", "blood_group", "qualification",
-            "current_address", "current_city" (id), "current_state" (id),
-            "current_pincode",
-            "permanent_address", "permanent_city" (id), "permanent_state" (id),
-            "permanent_pincode",
-            "student_mobile", "father_mobile", "mother_mobile",
-            "student_email", "father_email", "mother_email",
-            "father_occupation", "mother_occupation",
-            "documents": [
-                {
-                    "header", "regno_yearpassing", "school_college",
-                    "university_board", "certificate_no",
-                    "percent_obtained",
-                },
-                ...
-            ],
-        }
+    First submit creates the Student + User account and returns
+    temporary credentials. Subsequent submits update the existing
+    record and return an empty `creds` dict (the student already has
+    their login).
+
+    Documents are upserted by `header` so re-submits replace earlier
+    values under the same header rather than appending duplicates.
     """
-    if hasattr(lead, "promoted_student") and lead.promoted_student is not None:
-        raise ValueError("This application has already been submitted.")
+    if lead.application_locked_for_student:
+        raise PermissionError(
+            "This application form has been closed by your counsellor. "
+            "Please contact us if you need to make further changes."
+        )
     if lead.application_token is None:
         raise ValueError("This application link is no longer valid.")
 
-    # Campus / program / course may be overridden by the form. Resolve
-    # them, then derive Institute from the *chosen* campus so the form's
-    # institute branding stays consistent with the saved record.
-    from apps.master.models import AcademicYear, Campus, Course, Program
+    # --- Resolve placement -------------------------------------------------
+    from apps.master.models import AcademicYear, Campus, Program
     campus = lead.campus
     if payload.get("campus"):
         try:
@@ -172,37 +251,42 @@ def submit_application_from_lead(*, lead: Lead, payload: dict) -> tuple[Student,
             program = Program.objects.get(pk=payload["program"])
         except Program.DoesNotExist:
             raise ValueError("Selected program does not exist.")
-        # Validate program is offered at the chosen campus.
         if not program.campuses.filter(pk=campus.pk).exists():
             raise ValueError(
                 f"Program '{program.name}' is not offered at "
                 f"campus '{campus.name}'.",
             )
 
-    course = None
-    if payload.get("course"):
-        try:
-            course = Course.objects.get(pk=payload["course"])
-        except Course.DoesNotExist:
-            raise ValueError("Selected course does not exist.")
-        if course.program_id != program.id:
-            raise ValueError(
-                f"Course '{course.name}' is not part of "
-                f"program '{program.name}'.",
-            )
-
     institute = getattr(campus, "institute", None)
     if institute is None:
         raise ValueError(
             f"Campus '{campus.code}' has no parent Institute set; "
-            "fix the campus master before accepting applications."
+            "fix the campus master before accepting applications.",
         )
 
     acad_year = AcademicYear.objects.filter(is_current=True).first()
     if acad_year is None:
         raise ValueError("No current AcademicYear is set; create one first.")
 
-    # Create the User account.
+    # --- Update path: Student already exists for this lead -----------------
+    existing = getattr(lead, "promoted_student", None)
+    if existing is not None:
+        _apply_payload_to_student(
+            existing, payload,
+            institute=institute, campus=campus, program=program,
+            acad_year=acad_year, lead=lead,
+        )
+        # Photo replace (if a new one was uploaded).
+        photo = payload.get("_photo_file")
+        if photo is not None:
+            existing.photo.save("photo.jpg", photo, save=True)
+        _upsert_documents(existing, payload.get("documents") or [])
+        return existing, {
+            "application_form_id": existing.application_form_id,
+            "note": "Application updated.",
+        }
+
+    # --- Create path: first-time submit ------------------------------------
     seed = (payload.get("student_email") or lead.email or "").split("@")[0] \
         or payload.get("student_name") or lead.name
     username = _unique_username(seed=seed)
@@ -230,7 +314,6 @@ def submit_application_from_lead(*, lead: Lead, payload: dict) -> tuple[Student,
         institute=institute,
         campus=campus,
         program=program,
-        course=course,
         academic_year=acad_year,
         current_address=payload.get("current_address", ""),
         current_city_id=payload.get("current_city"),
@@ -252,38 +335,22 @@ def submit_application_from_lead(*, lead: Lead, payload: dict) -> tuple[Student,
         lead_origin=lead,
     )
 
-    # Optional photo (raw file passed via the view, not in the dict).
     photo = payload.get("_photo_file")
     if photo is not None:
         student.photo.save("photo.jpg", photo, save=True)
 
-    # Documents.
-    from .models import StudentDocument
-    docs = payload.get("documents") or []
-    for d in docs:
-        if not d.get("header"):
-            continue
-        StudentDocument.objects.create(
-            student=student,
-            header=d["header"],
-            regno_yearpassing=d.get("regno_yearpassing", ""),
-            school_college=d.get("school_college", ""),
-            university_board=d.get("university_board", ""),
-            certificate_no=d.get("certificate_no", ""),
-            percent_obtained=d.get("percent_obtained") or None,
-        )
+    _upsert_documents(student, payload.get("documents") or [])
 
-    # Flip lead → APPLICATION_SUBMITTED + invalidate token.
+    # Flip lead → APPLICATION_SUBMITTED on first submit only; keep the
+    # token around so the student can come back and add missing details.
     from apps.leads.services import change_status as change_lead_status
     if lead.status != Lead.Status.APPLICATION_SUBMITTED:
         change_lead_status(
             lead=lead,
             new_status=Lead.Status.APPLICATION_SUBMITTED,
-            changed_by=None,  # student self-submission, no actor
+            changed_by=None,
             note=f"Self-submitted application ({app_id}).",
         )
-    lead.application_token = None
-    lead.save(update_fields=["application_token"])
 
     return student, {
         "username": username,

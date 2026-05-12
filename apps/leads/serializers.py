@@ -103,6 +103,10 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     source_name = serializers.CharField(source="source.name", read_only=True)
     assign_to_name = serializers.CharField(source="assign_to.username", read_only=True)
     created_by_name = serializers.CharField(source="created_by.username", read_only=True)
+    application_locked_by_name = serializers.CharField(
+        source="application_locked_by.username",
+        read_only=True, default="",
+    )
     utm = LeadUtmSerializer(read_only=True)
 
     class Meta:
@@ -119,6 +123,9 @@ class LeadDetailSerializer(serializers.ModelSerializer):
             "alternative_phone", "alternative_email",
             "phone_normalized",
             "application_token", "application_token_sent_at",
+            "application_locked_for_student",
+            "application_locked_at",
+            "application_locked_by", "application_locked_by_name",
             "created_by", "created_by_name",
             "created_at", "updated_at",
             "utm",

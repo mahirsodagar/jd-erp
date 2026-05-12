@@ -175,6 +175,46 @@ class LeadHistoryView(APIView):
         return Response(StatusHistorySerializer(lead.status_history.all(), many=True).data)
 
 
+# --- Application form close / open (counsellor kill switch) --------------
+
+class LeadApplicationCloseView(APIView):
+    """Close the self-fill application form for this lead's student.
+    After this, the public POST /api/public/application/<token>/ returns
+    403. Counsellor-side edits via authenticated endpoints are
+    unaffected."""
+    permission_classes = [IsAuthenticated, HasPerm]
+    required_perm = "leads.lead.edit"
+
+    def post(self, request, pk):
+        from django.utils import timezone
+        lead = Lead.objects.get(pk=pk)
+        lead.application_locked_for_student = True
+        lead.application_locked_at = timezone.now()
+        lead.application_locked_by = request.user
+        lead.save(update_fields=[
+            "application_locked_for_student",
+            "application_locked_at", "application_locked_by", "updated_at",
+        ])
+        return Response(LeadDetailSerializer(lead).data)
+
+
+class LeadApplicationOpenView(APIView):
+    """Re-open the form so the student can edit again."""
+    permission_classes = [IsAuthenticated, HasPerm]
+    required_perm = "leads.lead.edit"
+
+    def post(self, request, pk):
+        lead = Lead.objects.get(pk=pk)
+        lead.application_locked_for_student = False
+        lead.application_locked_at = None
+        lead.application_locked_by = None
+        lead.save(update_fields=[
+            "application_locked_for_student",
+            "application_locked_at", "application_locked_by", "updated_at",
+        ])
+        return Response(LeadDetailSerializer(lead).data)
+
+
 # --- Followups ----------------------------------------------------------
 
 class LeadFollowupListCreateView(APIView):

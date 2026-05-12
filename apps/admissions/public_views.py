@@ -1,8 +1,13 @@
 """Public, no-auth endpoints used by the self-fill application form.
 
 Mounted under `/api/public/application/<token>/` — see config/urls.py.
-The token is a one-shot UUID stored on `Lead.application_token`,
-generated when staff clicks "Send application link". Cleared on submit.
+The token is a UUID stored on `Lead.application_token`, generated when
+staff clicks "Send application link". The same token stays valid for
+re-edits so students can fill incrementally after counsellor review.
+
+Counsellors close the form for the student by setting
+`Lead.application_locked_for_student=True` via the staff endpoints in
+apps/leads/views.py — once closed, POSTs here return 403.
 """
 
 import json
@@ -73,7 +78,6 @@ class PublicApplicationView(APIView):
             # Student-overridable placement.
             "campus": _int_or_none("campus"),
             "program": _int_or_none("program"),
-            "course": _int_or_none("course"),
             "student_name": request.data.get("student_name"),
             "father_name": request.data.get("father_name", ""),
             "mother_name": request.data.get("mother_name", ""),
@@ -107,6 +111,9 @@ class PublicApplicationView(APIView):
             student, creds = submit_application_from_lead(
                 lead=lead, payload=payload,
             )
+        except PermissionError as e:
+            # Form closed by counsellor — 403 with the message verbatim.
+            return Response({"detail": str(e)}, status=http.HTTP_403_FORBIDDEN)
         except ValueError as e:
             return Response({"detail": str(e)}, status=http.HTTP_400_BAD_REQUEST)
         except KeyError as e:
@@ -128,7 +135,8 @@ class PublicApplicationView(APIView):
 def _prefill(lead: Lead) -> dict:
     """Minimal payload the public form needs — never leaks lead status,
     history, internal ids beyond what the student already typed."""
-    from apps.master.models import Campus, City, Course, Program, State
+    from apps.master.models import Campus, City, Program, State
+
     # Programs need their campus links so the form can filter the
     # Program dropdown by selected Campus.
     programs = []
@@ -141,16 +149,61 @@ def _prefill(lead: Lead) -> dict:
             "id": p.id, "name": p.name, "code": p.code,
             "campus_ids": list(p.campuses.values_list("id", flat=True)),
         })
-    courses = list(
-        Course.objects.filter(is_active=True)
-        .values("id", "name", "code", "program").order_by("name")
-    )
+
+    # If the student already submitted once, send their saved values
+    # so the form can prefill for editing.
+    existing = getattr(lead, "promoted_student", None)
+    student_data = None
+    if existing is not None:
+        student_data = {
+            "id": existing.id,
+            "application_form_id": existing.application_form_id,
+            "student_name": existing.student_name,
+            "father_name": existing.father_name,
+            "mother_name": existing.mother_name,
+            "gender": existing.gender,
+            "dob": existing.dob.isoformat() if existing.dob else None,
+            "category": existing.category,
+            "study_medium": existing.study_medium,
+            "nationality": existing.nationality,
+            "blood_group": existing.blood_group,
+            "current_address": existing.current_address,
+            "current_city": existing.current_city_id,
+            "current_state": existing.current_state_id,
+            "current_pincode": existing.current_pincode,
+            "permanent_address": existing.permanent_address,
+            "permanent_city": existing.permanent_city_id,
+            "permanent_state": existing.permanent_state_id,
+            "permanent_pincode": existing.permanent_pincode,
+            "student_mobile": existing.student_mobile,
+            "student_email": existing.student_email,
+            "father_mobile": existing.father_mobile,
+            "mother_mobile": existing.mother_mobile,
+            "father_email": existing.father_email,
+            "mother_email": existing.mother_email,
+            "father_occupation": existing.father_occupation,
+            "mother_occupation": existing.mother_occupation,
+            "campus": existing.campus_id,
+            "program": existing.program_id,
+            "documents": list(
+                existing.documents.values(
+                    "id", "header", "regno_yearpassing", "school_college",
+                    "university_board", "certificate_no", "percent_obtained",
+                )
+            ),
+        }
+
     return {
         "name": lead.name,
         "email": lead.email,
         "phone": lead.phone,
-        # Lead's chosen campus / program are the defaults; the form
-        # may let the student change them.
+        # Lock state — frontend uses this to render read-only when closed.
+        "is_closed": lead.application_locked_for_student,
+        "closed_at": (
+            lead.application_locked_at.isoformat()
+            if lead.application_locked_at else None
+        ),
+        # Defaults from the lead.
         "campus": {"id": lead.campus_id, "name": lead.campus.name,
                    "code": lead.campus.code},
         "program": {"id": lead.program_id, "name": lead.program.name,
@@ -161,6 +214,8 @@ def _prefill(lead: Lead) -> dict:
              "name": getattr(lead.campus.institute, "name", "")}
             if lead.campus.institute_id else None
         ),
+        # Previously-saved student values (None on first visit).
+        "student": student_data,
         # Reference data the form needs — bundled here so the form
         # makes a single round-trip and stays unauthenticated.
         "campuses": list(
@@ -168,7 +223,6 @@ def _prefill(lead: Lead) -> dict:
             .values("id", "name", "code", "institute").order_by("name")
         ),
         "programs": programs,
-        "courses": courses,
         "states": list(
             State.objects.values("id", "name", "code").order_by("name")
         ),

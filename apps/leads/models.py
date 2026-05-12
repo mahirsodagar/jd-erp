@@ -26,13 +26,28 @@ class Lead(models.Model):
     alternative_email = models.EmailField(blank=True)
 
     # Self-fill application form token. Generated when staff clicks
-    # "Send application link"; cleared once the student submits the
-    # form. NULL = no pending application link.
+    # "Send application link". The link stays valid for re-edits so the
+    # student can add missing details after a counsellor review — close
+    # the form via `application_locked_for_student` to stop that.
     application_token = models.UUIDField(
         null=True, blank=True, unique=True, db_index=True,
-        help_text="One-shot token used by the public application form.",
+        help_text="UUID embedded in the public application link.",
     )
     application_token_sent_at = models.DateTimeField(null=True, blank=True)
+
+    # Counsellor-controlled kill switch. While True, the public POST is
+    # rejected with 403 ("form closed by counsellor"); GET still works so
+    # the student can see what was submitted. Staff edits via the
+    # authenticated admissions endpoints are unaffected.
+    application_locked_for_student = models.BooleanField(
+        default=False, db_index=True,
+    )
+    application_locked_at = models.DateTimeField(null=True, blank=True)
+    application_locked_by = models.ForeignKey(
+        "accounts.User", null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="application_locks_set",
+    )
 
     occurrence_number = models.PositiveSmallIntegerField(
         default=1, db_index=True,

@@ -10,6 +10,8 @@ from .reports import (
     TimePerStageView,
 )
 from .views import (
+    LeadApplicationCloseView,
+    LeadApplicationOpenView,
     LeadCommunicationListCreateView,
     LeadDetailView,
     LeadFollowupDetailView,
@@ -60,6 +62,12 @@ urlpatterns = [
          LeadSendFeeLinkView.as_view(), name="lead-send-fee-link"),
     path("<int:pk>/send-welcome/",
          LeadSendWelcomeView.as_view(), name="lead-send-welcome"),
+
+    # Counsellor closes / opens the student's self-fill application form.
+    path("<int:pk>/application/close/",
+         LeadApplicationCloseView.as_view(), name="lead-application-close"),
+    path("<int:pk>/application/open/",
+         LeadApplicationOpenView.as_view(), name="lead-application-open"),
 
     path("<int:pk>/followups/",
          LeadFollowupListCreateView.as_view(), name="lead-followup-list-create"),
