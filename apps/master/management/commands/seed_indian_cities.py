@@ -28,10 +28,9 @@ from django.core.management.base import BaseCommand, CommandError
 
 from apps.master.models import City, State
 
-
 _DEFAULT_URL = (
     "https://raw.githubusercontent.com/nshntarora/"
-    "Indian-Cities-JSON-Database/master/cities.json"
+    "Indian-Cities-JSON/blob/master/cities.json"
 )
 
 
