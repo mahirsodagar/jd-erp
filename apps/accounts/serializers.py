@@ -3,6 +3,8 @@ from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from apps.roles.models import Permission
+
 User = get_user_model()
 
 
@@ -39,6 +41,8 @@ class TenantTokenObtainSerializer(serializers.Serializer):
 
 class UserSerializer(serializers.ModelSerializer):
     roles = serializers.SerializerMethodField()
+    permissions = serializers.SerializerMethodField()
+    modules = serializers.SerializerMethodField()
     campuses = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
     is_student = serializers.SerializerMethodField()
     is_employee = serializers.SerializerMethodField()
@@ -50,15 +54,32 @@ class UserSerializer(serializers.ModelSerializer):
             "is_active", "is_staff", "is_superuser",
             "is_student", "is_employee",
             "campuses",
-            "date_joined", "last_login", "roles",
+            "date_joined", "last_login",
+            "roles", "permissions", "modules",
         ]
         read_only_fields = [
             "id", "is_superuser", "date_joined", "last_login",
-            "roles", "campuses", "is_student", "is_employee",
+            "roles", "permissions", "modules",
+            "campuses", "is_student", "is_employee",
         ]
 
     def get_roles(self, obj):
         return list(obj.roles.values_list("name", flat=True))
+
+    def get_permissions(self, obj):
+        # Superusers bypass per-permission gating (mirrors Django's
+        # User.has_perm behavior). Send them the full catalogue so the
+        # frontend can treat any check as satisfied.
+        qs = Permission.objects.all() if obj.is_superuser else (
+            Permission.objects.filter(roles__users=obj).distinct()
+        )
+        return list(qs.values_list("key", flat=True))
+
+    def get_modules(self, obj):
+        qs = Permission.objects.all() if obj.is_superuser else (
+            Permission.objects.filter(roles__users=obj).distinct()
+        )
+        return sorted(set(qs.values_list("module", flat=True)))
 
     def get_is_student(self, obj):
         # Reverse OneToOne from admissions.Student.user_account
