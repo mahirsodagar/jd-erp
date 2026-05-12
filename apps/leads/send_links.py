@@ -95,11 +95,12 @@ def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict
 
     # Build the React app URL the student will open, then shorten it to
     # match the DLT template format (`tinyurl.com/{slug}`).
-    # No `#` — the SPA uses BrowserRouter (createBrowserRouter), so the
-    # path component carries the route.
+    # The SPA uses createHashRouter, so the route lives after `#`.
+    # On static hosts (Netlify) without SPA fallback rewrites, a `#`-less
+    # URL like `/apply/{token}` would 404 on direct hit.
     token = _ensure_token(lead)
     base = getattr(settings, "FRONTEND_BASE_URL", "http://localhost:5173").rstrip("/")
-    long_url = f"{base}/apply/{token}"
+    long_url = f"{base}/#/apply/{token}"
     short_url = shorten(long_url)
 
     # PHP DLT template wording — keep verbatim.
