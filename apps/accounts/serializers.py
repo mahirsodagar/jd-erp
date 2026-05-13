@@ -170,3 +170,43 @@ class ChangePasswordSerializer(serializers.Serializer):
             raise serializers.ValidationError({"current_password": "Incorrect."})
         validate_password(attrs["new_password"], user=user)
         return attrs
+
+
+class ForgotPasswordSerializer(serializers.Serializer):
+    """Anonymous: user supplies their email to start a reset."""
+
+    email = serializers.EmailField()
+
+
+class ResetPasswordSerializer(serializers.Serializer):
+    """Anonymous: complete a reset with the (uid, token) emailed earlier.
+
+    Validates the signed token via Django's `default_token_generator`,
+    then sets the new password.
+    """
+
+    uid = serializers.CharField()
+    token = serializers.CharField()
+    new_password = serializers.CharField(min_length=8)
+
+    def validate(self, attrs):
+        from django.contrib.auth.tokens import default_token_generator
+        from django.utils.encoding import force_str
+        from django.utils.http import urlsafe_base64_decode
+
+        try:
+            user_id = force_str(urlsafe_base64_decode(attrs["uid"]))
+            user = User.objects.get(pk=int(user_id))
+        except (ValueError, TypeError, OverflowError, User.DoesNotExist) as e:
+            raise serializers.ValidationError(
+                {"uid": "Invalid reset link."},
+            ) from e
+
+        if not default_token_generator.check_token(user, attrs["token"]):
+            raise serializers.ValidationError(
+                {"token": "Reset link is invalid or has expired."},
+            )
+
+        validate_password(attrs["new_password"], user=user)
+        attrs["user"] = user
+        return attrs

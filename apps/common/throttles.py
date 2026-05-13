@@ -35,3 +35,10 @@ class PasswordChangeThrottle(UserRateThrottle):
     Tighter than the default user rate to slow credential-replay /
     enumeration if a stolen JWT is in play."""
     scope = "password_change"
+
+
+class ForgotPasswordThrottle(AnonRateThrottle):
+    """Throttle forgot/reset endpoints by IP — keeps an attacker from
+    spamming the forgot endpoint to discover account existence (also a
+    backstop on email-cost abuse)."""
+    scope = "forgot_password"

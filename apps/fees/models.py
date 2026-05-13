@@ -159,3 +159,46 @@ class Concession(models.Model):
 
     def __str__(self):
         return f"Concession {self.amount} ({self.status})"
+
+
+class QfixWebhookEvent(models.Model):
+    """Raw log of every Qfix payment webhook + idempotency anchor.
+
+    Qfix retries 5xx and may resend successful events, so every event
+    is keyed on its provider-side `transaction_id`. The first successful
+    POST creates the corresponding `FeeReceipt`; subsequent POSTs for
+    the same `transaction_id` short-circuit without double-recording.
+    """
+
+    class Status(models.TextChoices):
+        RECEIVED = "RECEIVED", "Received"
+        PROCESSED = "PROCESSED", "Processed (receipt created)"
+        SKIPPED = "SKIPPED", "Skipped (not a success event)"
+        ERROR = "ERROR", "Error"
+
+    # Qfix's own transaction identifier — drives idempotency.
+    transaction_id = models.CharField(max_length=120, unique=True)
+
+    # Raw payload, kept verbatim for audit / future replay.
+    raw_payload = models.JSONField()
+
+    # Outcome of the first time we processed this event.
+    status = models.CharField(
+        max_length=12, choices=Status.choices, default=Status.RECEIVED,
+    )
+    error_message = models.TextField(blank=True)
+
+    # When a receipt was created, link to it.
+    receipt = models.ForeignKey(
+        FeeReceipt, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="qfix_events",
+    )
+
+    received_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-received_at",)
+
+    def __str__(self):
+        return f"Qfix {self.transaction_id} ({self.status})"

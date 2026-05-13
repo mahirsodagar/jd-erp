@@ -14,6 +14,7 @@ from .views import (
     FeesMeView,
     InstallmentDetailView,
     InstallmentListCreateView,
+    QfixWebhookView,
 )
 
 urlpatterns = [
@@ -39,4 +40,7 @@ urlpatterns = [
 
     # Balance per enrollment
     path("enrollments/<int:pk>/balance/", EnrollmentBalanceView.as_view(), name="enrollment-balance"),
+
+    # Anonymous — Qfix payment gateway callback.
+    path("webhooks/qfix/", QfixWebhookView.as_view(), name="qfix-webhook"),
 ]

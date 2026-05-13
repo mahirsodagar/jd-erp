@@ -16,6 +16,8 @@ class AuthLog(models.Model):
         LOGOUT = "logout", "Logout"
         PASSWORD_CHANGE = "password_change", "Password change (self)"
         PASSWORD_RESET = "password_reset", "Password reset (admin)"
+        PASSWORD_RESET_REQUESTED = "password_reset_requested", "Password reset requested (self)"
+        PASSWORD_RESET_COMPLETED = "password_reset_completed", "Password reset completed (self)"
         ROLE_CREATE = "role_create", "Role created"
         ROLE_UPDATE = "role_update", "Role updated"
         ROLE_DELETE = "role_delete", "Role deleted"

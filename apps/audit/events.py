@@ -61,6 +61,31 @@ def record_password_reset(request, *, actor, target):
     )
 
 
+def record_password_reset_requested(request, *, target, email=""):
+    """Anonymous user kicked off a forgot-password.
+
+    `target` is None when no account matched the supplied email; we
+    still log the attempt (with email in `identifier`) so probes show up.
+    """
+    ip, ua = _request_meta(request)
+    AuthLog.objects.create(
+        event=AuthLog.Event.PASSWORD_RESET_REQUESTED,
+        actor=None, target=target,
+        identifier=email or (target.email if target else ""),
+        ip_address=ip, user_agent=ua,
+    )
+
+
+def record_password_reset_completed(request, *, target):
+    """Anonymous user successfully consumed a reset link."""
+    ip, ua = _request_meta(request)
+    AuthLog.objects.create(
+        event=AuthLog.Event.PASSWORD_RESET_COMPLETED,
+        actor=None, target=target,
+        ip_address=ip, user_agent=ua,
+    )
+
+
 def record_role_change(request, *, action, role):
     ip, ua = _request_meta(request)
     event_map = {

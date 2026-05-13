@@ -138,6 +138,9 @@ REST_FRAMEWORK = {
         "login": env("THROTTLE_LOGIN", default="10/min"),
         # Password-change per user — tighter than the general user rate.
         "password_change": env("THROTTLE_PASSWORD_CHANGE", default="5/min"),
+        # Forgot/reset password — anonymous, per IP. Conservative cap
+        # because each request can dispatch an email.
+        "forgot_password": env("THROTTLE_FORGOT_PASSWORD", default="5/hour"),
         # Public lead intake — per (API key, IP).
         "lead_intake": env("THROTTLE_LEAD_INTAKE", default="120/hour"),
     },
@@ -186,6 +189,14 @@ LEAVES_HR_INBOX = env("LEAVES_HR_INBOX", default="leave@jdinstitute.edu.in")
 FRONTEND_BASE_URL = env(
     "FRONTEND_BASE_URL", default="https://jdsd.netlify.app",
 )
+
+
+# --- Qfix payment-gateway webhook --------------------------------------
+
+# Shared secret Qfix uses to HMAC-SHA256-sign its webhook payloads.
+# Set this in PA's `.env`. While blank, the webhook accepts unsigned
+# POSTs (handy in sandbox); production deployments MUST set it.
+QFIX_WEBHOOK_SECRET = env("QFIX_WEBHOOK_SECRET", default="")
 
 
 # --- SMS — Bulk SMS Gateway India --------------------------------------

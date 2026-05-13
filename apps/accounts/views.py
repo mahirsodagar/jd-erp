@@ -1,4 +1,10 @@
+import logging
+
+from django.conf import settings as dj_settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -13,18 +19,29 @@ from apps.audit.events import (
     record_logout,
     record_password_change,
     record_password_reset,
+    record_password_reset_requested,
+    record_password_reset_completed,
 )
-from apps.common.throttles import LoginRateThrottle, PasswordChangeThrottle
+from apps.common.throttles import (
+    ForgotPasswordThrottle,
+    LoginRateThrottle,
+    PasswordChangeThrottle,
+)
+from apps.notifications.email import send_email
 
 from .permissions import HasPerm
 from .serializers import (
     AdminResetPasswordSerializer,
     ChangePasswordSerializer,
+    ForgotPasswordSerializer,
+    ResetPasswordSerializer,
     TenantTokenObtainSerializer,
     UserCreateSerializer,
     UserSerializer,
     UserUpdateSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
@@ -169,4 +186,105 @@ class AdminResetPasswordView(APIView):
         target.set_password(serializer.validated_data["new_password"])
         target.save(update_fields=["password"])
         record_password_reset(request, actor=request.user, target=target)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# --- Self-service forgot-password ----------------------------------------
+
+class ForgotPasswordView(APIView):
+    """Anonymous: kick off a password reset.
+
+    Always returns 200 — we don't want this endpoint to leak whether an
+    email is registered (account enumeration). The audit log records
+    actual-user-found vs not-found separately.
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [ForgotPasswordThrottle]
+
+    def post(self, request):
+        serializer = ForgotPasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"].strip().lower()
+
+        # Case-insensitive lookup; if multiple users share an email (rare
+        # but legal in the User model), grab the most-recently-active.
+        user = (
+            User.objects.filter(email__iexact=email, is_active=True)
+            .order_by("-last_login", "-date_joined")
+            .first()
+        )
+
+        if user is not None:
+            uidb64 = urlsafe_base64_encode(force_bytes(user.pk))
+            token = default_token_generator.make_token(user)
+            base = getattr(
+                dj_settings, "FRONTEND_BASE_URL", "http://localhost:5173",
+            ).rstrip("/")
+            # SPA uses HashRouter → route lives after #.
+            reset_url = f"{base}/#/reset-password/{uidb64}/{token}"
+
+            subject = "Reset your JD ERP password"
+            body = (
+                f"Hi {user.full_name or user.username},\n\n"
+                "We received a request to reset the password on your JD "
+                "account. To choose a new password, open this link:\n\n"
+                f"{reset_url}\n\n"
+                "The link expires in a few days. If you didn't request "
+                "this, you can safely ignore the email — your password "
+                "won't change.\n\n"
+                "— JD Admissions"
+            )
+            try:
+                send_email(recipient=email, subject=subject, body=body)
+            except Exception:
+                # Don't surface the failure to the caller (still 200 to
+                # avoid enumeration) — but log it so ops can spot
+                # SMTP outages.
+                logger.exception("Failed to send password-reset email to %s", email)
+
+            record_password_reset_requested(request, target=user)
+        else:
+            # Still audit so brute-force probes show up in the log.
+            record_password_reset_requested(request, target=None, email=email)
+
+        return Response(
+            {"detail": "If that email is registered, a reset link has been sent."},
+            status=status.HTTP_200_OK,
+        )
+
+
+class ResetPasswordView(APIView):
+    """Anonymous: complete a reset using the link emailed earlier."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [ForgotPasswordThrottle]
+
+    def post(self, request):
+        serializer = ResetPasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data["user"]
+        user.set_password(serializer.validated_data["new_password"])
+        user.save(update_fields=["password"])
+        record_password_reset_completed(request, target=user)
+
+        # Best-effort: tell the user their password just changed.
+        if user.email:
+            try:
+                send_email(
+                    recipient=user.email,
+                    subject="Your JD ERP password was changed",
+                    body=(
+                        f"Hi {user.full_name or user.username},\n\n"
+                        "Your password was just changed. If this was you, "
+                        "no further action is needed. If you didn't change "
+                        "your password, contact your administrator "
+                        "immediately.\n\n— JD Admissions"
+                    ),
+                )
+            except Exception:
+                logger.exception("Failed to send password-changed notice to %s", user.email)
+
         return Response(status=status.HTTP_204_NO_CONTENT)
