@@ -6,7 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Enrollment, Student, StudentDocument
+from .models import Enrollment, Student, StudentDocument, StudentRemark
 from .permissions import (
     StudentAccessPolicy, can_view_all_campuses, filter_visible,
     has_perm, is_self_student,
@@ -17,6 +17,7 @@ from .serializers import (
     StudentDocumentSerializer,
     StudentHRUpdateSerializer,
     StudentListSerializer,
+    StudentRemarkSerializer,
     StudentSelfUpdateSerializer,
 )
 from .services import can_enroll
@@ -173,6 +174,41 @@ class StudentDocumentDetailView(APIView):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         doc.delete()
         return Response(status=http.HTTP_204_NO_CONTENT)
+
+
+# --- Student remarks ---------------------------------------------------
+
+class StudentRemarksView(APIView):
+    """List + append free-form admin remarks on a student.
+
+    Read access is gated by the standard student visibility policy; write
+    access requires `admissions.student.edit`. Remarks are append-only —
+    no PATCH/DELETE — so historical context isn't quietly rewritten.
+    """
+
+    permission_classes = [IsAuthenticated, StudentAccessPolicy]
+
+    def _student(self, request, pk):
+        try:
+            s = Student.objects.get(pk=pk)
+        except Student.DoesNotExist as e:
+            raise Http404 from e
+        self.check_object_permissions(request, s)
+        return s
+
+    def get(self, request, pk):
+        student = self._student(request, pk)
+        qs = student.remarks.select_related("created_by").all()
+        return Response(StudentRemarkSerializer(qs, many=True).data)
+
+    def post(self, request, pk):
+        student = self._student(request, pk)
+        if not has_perm(request.user, "admissions.student.edit"):
+            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
+        s = StudentRemarkSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        s.save(student=student, created_by=request.user)
+        return Response(s.data, status=http.HTTP_201_CREATED)
 
 
 # --- Enrollments -------------------------------------------------------

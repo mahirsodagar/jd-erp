@@ -210,6 +210,24 @@ class StudentDocument(models.Model):
         ordering = ("-uploaded_on",)
 
 
+class StudentRemark(models.Model):
+    """Free-form admin notes attached to a student. Append-only from
+    the UI — older notes stay readable so context isn't lost."""
+
+    student = models.ForeignKey(
+        Student, on_delete=models.CASCADE, related_name="remarks",
+    )
+    note = models.TextField()
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="student_remarks_created",
+    )
+    created_on = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_on",)
+
+
 class Enrollment(models.Model):
     """The "Admission" — a Student joining a Batch in a Program/Campus/Year/Sem.
 

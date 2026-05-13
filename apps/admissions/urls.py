@@ -11,6 +11,7 @@ from .views import (
     StudentListView,
     StudentMeDocumentsView,
     StudentMeView,
+    StudentRemarksView,
 )
 
 urlpatterns = [
@@ -20,6 +21,7 @@ urlpatterns = [
     path("students/", StudentListView.as_view(), name="student-list"),
     path("students/<int:pk>/", StudentDetailView.as_view(), name="student-detail"),
     path("students/<int:pk>/documents/", StudentDocumentsView.as_view(), name="student-docs"),
+    path("students/<int:pk>/remarks/", StudentRemarksView.as_view(), name="student-remarks"),
     path("students/<int:pk>/parent/", ProvisionParentView.as_view(), name="student-parent-provision"),
     path("documents/<int:pk>/", StudentDocumentDetailView.as_view(), name="student-doc-detail"),
 

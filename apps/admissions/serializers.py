@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Enrollment, Student, StudentDocument
+from .models import Enrollment, Student, StudentDocument, StudentRemark
 
 
 class StudentListSerializer(serializers.ModelSerializer):
@@ -27,6 +27,10 @@ class StudentDetailSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source="course.name", read_only=True, default="")
     institute_name = serializers.CharField(source="institute.name", read_only=True)
     academic_year_code = serializers.CharField(source="academic_year.code", read_only=True)
+    current_city_name = serializers.CharField(source="current_city.name", read_only=True, default="")
+    current_state_name = serializers.CharField(source="current_state.name", read_only=True, default="")
+    permanent_city_name = serializers.CharField(source="permanent_city.name", read_only=True, default="")
+    permanent_state_name = serializers.CharField(source="permanent_state.name", read_only=True, default="")
     photo_url = serializers.SerializerMethodField()
 
     class Meta:
@@ -41,8 +45,10 @@ class StudentDetailSerializer(serializers.ModelSerializer):
             "program", "program_name",
             "course", "course_name",
             "academic_year", "academic_year_code",
-            "current_address", "current_city", "current_state", "current_pincode",
-            "permanent_address", "permanent_city", "permanent_state", "permanent_pincode",
+            "current_address", "current_city", "current_city_name",
+            "current_state", "current_state_name", "current_pincode",
+            "permanent_address", "permanent_city", "permanent_city_name",
+            "permanent_state", "permanent_state_name", "permanent_pincode",
             "student_mobile", "father_mobile", "mother_mobile",
             "student_email", "father_email", "mother_email", "institute_email",
             "father_occupation", "mother_occupation",
@@ -56,6 +62,8 @@ class StudentDetailSerializer(serializers.ModelSerializer):
             "created_by", "created_on", "updated_by", "updated_on",
             "campus_name", "program_name", "course_name",
             "institute_name", "academic_year_code", "photo_url",
+            "current_city_name", "current_state_name",
+            "permanent_city_name", "permanent_state_name",
         ]
 
     def get_photo_url(self, obj):
@@ -116,6 +124,22 @@ class StudentDocumentSerializer(serializers.ModelSerializer):
             # callers don't have to pass it in the body.
             "student": {"required": False},
         }
+
+
+class StudentRemarkSerializer(serializers.ModelSerializer):
+    created_by_name = serializers.CharField(
+        source="created_by.full_name", read_only=True, default="",
+    )
+
+    class Meta:
+        model = StudentRemark
+        fields = [
+            "id", "student", "note", "created_by", "created_by_name",
+            "created_on",
+        ]
+        read_only_fields = [
+            "id", "student", "created_by", "created_by_name", "created_on",
+        ]
 
 
 class EnrollmentSerializer(serializers.ModelSerializer):
