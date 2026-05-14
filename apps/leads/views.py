@@ -516,6 +516,80 @@ class LeadSendWelcomeView(_SendLinkBase):
         return Response(result, status=http.HTTP_201_CREATED)
 
 
+class LeadMarkFeePaidView(_SendLinkBase):
+    """Body: { amount?, mode?, ref?, paid_at?, notes? }
+
+    Records the application fee as paid on the lead. This is the gate
+    that unlocks `send_application_link`. All body fields are optional
+    to keep the action low-friction — the only required state change is
+    `application_fee_paid_at = now()`.
+    """
+
+    def post(self, request, pk):
+        from django.utils.dateparse import parse_datetime
+
+        lead, err = self._resolve(request, pk)
+        if err:
+            return err
+
+        from django.utils import timezone
+
+        paid_at_raw = request.data.get("paid_at")
+        paid_at = parse_datetime(paid_at_raw) if paid_at_raw else None
+        lead.application_fee_paid_at = paid_at or timezone.now()
+        lead.application_fee_amount = (
+            request.data.get("amount") or None
+        )
+        lead.application_fee_mode = (
+            (request.data.get("mode") or "").strip().upper()
+        )
+        lead.application_fee_ref = (
+            (request.data.get("ref") or "").strip()
+        )
+        lead.application_fee_notes = (
+            (request.data.get("notes") or "").strip()
+        )
+        lead.application_fee_recorded_by = request.user
+        lead.save(update_fields=[
+            "application_fee_paid_at", "application_fee_amount",
+            "application_fee_mode", "application_fee_ref",
+            "application_fee_notes", "application_fee_recorded_by",
+        ])
+        return Response(
+            {
+                "application_fee_paid_at": lead.application_fee_paid_at,
+                "application_fee_amount": str(lead.application_fee_amount or ""),
+                "application_fee_mode": lead.application_fee_mode,
+                "application_fee_ref": lead.application_fee_ref,
+                "application_fee_notes": lead.application_fee_notes,
+                "application_fee_recorded_by": request.user.id,
+            },
+            status=http.HTTP_200_OK,
+        )
+
+
+class LeadClearFeePaidView(_SendLinkBase):
+    """Undo a mark-paid (mistake correction). All fields cleared."""
+
+    def post(self, request, pk):
+        lead, err = self._resolve(request, pk)
+        if err:
+            return err
+
+        lead.application_fee_paid_at = None
+        lead.application_fee_amount = None
+        lead.application_fee_mode = ""
+        lead.application_fee_ref = ""
+        lead.application_fee_notes = ""
+        lead.application_fee_recorded_by = None
+        lead.save(update_fields=[
+            "application_fee_paid_at", "application_fee_amount",
+            "application_fee_mode", "application_fee_ref",
+            "application_fee_notes", "application_fee_recorded_by",
+        ])
+        return Response(status=http.HTTP_204_NO_CONTENT)
+
+
 class LeadIntakeView(APIView):
     """Public endpoint for automated lead sources (website forms, ad
     platforms, etc.). Auth via static API key, NOT JWT.

@@ -4,32 +4,19 @@ These wrap `apps.notifications.services.queue_notification` so the
 intent always lands in `NotificationDispatchLog`, and ALSO write a
 `LeadCommunication` row so the activity timeline shows what was sent.
 
-Outbound delivery is handled by the notifications dispatcher — on PA
-free the row stays at status='QUEUED' until a real provider is wired.
-
-Configuration lives in `settings`:
-
-    LEAD_LINKS = {
-        "JDIFT": {
-            "label":     "JD Institute of Fashion Technology",
-            "app_url":   "https://admin.jediiians.com/admission/jdift_application_link.php?sid={phone}",
-            "fee_url":   "https://9cfb.short.gy/jdinst",
-        },
-        "JDSD": {
-            "label":     "JD School of Design",
-            "app_url":   "https://admin.jediiians.com/admission/jdsd_application_link.php?sid={phone}",
-            "fee_url":   "https://9cfb.short.gy/jdsd",
-        },
-    }
-
-Override per environment via env / config.
+Per-institute payment account details (UPI VPA + bank) live in
+``settings.INSTITUTE_PAYMENT_DETAILS``, keyed by the institute code
+(``JDIFT`` / ``JDSD``). Override per environment via ``.env``.
 """
 
 from __future__ import annotations
 
+import io
 import uuid
+from urllib.parse import quote
 
 from django.conf import settings
+from django.core.mail import EmailMultiAlternatives
 from django.utils import timezone
 
 from apps.notifications.services import queue_notification
@@ -37,35 +24,49 @@ from apps.notifications.services import queue_notification
 from .models import Lead, LeadCommunication
 
 
-# --- Defaults — keep in sync with PHP `sendapplink.php` / `sendfeelink.php` ---
+# --- Institute lookup -------------------------------------------------------
 
-_DEFAULT_LINKS = {
-    "JDIFT": {
-        "label": "JD Institute of Fashion Technology",
-        # `short_name` is the variable the DLT fee template expects.
-        "short_name": "JD Institute",
-        # Pre-shortened fee link from PHP — DLT-approved as-is.
-        "fee_url": "https://9cfb.short.gy/jdinst",
-    },
-    "JDSD": {
-        "label": "JD School of Design",
-        "short_name": "JD School",
-        "fee_url": "https://9cfb.short.gy/jdsd",
-    },
-}
-
-
-def _institute_config(institute_key: str) -> dict:
-    cfg = getattr(settings, "LEAD_LINKS", _DEFAULT_LINKS)
+def _payment_details(institute_key: str) -> dict:
+    """Return UPI / bank details for the institute. Raises if not configured."""
+    cfg = getattr(settings, "INSTITUTE_PAYMENT_DETAILS", {})
     if institute_key not in cfg:
         raise ValueError(
-            f"Unknown institute '{institute_key}'. "
-            f"Configure settings.LEAD_LINKS or pass one of: {list(cfg.keys())}."
+            f"No INSTITUTE_PAYMENT_DETAILS entry for '{institute_key}'. "
+            f"Configure it in settings/env. Known keys: {list(cfg.keys())}.",
         )
     return cfg[institute_key]
 
 
-# --- Send actions -----------------------------------------------------------
+def _application_fee_for_lead(lead: Lead, payment: dict) -> str:
+    """Resolve the application-fee amount to print on the fee link email.
+
+    Lookup order:
+      1. Active FeeTemplate matching (campus, program) — pick the most
+         recent if several years exist (lead has no academic_year FK).
+      2. Static `default_amount` from settings.INSTITUTE_PAYMENT_DETAILS,
+         used only as a last-resort fallback so the email can still go.
+      3. Empty string — UPI URI then drops the amount and the student
+         types it in their app.
+    """
+    from apps.master.models import FeeTemplate
+
+    if lead.campus_id and lead.program_id:
+        tmpl = (
+            FeeTemplate.objects
+            .filter(
+                campus_id=lead.campus_id,
+                program_id=lead.program_id,
+                is_active=True,
+            )
+            .order_by("-academic_year__id", "-id")
+            .first()
+        )
+        if tmpl and tmpl.application_fee:
+            return str(tmpl.application_fee)
+    return str(payment.get("default_amount") or "")
+
+
+# --- Token plumbing for the public application form ------------------------
 
 def _ensure_token(lead: Lead) -> uuid.UUID:
     """Generate or reuse the lead's application token. Reuses the existing
@@ -80,30 +81,33 @@ def _ensure_token(lead: Lead) -> uuid.UUID:
     return lead.application_token
 
 
+# --- Application form link --------------------------------------------------
+
 def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
     """Queue SMS + email with the application form link, log a
     `LeadCommunication` row.
 
-    SMS body matches the PHP-side DLT-approved template
-    (template_id `1307167852052800815`), so the only variables are
-    {name} and {url}, and {url} resolves to a `tinyurl.com/...` slug.
+    Gated: the application fee MUST be marked paid first. Counsellors
+    use `send_fee_link` to email payment instructions, then mark the
+    fee paid via the leads API once it's received in the bank.
     """
+    if lead.application_fee_paid_at is None:
+        raise ValueError(
+            "Application fee must be marked paid before the application "
+            "link can be sent. Use 'Send Fee Link' first, collect the "
+            "payment, then mark it paid on the lead.",
+        )
+
     from apps.notifications.shorten import shorten
 
-    cfg = _institute_config(institute_key)
-    institute_label = cfg["label"]
+    payment = _payment_details(institute_key)
+    institute_label = payment["payee_name"]
 
-    # Build the React app URL the student will open, then shorten it to
-    # match the DLT template format (`tinyurl.com/{slug}`).
-    # The SPA uses createHashRouter, so the route lives after `#`.
-    # On static hosts (Netlify) without SPA fallback rewrites, a `#`-less
-    # URL like `/apply/{token}` would 404 on direct hit.
     token = _ensure_token(lead)
     base = getattr(settings, "FRONTEND_BASE_URL", "https://jdsd.netlify.app").rstrip("/")
     long_url = f"{base}/#/apply/{token}"
     short_url = shorten(long_url)
 
-    # PHP DLT template wording — keep verbatim.
     sms_body = (
         f"Dear {lead.name}, Thank you for selecting JD, Your inquiry has "
         f"been submitted. Please click the link to complete your "
@@ -155,46 +159,209 @@ def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict
     }
 
 
-def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
-    cfg = _institute_config(institute_key)
-    url = cfg["fee_url"]
-    short_name = cfg.get("short_name", cfg["label"])
-    institute_label = cfg["label"]
+# --- Fee instructions email + SMS notice -----------------------------------
 
-    # PHP DLT template wording (template_id 1307168958796572350).
-    sms_body = (
-        f"Dear student, Greetings of the day! Thank you for choosing "
-        f"{short_name} for your Design/Art/Media course. Click the "
-        f"following link {url} to pay your fees and complete the "
-        f"admission process. Best Regards JD Admissions Team"
+def _upi_deeplink(*, vpa: str, payee_name: str, amount: str, note: str) -> str:
+    """Build a UPI intent URI per NPCI spec.
+
+    Most Indian UPI apps will scan the QR built from this URI and
+    pre-fill payee + amount.
+    """
+    parts = [
+        f"pa={quote(vpa)}",
+        f"pn={quote(payee_name)}",
+        f"cu=INR",
+    ]
+    if amount:
+        parts.append(f"am={quote(str(amount))}")
+    if note:
+        parts.append(f"tn={quote(note)}")
+    return "upi://pay?" + "&".join(parts)
+
+
+def _qr_png_bytes(uri: str) -> bytes:
+    """Render the UPI URI as a PNG QR. Uses `qrcode[pil]` (already in reqs)."""
+    import qrcode
+
+    img = qrcode.make(uri)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _fee_email_html(*, lead: Lead, payment: dict, amount: str, qr_cid: str) -> str:
+    """Inline-styled HTML so it survives most mail clients."""
+    amount_line = (
+        f'<p style="margin: 4px 0 0 0; font-size: 13px;">Amount: '
+        f'<strong>&#8377;{amount}</strong></p>'
+        if amount
+        else ""
+    )
+    return f"""\
+<!doctype html>
+<html><body style="font-family: Arial, sans-serif; color: #1f2937; max-width: 560px;">
+<p>Dear {lead.name},</p>
+
+<p>Thank you for choosing <strong>{payment['payee_name']}</strong>.
+To complete your application, please pay the application fee using
+any of the options below.</p>
+
+<table style="border-collapse: collapse; margin-top: 16px;">
+  <tr>
+    <td style="padding-right: 24px; vertical-align: top;">
+      <p style="margin: 0 0 4px 0; font-weight: 600;">Scan to pay (any UPI app)</p>
+      <img src="cid:{qr_cid}" alt="UPI QR" style="width: 220px; height: 220px; border: 1px solid #e5e7eb; border-radius: 8px;">
+      <p style="margin: 8px 0 0 0; font-size: 13px;">UPI ID: <strong>{payment['vpa']}</strong></p>
+      {amount_line}
+    </td>
+    <td style="vertical-align: top;">
+      <p style="margin: 0 0 4px 0; font-weight: 600;">Bank transfer (NEFT / RTGS / IMPS)</p>
+      <table style="font-size: 13px; border-collapse: collapse;">
+        <tr><td style="padding: 2px 12px 2px 0; color: #6b7280;">Account name</td><td style="padding: 2px 0;">{payment['ac_name']}</td></tr>
+        <tr><td style="padding: 2px 12px 2px 0; color: #6b7280;">Account no</td><td style="padding: 2px 0; font-family: monospace;">{payment['ac_no']}</td></tr>
+        <tr><td style="padding: 2px 12px 2px 0; color: #6b7280;">IFSC</td><td style="padding: 2px 0; font-family: monospace;">{payment['ifsc']}</td></tr>
+        <tr><td style="padding: 2px 12px 2px 0; color: #6b7280;">Bank</td><td style="padding: 2px 0;">{payment['bank']}</td></tr>
+        <tr><td style="padding: 2px 12px 2px 0; color: #6b7280;">Branch</td><td style="padding: 2px 0;">{payment['branch']}</td></tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+<p style="margin-top: 20px;">After paying, please reply to this email with
+the payment reference (UPI transaction ID / bank reference number) so
+we can verify and send your application form link.</p>
+
+<p style="margin-top: 24px;">With Regards,<br>JD Admissions Team</p>
+</body></html>
+"""
+
+
+def _fee_email_text(*, lead: Lead, payment: dict, amount: str) -> str:
+    """Plain-text fallback for clients that won't render HTML."""
+    fee_phrase = (
+        f"the application fee of Rs.{amount}"
+        if amount
+        else "the application fee"
+    )
+    return (
+        f"Dear {lead.name},\n\n"
+        f"Thank you for choosing {payment['payee_name']}. To complete "
+        f"your application, please pay {fee_phrase} using any of the "
+        f"options below.\n\n"
+        f"UPI\n"
+        f"  UPI ID: {payment['vpa']}\n"
+        f"  Payee:  {payment['payee_name']}\n\n"
+        f"Bank transfer\n"
+        f"  Account name: {payment['ac_name']}\n"
+        f"  Account no:   {payment['ac_no']}\n"
+        f"  IFSC:         {payment['ifsc']}\n"
+        f"  Bank:         {payment['bank']}\n"
+        f"  Branch:       {payment['branch']}\n\n"
+        f"After paying, please reply with the transaction / reference "
+        f"number so we can verify and send your application form link.\n\n"
+        f"With Regards,\nJD Admissions Team"
     )
 
+
+def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
+    """Email the student UPI / bank / QR payment instructions, send a
+    short SMS pointing them at the email."""
+    payment = _payment_details(institute_key)
+    institute_label = payment["payee_name"]
+    # Pull from the matching FeeTemplate (lead.campus + lead.program)
+    # so admissions can edit the fee from Master Data without a deploy.
+    amount = _application_fee_for_lead(lead, payment)
+
+    if not lead.email:
+        raise ValueError(
+            "Lead has no email on file — fee instructions are sent by "
+            "email (with QR + bank details). Capture an email first.",
+        )
+
+    # Build UPI URI + QR PNG, attach inline so the QR image actually
+    # renders in the recipient's mail client.
+    upi_uri = _upi_deeplink(
+        vpa=payment["vpa"],
+        payee_name=payment["payee_name"],
+        amount=amount,
+        note=f"Application fee L{lead.id}",
+    )
+    qr_bytes = _qr_png_bytes(upi_uri)
+    qr_cid = f"qr-{lead.id}-{int(timezone.now().timestamp())}"
+
+    subject = f"{institute_label} — Application fee payment instructions"
+    text_body = _fee_email_text(lead=lead, payment=payment, amount=amount)
+    html_body = _fee_email_html(
+        lead=lead, payment=payment, amount=amount, qr_cid=qr_cid,
+    )
+
+    msg = EmailMultiAlternatives(
+        subject=subject,
+        body=text_body,
+        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+        to=[lead.email],
+    )
+    msg.attach_alternative(html_body, "text/html")
+    qr_attachment = _build_inline_image(qr_bytes, qr_cid, "fee-qr.png")
+    msg.attach(qr_attachment)
+    msg.mixed_subtype = "related"
+
+    email_ok = False
+    email_err = ""
+    try:
+        sent = msg.send(fail_silently=False)
+        email_ok = bool(sent)
+    except Exception as e:
+        email_err = f"{type(e).__name__}: {e}"
+
+    # SMS notice — short, just tells them to check their email.
+    # NOTE: This new template needs DLT registration before SMS will
+    # actually deliver. Until then it sits queued.
+    sms_body = (
+        f"Dear {lead.name}, JD has emailed you the application fee "
+        f"payment details (UPI / bank). Please check {lead.email}. "
+        f"— JD Admissions"
+    )
     sms_log = queue_notification(
         template_key="lead.fee_link.sms",
         recipient=lead.phone,
         context={
-            "name": lead.name, "url": url, "institute": institute_label,
-            "lead_id": lead.id,
+            "name": lead.name, "email": lead.email,
+            "institute": institute_label,
         },
         related=lead,
     )
 
     comm = LeadCommunication.objects.create(
         lead=lead,
-        type=LeadCommunication.Type.SMS,
-        subject=f"{institute_label} — Fee Link",
-        message=sms_body,
+        type=LeadCommunication.Type.EMAIL,
+        subject=subject,
+        message=text_body,
         sent_at=timezone.now(),
         logged_by=actor,
     )
 
     return {
         "sms_log_id": getattr(sms_log, "id", None),
+        "email_sent": email_ok,
+        "email_error": email_err,
         "communication_id": comm.id,
-        "url": url,
         "institute": institute_label,
+        "amount": amount,
     }
 
+
+def _build_inline_image(data: bytes, cid: str, filename: str):
+    """Wrap PNG bytes as a MIME image with a CID for HTML inline use."""
+    from email.mime.image import MIMEImage
+
+    img = MIMEImage(data, _subtype="png")
+    img.add_header("Content-ID", f"<{cid}>")
+    img.add_header("Content-Disposition", "inline", filename=filename)
+    return img
+
+
+# --- Welcome ----------------------------------------------------------------
 
 def send_welcome_message(*, lead: Lead, actor=None) -> dict:
     if not lead.email:

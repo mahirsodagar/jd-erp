@@ -191,12 +191,37 @@ FRONTEND_BASE_URL = env(
 )
 
 
-# --- Qfix payment-gateway webhook --------------------------------------
+# --- Application-fee payment instructions ------------------------------
 
-# Shared secret Qfix uses to HMAC-SHA256-sign its webhook payloads.
-# Set this in PA's `.env`. While blank, the webhook accepts unsigned
-# POSTs (handy in sandbox); production deployments MUST set it.
-QFIX_WEBHOOK_SECRET = env("QFIX_WEBHOOK_SECRET", default="")
+# Per-institute UPI / bank-account details rendered into the fee-link
+# email (with a generated QR). Override via env vars (JSON) when prod
+# values land. Each entry: vpa, payee_name, ac_name, ac_no, ifsc,
+# bank, branch, default_amount.
+INSTITUTE_PAYMENT_DETAILS = env.json(
+    "INSTITUTE_PAYMENT_DETAILS",
+    default={
+        "JDIFT": {
+            "vpa": "jdift@hdfc",
+            "payee_name": "JD Institute of Fashion Technology",
+            "ac_name": "JD INSTITUTE OF FASHION TECHNOLOGY",
+            "ac_no": "00000000000000",
+            "ifsc": "HDFC0000000",
+            "bank": "HDFC Bank",
+            "branch": "Bengaluru",
+            "default_amount": "1000",
+        },
+        "JDSD": {
+            "vpa": "jdsd@hdfc",
+            "payee_name": "JD Educational Trust",
+            "ac_name": "JD EDUCATIONAL TRUST",
+            "ac_no": "00000000000000",
+            "ifsc": "HDFC0000000",
+            "bank": "HDFC Bank",
+            "branch": "Bengaluru",
+            "default_amount": "1000",
+        },
+    },
+)
 
 
 # --- SMS — Bulk SMS Gateway India --------------------------------------

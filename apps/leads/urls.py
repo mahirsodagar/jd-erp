@@ -21,6 +21,8 @@ from .views import (
     LeadListCreateView,
     LeadPromoteView,
     LeadReassignView,
+    LeadClearFeePaidView,
+    LeadMarkFeePaidView,
     LeadSendApplicationLinkView,
     LeadSendFeeLinkView,
     LeadSendWelcomeView,
@@ -62,6 +64,11 @@ urlpatterns = [
          LeadSendFeeLinkView.as_view(), name="lead-send-fee-link"),
     path("<int:pk>/send-welcome/",
          LeadSendWelcomeView.as_view(), name="lead-send-welcome"),
+
+    path("<int:pk>/mark-fee-paid/",
+         LeadMarkFeePaidView.as_view(), name="lead-mark-fee-paid"),
+    path("<int:pk>/clear-fee-paid/",
+         LeadClearFeePaidView.as_view(), name="lead-clear-fee-paid"),
 
     # Counsellor closes / opens the student's self-fill application form.
     path("<int:pk>/application/close/",

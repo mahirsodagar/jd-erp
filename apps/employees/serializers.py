@@ -165,9 +165,10 @@ class EmployeeCreateSerializer(_EmployeeWriteBase):
         ]
         extra_kwargs = {
             "emp_code": {"required": False, "allow_blank": True},
-            # Model is nullable to allow a single top-level director with no
-            # manager, but normal API creates must supply one.
-            "reporting_manager_1": {"required": True, "allow_null": False},
+            # Optional — matches PHP behaviour. The first employee
+            # (director) has nobody to report to, and PHP never enforced
+            # this either, so leaving it blank is allowed.
+            "reporting_manager_1": {"required": False, "allow_null": True},
         }
 
 

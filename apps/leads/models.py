@@ -49,6 +49,29 @@ class Lead(models.Model):
         related_name="application_locks_set",
     )
 
+    # --- Application fee (manual reconciliation) ---------------------
+    # Counsellor sends a fee link (UPI / QR / bank email) → student pays
+    # → counsellor or accounts marks it paid here. Application form link
+    # is gated on `application_fee_paid_at` being non-null.
+    application_fee_paid_at = models.DateTimeField(null=True, blank=True)
+    application_fee_amount = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+    )
+    application_fee_mode = models.CharField(
+        max_length=10, blank=True,
+        help_text="CASH / CHEQUE / DD / ONLINE / UPI / NEFT / RTGS",
+    )
+    application_fee_ref = models.CharField(
+        max_length=120, blank=True,
+        help_text="UPI txn id / cheque no / bank ref / receipt no.",
+    )
+    application_fee_notes = models.TextField(blank=True)
+    application_fee_recorded_by = models.ForeignKey(
+        "accounts.User", null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="application_fees_recorded",
+    )
+
     occurrence_number = models.PositiveSmallIntegerField(
         default=1, db_index=True,
         help_text="1=Primary, 2=Secondary, 3=Tertiary, 4+=Repeated.",

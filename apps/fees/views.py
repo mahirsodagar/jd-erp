@@ -1,15 +1,11 @@
-import json
-import logging
 from datetime import date as _date
 
 from django.db import transaction
 from django.http import Http404, HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
 from rest_framework import status as http
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -31,11 +27,7 @@ from .serializers import (
 )
 from .services.balance import enrollment_balance
 from .services.pdf import render_receipt_pdf
-from .services.qfix import process_event as qfix_process_event
-from .services.qfix import verify_signature as qfix_verify_signature
 from .services.receipt_no import generate_receipt_no
-
-webhook_logger = logging.getLogger("apps.fees.webhooks")
 
 
 # --- Installments ------------------------------------------------------
@@ -57,6 +49,73 @@ class InstallmentListCreateView(APIView):
         s.is_valid(raise_exception=True)
         s.save(created_by=request.user)
         return Response(s.data, status=http.HTTP_201_CREATED)
+
+
+class InstallmentBulkCreateView(APIView):
+    """Create N installments at once. Body:
+
+        {
+          "enrollment": <id>,
+          "items": [
+            {"sequence": 1, "due_date": "2026-06-01", "amount": "120000", "description": "..."},
+            ...
+          ]
+        }
+
+    All-or-nothing — either every row inserts or none. Useful when the
+    counsellor sets up the full schedule on day one.
+    """
+
+    permission_classes = [IsAuthenticated, FeeAccessPolicy]
+
+    def post(self, request):
+        if not has_perm(request.user, "fees.installment.manage"):
+            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
+
+        enrollment_id = request.data.get("enrollment")
+        items = request.data.get("items") or []
+        if not enrollment_id:
+            return Response(
+                {"enrollment": "Required."}, status=http.HTTP_400_BAD_REQUEST,
+            )
+        if not isinstance(items, list) or not items:
+            return Response(
+                {"items": "Provide a non-empty list."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            enrollment = Enrollment.objects.get(pk=enrollment_id)
+        except Enrollment.DoesNotExist:
+            return Response(
+                {"enrollment": "Not found."}, status=http.HTTP_400_BAD_REQUEST,
+            )
+        # Visibility — make sure the user can touch this enrollment.
+        if not visible_enrollments_filter(
+            Enrollment.objects.filter(pk=enrollment.id), request.user,
+        ).exists():
+            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
+
+        # Validate each row through the existing serializer (gets us
+        # type checks + decimal conversion + sequence-uniqueness errors
+        # for free).
+        serializers = []
+        errors = []
+        for idx, raw in enumerate(items):
+            payload = {**raw, "enrollment": enrollment.id}
+            s = InstallmentSerializer(data=payload)
+            if not s.is_valid():
+                errors.append({"index": idx, "errors": s.errors})
+            serializers.append(s)
+        if errors:
+            return Response({"items": errors}, status=http.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            created = []
+            for s in serializers:
+                s.save(created_by=request.user)
+                created.append(s.data)
+        return Response(created, status=http.HTTP_201_CREATED)
 
 
 class InstallmentDetailView(APIView):
@@ -385,67 +444,3 @@ class FeesMeReceiptPdfView(_StudentMixin, APIView):
         resp = HttpResponse(pdf, content_type="application/pdf")
         resp["Content-Disposition"] = f'inline; filename="{r.receipt_no}.pdf"'
         return resp
-
-
-# --- Qfix payment webhook ---------------------------------------------
-
-@method_decorator(csrf_exempt, name="dispatch")
-class QfixWebhookView(APIView):
-    """Anonymous endpoint Qfix POSTs to when a payment settles.
-
-    Auth/identity comes from the HMAC-SHA256 signature in
-    ``X-Qfix-Signature`` — see ``services.qfix.verify_signature``.
-
-    Behaviour:
-      - 401 if signature missing/invalid.
-      - 400 on un-parseable JSON.
-      - 200 on every other path, including failed-status events and
-        retries (idempotent on `transaction_id`). Qfix can stop retrying
-        once it sees a 200 — even when our side decides the event was a
-        no-op (already processed, wrong status, unknown enrollment).
-        The raw payload is always persisted to ``QfixWebhookEvent`` so
-        ops can investigate later.
-    """
-
-    permission_classes = [AllowAny]
-    authentication_classes = []
-
-    def post(self, request):
-        raw = request.body or b""
-
-        signature = request.META.get(
-            "HTTP_X_QFIX_SIGNATURE",
-        ) or request.headers.get("X-Qfix-Signature")
-        if not qfix_verify_signature(raw, signature):
-            webhook_logger.warning("Qfix webhook rejected: bad signature.")
-            return Response(
-                {"detail": "Invalid signature."},
-                status=http.HTTP_401_UNAUTHORIZED,
-            )
-
-        try:
-            payload = json.loads(raw.decode("utf-8") or "{}")
-        except (ValueError, UnicodeDecodeError):
-            webhook_logger.warning("Qfix webhook rejected: invalid JSON body.")
-            return Response(
-                {"detail": "Invalid JSON."},
-                status=http.HTTP_400_BAD_REQUEST,
-            )
-
-        result = qfix_process_event(payload)
-        webhook_logger.info(
-            "Qfix webhook handled: txn=%s status=%s receipt_created=%s",
-            result.event.transaction_id,
-            result.event.status,
-            result.receipt_created,
-        )
-        return Response(
-            {
-                "received": True,
-                "transaction_id": result.event.transaction_id,
-                "status": result.event.status,
-                "receipt_created": result.receipt_created,
-                "duplicate": not result.created,
-            },
-            status=http.HTTP_200_OK,
-        )

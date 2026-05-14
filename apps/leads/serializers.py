@@ -107,6 +107,10 @@ class LeadDetailSerializer(serializers.ModelSerializer):
         source="application_locked_by.username",
         read_only=True, default="",
     )
+    application_fee_recorded_by_name = serializers.CharField(
+        source="application_fee_recorded_by.username",
+        read_only=True, default="",
+    )
     utm = LeadUtmSerializer(read_only=True)
 
     class Meta:
@@ -126,6 +130,11 @@ class LeadDetailSerializer(serializers.ModelSerializer):
             "application_locked_for_student",
             "application_locked_at",
             "application_locked_by", "application_locked_by_name",
+            "application_fee_paid_at", "application_fee_amount",
+            "application_fee_mode", "application_fee_ref",
+            "application_fee_notes",
+            "application_fee_recorded_by",
+            "application_fee_recorded_by_name",
             "created_by", "created_by_name",
             "created_at", "updated_at",
             "utm",
