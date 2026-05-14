@@ -31,6 +31,26 @@ class StudentDetailSerializer(serializers.ModelSerializer):
     current_state_name = serializers.CharField(source="current_state.name", read_only=True, default="")
     permanent_city_name = serializers.CharField(source="permanent_city.name", read_only=True, default="")
     permanent_state_name = serializers.CharField(source="permanent_state.name", read_only=True, default="")
+    # Snapshot of the application-fee record on the originating lead.
+    # Read-only; the lead is the source of truth — see
+    # `apps.leads.views.LeadMarkFeePaidView` for where it gets written.
+    application_fee_paid_at = serializers.DateTimeField(
+        source="lead_origin.application_fee_paid_at", read_only=True,
+    )
+    application_fee_amount = serializers.DecimalField(
+        source="lead_origin.application_fee_amount",
+        max_digits=10, decimal_places=2, read_only=True,
+    )
+    application_fee_mode = serializers.CharField(
+        source="lead_origin.application_fee_mode", read_only=True, default="",
+    )
+    application_fee_ref = serializers.CharField(
+        source="lead_origin.application_fee_ref", read_only=True, default="",
+    )
+    application_fee_recorded_by_name = serializers.CharField(
+        source="lead_origin.application_fee_recorded_by.username",
+        read_only=True, default="",
+    )
     photo_url = serializers.SerializerMethodField()
 
     class Meta:
@@ -54,6 +74,9 @@ class StudentDetailSerializer(serializers.ModelSerializer):
             "father_occupation", "mother_occupation",
             "photo", "photo_url",
             "user_account", "parent_user_account", "lead_origin",
+            "application_fee_paid_at", "application_fee_amount",
+            "application_fee_mode", "application_fee_ref",
+            "application_fee_recorded_by_name",
             "created_by", "created_on", "updated_by", "updated_on",
         ]
         read_only_fields = [
@@ -64,6 +87,9 @@ class StudentDetailSerializer(serializers.ModelSerializer):
             "institute_name", "academic_year_code", "photo_url",
             "current_city_name", "current_state_name",
             "permanent_city_name", "permanent_state_name",
+            "application_fee_paid_at", "application_fee_amount",
+            "application_fee_mode", "application_fee_ref",
+            "application_fee_recorded_by_name",
         ]
 
     def get_photo_url(self, obj):
