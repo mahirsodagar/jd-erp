@@ -25,6 +25,13 @@ class Lead(models.Model):
     alternative_phone = models.CharField(max_length=32, blank=True)
     alternative_email = models.EmailField(blank=True)
 
+    # Parent contact captured at lead creation. Required by the Add Lead
+    # form (validated at the API layer in LeadCreateSerializer); kept
+    # `blank=True` on the model so historical rows stay valid and
+    # subsequent edits via LeadUpdateSerializer aren't forced to refill.
+    father_mobile = models.CharField(max_length=32, blank=True)
+    father_email = models.EmailField(blank=True)
+
     # Self-fill application form token. Generated when staff clicks
     # "Send application link". The link stays valid for re-edits so the
     # student can add missing details after a counsellor review — close

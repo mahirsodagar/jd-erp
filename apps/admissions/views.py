@@ -21,6 +21,7 @@ from .serializers import (
     StudentSelfUpdateSerializer,
 )
 from .services import can_enroll
+from .services_undertaking import send_undertaking
 
 
 # --- HR-facing student endpoints ---------------------------------------
@@ -276,3 +277,59 @@ class EnrollmentDetailView(APIView):
         s.is_valid(raise_exception=True)
         s.save()
         return Response(s.data)
+
+
+class EnrollmentUndertakingView(APIView):
+    """POST /api/admissions/enrollments/{pk}/undertaking/
+
+    Renders the fee undertaking PDF from the enrollment + installments
+    + approved concession, emails it to the student with the requesting
+    user CC'd. The PDF is not persisted.
+
+    Body (all optional):
+        remarks: str
+        application_form: str   # defaults to student.application_form_id
+        extra_cc: [str]         # additional CC addresses
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            enrollment = Enrollment.objects.select_related(
+                "student", "campus", "program", "course",
+                "student__institute",
+            ).get(pk=pk)
+        except Enrollment.DoesNotExist as e:
+            raise Http404 from e
+
+        u = request.user
+        if not (u.is_superuser or has_perm(u, "admissions.student.view")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        if not can_view_all_campuses(u) and not u.campuses.filter(
+            pk=enrollment.campus_id,
+        ).exists():
+            raise Http404
+
+        remarks = (request.data.get("remarks") or "").strip()
+        application_form = (request.data.get("application_form") or "").strip()
+        extra_cc = request.data.get("extra_cc") or []
+        if isinstance(extra_cc, str):
+            extra_cc = [s.strip() for s in extra_cc.split(",") if s.strip()]
+
+        try:
+            result = send_undertaking(
+                enrollment,
+                requested_by=u,
+                remarks=remarks,
+                application_form=application_form,
+                extra_cc=extra_cc,
+            )
+        except ValueError as e:
+            return Response({"detail": str(e)},
+                            status=http.HTTP_400_BAD_REQUEST)
+        except RuntimeError as e:
+            return Response({"detail": str(e)},
+                            status=http.HTTP_502_BAD_GATEWAY)
+        return Response(result)

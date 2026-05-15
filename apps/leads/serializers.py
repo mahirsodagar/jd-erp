@@ -69,17 +69,24 @@ class LeadCreateSerializer(_LeadBaseSerializer):
     the next available counsellor from the pool for the program's
     category (Module F.3). If the pool is empty, the create fails with
     a clear error from the service layer.
+
+    `father_mobile` and `father_email` are required on create (model is
+    blank=True so historical rows stay valid, but the Add Lead form
+    must capture them — enforced here at the API boundary).
     """
 
     class Meta:
         model = Lead
         fields = [
             "name", "email", "phone",
+            "father_mobile", "father_email",
             "campus", "program", "source", "assign_to",
             "remarks", "city", "state",
         ]
         extra_kwargs = {
             "assign_to": {"required": False, "allow_null": True},
+            "father_mobile": {"required": True, "allow_blank": False},
+            "father_email": {"required": True, "allow_blank": False},
         }
 
 
@@ -92,6 +99,7 @@ class LeadUpdateSerializer(_LeadBaseSerializer):
         model = Lead
         fields = [
             "name", "email", "phone",
+            "father_mobile", "father_email",
             "campus", "program", "source",
             "remarks", "city", "state",
         ]
@@ -117,6 +125,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
         model = Lead
         fields = [
             "id", "name", "email", "phone",
+            "father_mobile", "father_email",
             "campus", "campus_name",
             "program", "program_name",
             "source", "source_name",

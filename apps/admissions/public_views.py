@@ -105,6 +105,15 @@ class PublicApplicationView(APIView):
             "mother_occupation": request.data.get("mother_occupation", ""),
             "documents": documents,
             "_photo_file": request.FILES.get("photo"),
+            # Per-row certificate uploads. Frontend sends multipart
+            # parts named `document_file_{i}` aligned by index with
+            # the documents JSON. We keep them index-aligned (None for
+            # rows without an upload) so the service layer can attach
+            # them to the matching StudentDocument.
+            "_document_files": [
+                request.FILES.get(f"document_file_{i}")
+                for i in range(len(documents))
+            ],
         }
 
         try:

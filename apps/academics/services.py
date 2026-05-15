@@ -105,3 +105,75 @@ def bulk_publish_weekly(*, start_date: _date, end_date: _date,
                 })
         cur += timedelta(days=1)
     return {"created": created, "skipped": skipped}
+
+
+@transaction.atomic
+def bulk_publish_weekly_grid(*, start_date: _date, end_date: _date,
+                             batch, cells: list[dict],
+                             resolver, created_by=None,
+                             force: bool = False) -> dict:
+    """Expand a full (weekday × time_slot) grid over the date range.
+
+    Mirrors the PHP "Publish Time Table" action — the whole grid is
+    published in one call so the user doesn't need to fire one request
+    per cell.
+
+    Each cell dict carries pre-fetched FK objects (subject, instructor,
+    classroom, time_slot) — the resolver is the caller's view that
+    already had to fetch them anyway. The transaction wraps every cell,
+    so a serializer-level rejection (e.g. unknown id) rolls the whole
+    publish back; per-date soft conflicts inside one cell still get
+    skipped through the existing `bulk_publish_weekly` semantics.
+
+    Returns:
+      {
+        "total_created": int,
+        "total_skipped": int,
+        "cells": [
+          {
+            "index": int,
+            "weekday": int,
+            "time_slot": int,
+            "created": [ids],
+            "skipped": [{date, errors, warnings}],
+          },
+          ...
+        ],
+      }
+    """
+    if end_date < start_date:
+        raise ValueError("end_date must be on or after start_date.")
+
+    out_cells: list[dict] = []
+    total_created = 0
+    total_skipped = 0
+
+    for idx, cell in enumerate(cells):
+        resolved = resolver(cell)
+        sub = bulk_publish_weekly(
+            start_date=start_date,
+            end_date=end_date,
+            weekday=cell["weekday"],
+            batch=batch,
+            subject=resolved["subject"],
+            instructor=resolved["instructor"],
+            classroom=resolved["classroom"],
+            time_slot=resolved["time_slot"],
+            created_by=created_by,
+            force=force,
+        )
+        total_created += len(sub["created"])
+        total_skipped += len(sub["skipped"])
+        out_cells.append({
+            "index": idx,
+            "weekday": cell["weekday"],
+            "time_slot": cell["time_slot"],
+            "created": sub["created"],
+            "skipped": sub["skipped"],
+        })
+
+    return {
+        "total_created": total_created,
+        "total_skipped": total_skipped,
+        "cells": out_cells,
+    }

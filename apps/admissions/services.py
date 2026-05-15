@@ -191,15 +191,27 @@ def _apply_payload_to_student(student: Student, payload: dict,
     student.save()
 
 
-def _upsert_documents(student: Student, docs: list[dict]) -> None:
+def _upsert_documents(
+    student: Student,
+    docs: list[dict],
+    files: list | None = None,
+) -> None:
     """Upsert by (student, header). Re-submits replace fields under the
-    same header rather than appending duplicates."""
+    same header rather than appending duplicates.
+
+    `files`, when supplied, is index-aligned with `docs` — entry `i`
+    holds the uploaded File for `docs[i]` (or None if no file was sent
+    for that row). When a file is present we attach it via
+    `FileField.save(...)` which moves it under `students/docs/` per the
+    model's `upload_to` setting.
+    """
     from .models import StudentDocument
-    for d in docs:
+    files = files or []
+    for idx, d in enumerate(docs):
         header = d.get("header")
         if not header:
             continue
-        StudentDocument.objects.update_or_create(
+        obj, _created = StudentDocument.objects.update_or_create(
             student=student, header=header,
             defaults={
                 "regno_yearpassing": d.get("regno_yearpassing", ""),
@@ -209,6 +221,11 @@ def _upsert_documents(student: Student, docs: list[dict]) -> None:
                 "percent_obtained": d.get("percent_obtained") or None,
             },
         )
+        f = files[idx] if idx < len(files) else None
+        if f is not None:
+            # Use the original filename for traceability; FileField's
+            # upload_to + storage backend handle collisions.
+            obj.file.save(getattr(f, "name", "certificate"), f, save=True)
 
 
 @transaction.atomic
@@ -280,7 +297,11 @@ def submit_application_from_lead(*, lead: Lead, payload: dict) -> tuple[Student,
         photo = payload.get("_photo_file")
         if photo is not None:
             existing.photo.save("photo.jpg", photo, save=True)
-        _upsert_documents(existing, payload.get("documents") or [])
+        _upsert_documents(
+            existing,
+            payload.get("documents") or [],
+            payload.get("_document_files") or [],
+        )
         return existing, {
             "application_form_id": existing.application_form_id,
             "note": "Application updated.",
@@ -339,7 +360,11 @@ def submit_application_from_lead(*, lead: Lead, payload: dict) -> tuple[Student,
     if photo is not None:
         student.photo.save("photo.jpg", photo, save=True)
 
-    _upsert_documents(student, payload.get("documents") or [])
+    _upsert_documents(
+        student,
+        payload.get("documents") or [],
+        payload.get("_document_files") or [],
+    )
 
     # Flip lead → APPLICATION_SUBMITTED on first submit only; keep the
     # token around so the student can come back and add missing details.

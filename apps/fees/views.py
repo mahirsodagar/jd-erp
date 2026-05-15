@@ -1,6 +1,7 @@
 from datetime import date as _date
 
 from django.db import transaction
+from django.db.models import Q
 from django.http import Http404, HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -172,12 +173,24 @@ class FeeReceiptListCreateView(APIView):
             qs = qs.filter(status=v)
         if v := params.get("payment_mode"):
             qs = qs.filter(payment_mode=v)
-        if v := params.get("from"):
+        if v := params.get("campus"):
+            qs = qs.filter(enrollment__campus_id=v)
+        # Accept both received_from/received_to (newer, used by the
+        # admission report pages) and from/to (legacy). Same semantics.
+        if v := (params.get("received_from") or params.get("from")):
             if d := parse_date(v):
                 qs = qs.filter(received_date__gte=d)
-        if v := params.get("to"):
+        if v := (params.get("received_to") or params.get("to")):
             if d := parse_date(v):
                 qs = qs.filter(received_date__lte=d)
+        if v := params.get("search"):
+            v = v.strip()
+            if v:
+                qs = qs.filter(
+                    Q(receipt_no__icontains=v)
+                    | Q(enrollment__student__student_name__icontains=v)
+                    | Q(enrollment__student__application_form_id__icontains=v)
+                )
         return Response(FeeReceiptDetailSerializer(qs[:500], many=True).data)
 
     @transaction.atomic
@@ -294,10 +307,26 @@ class ConcessionListCreateView(APIView):
             "enrollment", "enrollment__student", "requested_by", "approver",
         )
         qs = visible_enrollments_filter(qs, request.user)
-        if v := request.query_params.get("status"):
+        params = request.query_params
+        if v := params.get("status"):
             qs = qs.filter(status=v)
-        if v := request.query_params.get("enrollment"):
+        if v := params.get("enrollment"):
             qs = qs.filter(enrollment_id=v)
+        if v := params.get("requested_from"):
+            if d := parse_date(v):
+                qs = qs.filter(requested_on__date__gte=d)
+        if v := params.get("requested_to"):
+            if d := parse_date(v):
+                qs = qs.filter(requested_on__date__lte=d)
+        if v := params.get("search"):
+            v = v.strip()
+            if v:
+                qs = qs.filter(
+                    Q(enrollment__student__student_name__icontains=v)
+                    | Q(enrollment__student__application_form_id__icontains=v)
+                    | Q(reason__icontains=v)
+                    | Q(requested_by__username__icontains=v)
+                )
         return Response(ConcessionDetailSerializer(qs[:500], many=True).data)
 
     def post(self, request):

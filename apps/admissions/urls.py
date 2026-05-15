@@ -5,6 +5,7 @@ from apps.portal.views import ProvisionParentView
 from .views import (
     EnrollmentDetailView,
     EnrollmentListCreateView,
+    EnrollmentUndertakingView,
     StudentDetailView,
     StudentDocumentDetailView,
     StudentDocumentsView,
@@ -27,4 +28,9 @@ urlpatterns = [
 
     path("enrollments/", EnrollmentListCreateView.as_view(), name="enrollment-list-create"),
     path("enrollments/<int:pk>/", EnrollmentDetailView.as_view(), name="enrollment-detail"),
+    path(
+        "enrollments/<int:pk>/undertaking/",
+        EnrollmentUndertakingView.as_view(),
+        name="enrollment-undertaking",
+    ),
 ]

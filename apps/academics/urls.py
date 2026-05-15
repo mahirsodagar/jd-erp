@@ -35,6 +35,7 @@ from .views import (
     StudentSubmitView,
     StudentTranscriptView,
     SubmissionGradeView,
+    WeeklyGridPublishView,
 )
 
 urlpatterns = [
@@ -42,6 +43,7 @@ urlpatterns = [
     path("schedule/", ScheduleSlotListCreateView.as_view(), name="schedule-list-create"),
     path("schedule/<int:pk>/", ScheduleSlotDetailView.as_view(), name="schedule-detail"),
     path("schedule/bulk-weekly/", BulkWeeklyPublishView.as_view(), name="schedule-bulk-weekly"),
+    path("schedule/bulk-weekly-grid/", WeeklyGridPublishView.as_view(), name="schedule-bulk-weekly-grid"),
     path("schedule/conflict-check/", ConflictCheckView.as_view(), name="schedule-conflict-check"),
     path("timetable/me/", MyTimetableView.as_view(), name="timetable-me"),
 

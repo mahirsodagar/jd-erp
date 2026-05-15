@@ -37,8 +37,12 @@ from .serializers import (
     CertificateRejectSerializer, CertificateRequestSerializer,
     CertificateSerializer, FreezeSerializer, MarksEntrySerializer,
     ScheduleSlotSerializer, StudentSubmitSerializer, SubmissionGradeSerializer,
+    WeeklyGridPublishSerializer,
 )
-from .services import bulk_publish_weekly, create_slot, detect_conflicts
+from .services import (
+    bulk_publish_weekly, bulk_publish_weekly_grid,
+    create_slot, detect_conflicts,
+)
 
 
 def _scope(qs, user):
@@ -188,6 +192,73 @@ class BulkWeeklyPublishView(APIView):
             instructor=instructor, classroom=classroom,
             time_slot=time_slot, created_by=request.user,
             force=d.get("force", False),
+        )
+        return Response(result, status=http.HTTP_201_CREATED)
+
+
+class WeeklyGridPublishView(APIView):
+    """PHP `schedule.php` "Publish Time Table" equivalent — accepts the
+    entire weekday × time_slot grid for one batch and expands it across
+    the date range in one transaction."""
+
+    permission_classes = [IsAuthenticated, ScheduleAccess]
+
+    def post(self, request):
+        if not has_perm(request.user, "academics.schedule.manage"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = WeeklyGridPublishSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        d = s.validated_data
+
+        try:
+            batch = Batch.objects.get(pk=d["batch"])
+        except Batch.DoesNotExist:
+            return Response({"batch": "Not found."},
+                            status=http.HTTP_400_BAD_REQUEST)
+
+        # Pre-fetch each unique FK referenced by the cells so we error
+        # out cleanly before any row is written.
+        subject_ids = {c["subject"] for c in d["cells"]}
+        instructor_ids = {c["instructor"] for c in d["cells"]}
+        classroom_ids = {c["classroom"] for c in d["cells"]
+                         if c.get("classroom")}
+        time_slot_ids = {c["time_slot"] for c in d["cells"]}
+
+        subjects = {s.id: s for s in Subject.objects.filter(pk__in=subject_ids)}
+        instructors = {e.id: e for e in
+                       Employee.objects.filter(pk__in=instructor_ids)}
+        classrooms = {c.id: c for c in
+                      Classroom.objects.filter(pk__in=classroom_ids)}
+        time_slots = {t.id: t for t in
+                      TimeSlot.objects.filter(pk__in=time_slot_ids)}
+
+        missing: list[str] = []
+        if subject_ids - subjects.keys():
+            missing.append(f"subjects: {sorted(subject_ids - subjects.keys())}")
+        if instructor_ids - instructors.keys():
+            missing.append(f"instructors: {sorted(instructor_ids - instructors.keys())}")
+        if classroom_ids - classrooms.keys():
+            missing.append(f"classrooms: {sorted(classroom_ids - classrooms.keys())}")
+        if time_slot_ids - time_slots.keys():
+            missing.append(f"time_slots: {sorted(time_slot_ids - time_slots.keys())}")
+        if missing:
+            return Response({"detail": "Unknown master ids: " + "; ".join(missing)},
+                            status=http.HTTP_400_BAD_REQUEST)
+
+        def _resolve(cell):
+            return {
+                "subject": subjects[cell["subject"]],
+                "instructor": instructors[cell["instructor"]],
+                "classroom": classrooms.get(cell.get("classroom"))
+                if cell.get("classroom") else None,
+                "time_slot": time_slots[cell["time_slot"]],
+            }
+
+        result = bulk_publish_weekly_grid(
+            start_date=d["start_date"], end_date=d["end_date"],
+            batch=batch, cells=d["cells"], resolver=_resolve,
+            created_by=request.user, force=d.get("force", False),
         )
         return Response(result, status=http.HTTP_201_CREATED)
 

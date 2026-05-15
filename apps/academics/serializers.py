@@ -63,6 +63,57 @@ class BulkWeeklyPublishSerializer(serializers.Serializer):
         return attrs
 
 
+class _GridCellSerializer(serializers.Serializer):
+    """One cell in the weekly grid editor — a (weekday × time_slot)
+    position assigned to a subject/instructor/classroom."""
+
+    weekday = serializers.IntegerField(min_value=0, max_value=6)
+    time_slot = serializers.IntegerField()
+    subject = serializers.IntegerField()
+    instructor = serializers.IntegerField()
+    classroom = serializers.IntegerField(required=False, allow_null=True)
+
+
+class WeeklyGridPublishSerializer(serializers.Serializer):
+    """Payload for `POST /schedule/bulk-weekly-grid/` — the PHP-style
+    "publish whole grid" action. The cells list holds all populated
+    (weekday × time_slot) positions for the batch; the server expands
+    each over the date range matching its weekday and inserts the
+    resulting ScheduleSlot rows in one transaction."""
+
+    batch = serializers.IntegerField()
+    start_date = serializers.DateField()
+    end_date = serializers.DateField()
+    force = serializers.BooleanField(required=False, default=False)
+    cells = _GridCellSerializer(many=True)
+
+    def validate(self, attrs):
+        if attrs["end_date"] < attrs["start_date"]:
+            raise serializers.ValidationError(
+                {"end_date": "Must be on or after start_date."}
+            )
+        if not attrs["cells"]:
+            raise serializers.ValidationError(
+                {"cells": "Provide at least one filled cell."}
+            )
+        # Reject duplicates within the submitted grid — two cells with
+        # the same (weekday, time_slot) collide before we even hit the
+        # DB conflict check.
+        seen: set[tuple[int, int]] = set()
+        for i, c in enumerate(attrs["cells"]):
+            key = (c["weekday"], c["time_slot"])
+            if key in seen:
+                raise serializers.ValidationError(
+                    {"cells": (
+                        f"Duplicate cell at index {i}: weekday "
+                        f"{c['weekday']} × time_slot {c['time_slot']} "
+                        "already specified."
+                    )}
+                )
+            seen.add(key)
+        return attrs
+
+
 # --- G.2 — Attendance --------------------------------------------------
 
 class AttendanceSerializer(serializers.ModelSerializer):
