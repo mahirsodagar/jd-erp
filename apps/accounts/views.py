@@ -34,6 +34,7 @@ from .serializers import (
     AdminResetPasswordSerializer,
     ChangePasswordSerializer,
     ForgotPasswordSerializer,
+    MeUpdateSerializer,
     ResetPasswordSerializer,
     TenantTokenObtainSerializer,
     UserCreateSerializer,
@@ -96,6 +97,14 @@ class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        return Response(UserSerializer(request.user).data)
+
+    def patch(self, request):
+        serializer = MeUpdateSerializer(
+            request.user, data=request.data, partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
         return Response(UserSerializer(request.user).data)
 
 

@@ -120,6 +120,26 @@ class UserCreateSerializer(serializers.ModelSerializer):
         return user
 
 
+class MeUpdateSerializer(serializers.ModelSerializer):
+    """Self-service profile edit — limited to the fields a user is
+    allowed to change about themselves. Username, roles, campuses, and
+    privilege flags stay admin-only."""
+
+    class Meta:
+        model = User
+        fields = ["full_name", "email"]
+
+    def validate_email(self, value):
+        qs = User.objects.filter(email__iexact=value)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError(
+                "Another account already uses this email.",
+            )
+        return value
+
+
 class UserUpdateSerializer(serializers.ModelSerializer):
     role_ids = serializers.ListField(
         child=serializers.IntegerField(), required=False, write_only=True,
