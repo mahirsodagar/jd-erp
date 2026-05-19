@@ -7,8 +7,15 @@ for dev and a real SMTP backend in prod.
 
 from __future__ import annotations
 
+from typing import Iterable
+
 from django.conf import settings
 from django.core.mail import EmailMessage
+
+
+# Attachments arrive as (filename, bytes, content_type) tuples — same
+# shape EmailMessage.attach() expects natively.
+Attachment = tuple[str, bytes, str]
 
 
 def send_email(
@@ -18,6 +25,7 @@ def send_email(
     subject: str,
     body: str,
     is_html: bool = False,
+    attachments: Iterable[Attachment] | None = None,
 ) -> tuple[bool, str]:
     if not recipient:
         return False, "No recipient address."
@@ -31,6 +39,10 @@ def send_email(
     )
     if is_html:
         msg.content_subtype = "html"
+
+    for att in attachments or ():
+        filename, content, content_type = att
+        msg.attach(filename, content, content_type or "application/octet-stream")
 
     try:
         sent = msg.send(fail_silently=False)

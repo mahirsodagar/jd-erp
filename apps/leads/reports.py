@@ -79,6 +79,7 @@ class ConversionFunnelView(_ReportBase):
             "total_leads": total,
             "active": status_counts.get(Lead.Status.ACTIVE, 0),
             "inactive": status_counts.get(Lead.Status.INACTIVE, 0),
+            "non_responsive": status_counts.get(Lead.Status.NON_RESPONSIVE, 0),
             "application_submitted": status_counts.get(Lead.Status.APPLICATION_SUBMITTED, 0),
             "enrolled": enrolled,
             "conversion_rate": round((enrolled / total) * 100, 2) if total else 0.0,

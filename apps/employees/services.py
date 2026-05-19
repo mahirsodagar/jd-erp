@@ -3,9 +3,11 @@ on PythonAnywhere free without system libraries."""
 
 import io
 import re
+import secrets
 from datetime import datetime
 
 import qrcode
+from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.db import transaction
 from django.db.models import Max
@@ -172,3 +174,82 @@ def render_id_card(employee: Employee) -> bytes:
     buf = io.BytesIO()
     card.save(buf, format="PNG")
     return buf.getvalue()
+
+
+# --- Portal account provisioning ----------------------------------------
+
+# Single shared role name that every freshly provisioned employee picks up.
+# Keep this in sync with `apps.roles.seed.seed_faculty_role`.
+DEFAULT_EMPLOYEE_ROLE = "Faculty"
+
+
+def _unique_username_for(employee: Employee) -> str:
+    """`emp_code` lower-cased + de-dup suffix if taken. Username collision
+    is unlikely with code-based slugs but the User table is project-wide,
+    so we still defend against it."""
+    User = get_user_model()
+    base = re.sub(r"[^a-z0-9]+", "-", employee.emp_code.lower()).strip("-")
+    candidate = base or f"emp{employee.id}"
+    n = 1
+    while User.objects.filter(username__iexact=candidate).exists():
+        n += 1
+        candidate = f"{base}-{n}"
+    return candidate
+
+
+@transaction.atomic
+def provision_portal_user(
+    *,
+    employee: Employee,
+    default_role_name: str | None = DEFAULT_EMPLOYEE_ROLE,
+) -> tuple[object, str | None]:
+    """Create a portal `User` for the employee if one doesn't exist yet.
+
+    Returns `(user, temp_password)`. `temp_password` is None when the
+    employee already had an account — callers should show it once to HR
+    when fresh, otherwise nothing.
+
+    The user is linked via the `Employee.user_account` OneToOne so the
+    employee row is the source of truth; deleting the user nulls the
+    link but doesn't delete the employee.
+    """
+    from apps.roles.models import Role  # local to avoid app-init cycles
+
+    User = get_user_model()
+
+    if employee.user_account_id:
+        return employee.user_account, None
+
+    # Re-attach to an existing user that shares the employee's email.
+    # This makes the backfill idempotent on a system where someone has
+    # already manually provisioned a portal account via the admin UI.
+    if employee.email_primary:
+        existing = User.objects.filter(
+            email__iexact=employee.email_primary,
+        ).first()
+        if existing is not None:
+            employee.user_account = existing
+            employee.save(update_fields=["user_account"])
+            return existing, None
+
+    username = _unique_username_for(employee)
+    temp_password = secrets.token_urlsafe(12)
+    user = User.objects.create_user(
+        username=username,
+        email=employee.email_primary or "",
+        full_name=employee.full_name,
+        password=temp_password,
+    )
+    if employee.campus_id:
+        user.campuses.add(employee.campus)
+    if default_role_name:
+        role = Role.objects.filter(name=default_role_name).first()
+        if role is not None:
+            user.roles.add(role)
+
+    # Mirror the plaintext so HR can re-share it without forcing a
+    # rotation. See model field doc for the trade-off.
+    employee.user_account = user
+    employee.portal_temp_password = temp_password
+    employee.save(update_fields=["user_account", "portal_temp_password"])
+    return user, temp_password

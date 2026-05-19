@@ -176,6 +176,56 @@ def seed_admin_role():
     return role
 
 
+# Permission keys auto-granted to a new employee.
+#
+# The frontend sidebar gates each menu group on its module key being
+# present in the user's `modules` list, which is derived from their
+# permissions. So we grant the minimum set of perms whose presence
+# unlocks the right sidebar groups for an everyday employee:
+#
+#   leaves.report.view     → "Leaves" group (Apply, My Leaves, Balances)
+#   audit.course_end.submit → "Audit" group (so they can submit own
+#                              Faculty Daily / Course-End / Self-Appraisal)
+#
+# All listed perms also gate at least one endpoint that the employee
+# legitimately needs. Anything more sensitive (view_all, approve_any,
+# manage) stays admin-only and is granted later from the Users page.
+FACULTY_PERMISSION_KEYS = [
+    "leaves.report.view",
+    "audit.course_end.submit",
+]
+
+
+def seed_faculty_role():
+    """Baseline role assigned to every freshly-provisioned employee.
+
+    The keys in `FACULTY_PERMISSION_KEYS` are intentionally minimal —
+    HR grants extra access from the Users page when needed.
+    """
+    role, _ = Role.objects.get_or_create(
+        name="Faculty",
+        defaults={
+            "description": (
+                "Baseline access for employees: self-service leaves, "
+                "personal timetable / attendance / tests / certificates, "
+                "own daily reports, and tasks."
+            ),
+            "is_system": True,
+        },
+    )
+    role.is_system = True
+    role.description = role.description or (
+        "Baseline access for employees: self-service leaves, "
+        "personal timetable / attendance / tests / certificates, "
+        "own daily reports, and tasks."
+    )
+    role.save(update_fields=["is_system", "description"])
+    perms = Permission.objects.filter(key__in=FACULTY_PERMISSION_KEYS)
+    role.permissions.set(perms)
+    return role
+
+
 def seed_all():
     seed_permissions()
     seed_admin_role()
+    seed_faculty_role()

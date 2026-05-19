@@ -29,6 +29,7 @@ from apps.common.throttles import (
 )
 from apps.notifications.email import send_email
 
+from .password_mirror import mirror_plaintext_password
 from .permissions import HasPerm
 from .serializers import (
     AdminResetPasswordSerializer,
@@ -117,8 +118,10 @@ class ChangePasswordView(APIView):
             data=request.data, context={"request": request}
         )
         serializer.is_valid(raise_exception=True)
-        request.user.set_password(serializer.validated_data["new_password"])
+        new_pw = serializer.validated_data["new_password"]
+        request.user.set_password(new_pw)
         request.user.save(update_fields=["password"])
+        mirror_plaintext_password(request.user, new_pw)
         record_password_change(request, user=request.user)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -192,8 +195,10 @@ class AdminResetPasswordView(APIView):
         target = User.objects.get(pk=pk)
         serializer = AdminResetPasswordSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        target.set_password(serializer.validated_data["new_password"])
+        new_pw = serializer.validated_data["new_password"]
+        target.set_password(new_pw)
         target.save(update_fields=["password"])
+        mirror_plaintext_password(target, new_pw)
         record_password_reset(request, actor=request.user, target=target)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -275,8 +280,10 @@ class ResetPasswordView(APIView):
         serializer = ResetPasswordSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data["user"]
-        user.set_password(serializer.validated_data["new_password"])
+        new_pw = serializer.validated_data["new_password"]
+        user.set_password(new_pw)
         user.save(update_fields=["password"])
+        mirror_plaintext_password(user, new_pw)
         record_password_reset_completed(request, target=user)
 
         # Best-effort: tell the user their password just changed.

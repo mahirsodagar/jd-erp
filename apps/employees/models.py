@@ -170,6 +170,14 @@ class Employee(models.Model):
         settings.AUTH_USER_MODEL, null=True, blank=True,
         on_delete=models.SET_NULL, related_name="employee",
     )
+    portal_temp_password = models.CharField(
+        max_length=64, blank=True,
+        help_text=(
+            "Last issued plaintext password for the employee's portal "
+            "account. Stored so HR can re-share it without forcing a "
+            "reset. Mirrors the JD_ERP PHP behavior — treat as sensitive."
+        ),
+    )
 
     # Audit fields
     created_by = models.ForeignKey(

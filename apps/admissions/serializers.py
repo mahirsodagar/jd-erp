@@ -11,7 +11,8 @@ class StudentListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Student
         fields = [
-            "id", "application_form_id", "student_name",
+            "id", "application_form_id", "registration_number",
+            "student_name",
             "campus", "campus_name",
             "program", "program_name",
             "academic_year", "academic_year_code",
@@ -52,11 +53,13 @@ class StudentDetailSerializer(serializers.ModelSerializer):
         read_only=True, default="",
     )
     photo_url = serializers.SerializerMethodField()
+    portal_username = serializers.SerializerMethodField()
+    portal_temp_password = serializers.SerializerMethodField()
 
     class Meta:
         model = Student
         fields = [
-            "id", "application_form_id",
+            "id", "application_form_id", "registration_number",
             "student_name", "father_name", "mother_name",
             "gender", "dob", "category", "study_medium",
             "nationality", "blood_group",
@@ -74,6 +77,7 @@ class StudentDetailSerializer(serializers.ModelSerializer):
             "father_occupation", "mother_occupation",
             "photo", "photo_url",
             "user_account", "parent_user_account", "lead_origin",
+            "portal_username", "portal_temp_password",
             "application_fee_paid_at", "application_fee_amount",
             "application_fee_mode", "application_fee_ref",
             "application_fee_recorded_by_name",
@@ -82,6 +86,7 @@ class StudentDetailSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id", "application_form_id",
             "user_account", "parent_user_account", "lead_origin",
+            "portal_username", "portal_temp_password",
             "created_by", "created_on", "updated_by", "updated_on",
             "campus_name", "program_name", "course_name",
             "institute_name", "academic_year_code", "photo_url",
@@ -95,6 +100,33 @@ class StudentDetailSerializer(serializers.ModelSerializer):
     def get_photo_url(self, obj):
         request = self.context.get("request")
         return request.build_absolute_uri(obj.photo.url) if obj.photo and request else None
+
+    def get_portal_username(self, obj):
+        # Only surface to staff — students shouldn't see their own row
+        # carrying this. The cred-management UI is staff-only anyway.
+        if not self._can_view_credentials(obj):
+            return ""
+        return getattr(obj.user_account, "username", "") if obj.user_account_id else ""
+
+    def get_portal_temp_password(self, obj):
+        if not self._can_view_credentials(obj):
+            return ""
+        return obj.portal_temp_password or ""
+
+    def _can_view_credentials(self, obj) -> bool:
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user is None or not user.is_authenticated:
+            return False
+        if user.is_superuser:
+            return True
+        # Hide from the student herself; show to anyone who can edit
+        # the student (HR / admissions staff).
+        if obj.user_account_id and obj.user_account_id == user.id:
+            return False
+        return user.roles.filter(
+            permissions__key="admissions.student.edit",
+        ).exists()
 
 
 class StudentSelfUpdateSerializer(serializers.ModelSerializer):
@@ -122,6 +154,7 @@ class StudentHRUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Student
         fields = [
+            "registration_number",
             "student_name", "father_name", "mother_name",
             "gender", "dob", "category", "study_medium",
             "nationality", "blood_group",

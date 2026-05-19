@@ -1,5 +1,6 @@
 from django.urls import path
 
+from .bulk_message import LeadBulkMessageView
 from .reports import (
     ConversionFunnelView,
     CounsellorLeaderboardView,
@@ -35,6 +36,7 @@ from .views import (
 
 urlpatterns = [
     path("intake/", LeadIntakeView.as_view(), name="lead-intake"),
+    path("bulk-message/", LeadBulkMessageView.as_view(), name="lead-bulk-message"),
 
     # F.3 — counsellor pools
     path("pools/", PoolListCreateView.as_view(), name="pool-list-create"),

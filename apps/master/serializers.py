@@ -46,7 +46,7 @@ class ProgramSerializer(serializers.ModelSerializer):
 class InstituteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Institute
-        fields = ["id", "name", "code", "logo", "is_active",
+        fields = ["id", "name", "code", "logo", "email_domain", "is_active",
                   "created_at", "updated_at"]
         read_only_fields = ["id", "created_at", "updated_at"]
 

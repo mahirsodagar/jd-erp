@@ -20,7 +20,12 @@ from .serializers import (
     StudentRemarkSerializer,
     StudentSelfUpdateSerializer,
 )
-from .services import can_enroll
+from .services import (
+    can_enroll, graduate_batch, promote_batch,
+    provision_student_portal_credentials,
+)
+from .services_handbook import send_handbook_email
+from .services_portal_email import send_portal_credentials_email
 from .services_undertaking import send_undertaking
 
 
@@ -46,6 +51,7 @@ class StudentListView(APIView):
             qs = qs.filter(
                 Q(student_name__icontains=q)
                 | Q(application_form_id__icontains=q)
+                | Q(registration_number__icontains=q)
                 | Q(student_email__icontains=q)
                 | Q(student_mobile__icontains=q)
             )
@@ -332,4 +338,238 @@ class EnrollmentUndertakingView(APIView):
         except RuntimeError as e:
             return Response({"detail": str(e)},
                             status=http.HTTP_502_BAD_GATEWAY)
+        return Response(result)
+
+
+# --- Portal credentials + handbook -------------------------------------
+
+class StudentSendPortalCredentialsView(APIView):
+    """Single-button "send portal credentials" action.
+
+    On each call we:
+      1. Provision the portal user if missing (set `Student.user_account`).
+      2. Generate a personalised institute email from the Institute's
+         `email_domain` master.
+      3. Rotate the user's password so the email reflects current state.
+      4. Email the (institute_email, password) pair to the student's
+         personal email.
+
+    Returns the username, email, and the just-issued temporary password
+    so the calling counsellor can show it on screen too (matching the
+    PHP "show once" pattern).
+
+    Gated on the student having at least one Enrollment — per the
+    revised admission flow.
+    """
+
+    permission_classes = [IsAuthenticated, StudentAccessPolicy]
+
+    def post(self, request, pk):
+        try:
+            student = Student.objects.select_related(
+                "institute", "campus",
+            ).get(pk=pk)
+        except Student.DoesNotExist as e:
+            raise Http404 from e
+        self.check_object_permissions(request, student)
+        if not has_perm(request.user, "admissions.student.edit"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+
+        if not Enrollment.objects.filter(student=student).exists():
+            return Response(
+                {"detail": "Enroll the student into a batch first."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            creds = provision_student_portal_credentials(student=student)
+        except ValueError as e:
+            return Response({"detail": str(e)},
+                            status=http.HTTP_400_BAD_REQUEST)
+
+        # Best-effort delivery: don't block the staff response on SMTP.
+        email_ok, email_err = send_portal_credentials_email(
+            student=student, creds=creds,
+        )
+
+        return Response({
+            **creds,
+            "delivered": email_ok,
+            "delivery_error": "" if email_ok else email_err,
+            "recipient": student.student_email or "",
+        })
+
+
+class StudentSendHandbookView(APIView):
+    """Emails the institute's student handbook to the student's personal
+    inbox. Plain-text body for now — attach the actual PDF later by
+    storing it on the Institute master."""
+
+    permission_classes = [IsAuthenticated, StudentAccessPolicy]
+
+    def post(self, request, pk):
+        try:
+            student = Student.objects.select_related(
+                "institute",
+            ).get(pk=pk)
+        except Student.DoesNotExist as e:
+            raise Http404 from e
+        self.check_object_permissions(request, student)
+        if not has_perm(request.user, "admissions.student.edit"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+
+        if not Enrollment.objects.filter(student=student).exists():
+            return Response(
+                {"detail": "Enroll the student into a batch first."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+
+        email_ok, email_err = send_handbook_email(student=student)
+        return Response({
+            "delivered": email_ok,
+            "delivery_error": "" if email_ok else email_err,
+            "recipient": student.student_email or "",
+        })
+
+
+# --- Batch promotion + bulk graduation ---------------------------------
+
+class BatchPromoteView(APIView):
+    """POST /api/admissions/batch-promote/
+
+    Body:
+        source_batch: int
+        source_semester: int
+        target_batch: int
+        target_semester: int
+        target_academic_year: int
+        student_ids: list[int] | null   # null = whole batch
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        u = request.user
+        if not (u.is_superuser
+                or has_perm(u, "admissions.enrollment.manage")
+                or has_perm(u, "admissions.student.promote")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+
+        from apps.master.models import AcademicYear, Batch, Semester
+
+        try:
+            source_batch = Batch.objects.get(pk=request.data.get("source_batch"))
+            source_semester = Semester.objects.get(
+                pk=request.data.get("source_semester"),
+            )
+            target_batch = Batch.objects.get(pk=request.data.get("target_batch"))
+            target_semester = Semester.objects.get(
+                pk=request.data.get("target_semester"),
+            )
+            target_year = AcademicYear.objects.get(
+                pk=request.data.get("target_academic_year"),
+            )
+        except (Batch.DoesNotExist, Semester.DoesNotExist,
+                AcademicYear.DoesNotExist):
+            return Response(
+                {"detail": "Source / target batch / semester / academic year "
+                           "not found."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+
+        # Campus scope — block users from promoting students out of
+        # campuses they can't see.
+        if not can_view_all_campuses(u):
+            campuses = set(u.campuses.values_list("pk", flat=True))
+            if source_batch.campus_id not in campuses \
+                    or target_batch.campus_id not in campuses:
+                return Response(
+                    {"detail": "Source or target campus is out of scope."},
+                    status=http.HTTP_403_FORBIDDEN,
+                )
+
+        raw_ids = request.data.get("student_ids")
+        student_ids = None
+        if raw_ids is not None:
+            try:
+                student_ids = [int(v) for v in raw_ids]
+            except (TypeError, ValueError):
+                return Response({"student_ids": "Must be a list of integers."},
+                                status=http.HTTP_400_BAD_REQUEST)
+
+        try:
+            result = promote_batch(
+                source_batch=source_batch,
+                source_semester=source_semester,
+                target_batch=target_batch,
+                target_semester=target_semester,
+                target_academic_year=target_year,
+                student_ids=student_ids,
+                actor=u,
+            )
+        except ValueError as e:
+            return Response({"detail": str(e)},
+                            status=http.HTTP_400_BAD_REQUEST)
+        return Response(result)
+
+
+class BatchGraduateView(APIView):
+    """POST /api/admissions/batch-graduate/
+
+    Mark every ACTIVE enrollment in a batch (optionally one semester)
+    as ALUMNI, creating an AlumniRecord per student.
+
+    Body:
+        batch: int
+        semester: int | null
+        student_ids: list[int] | null
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        u = request.user
+        if not (u.is_superuser
+                or has_perm(u, "admissions.enrollment.manage")
+                or has_perm(u, "academics.certificate.issue")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+
+        from apps.master.models import Batch, Semester
+
+        try:
+            batch = Batch.objects.get(pk=request.data.get("batch"))
+        except Batch.DoesNotExist:
+            return Response({"batch": "Required and must exist."},
+                            status=http.HTTP_400_BAD_REQUEST)
+
+        semester = None
+        if request.data.get("semester") is not None:
+            try:
+                semester = Semester.objects.get(pk=request.data["semester"])
+            except Semester.DoesNotExist:
+                return Response({"semester": "Not found."},
+                                status=http.HTTP_400_BAD_REQUEST)
+
+        if not can_view_all_campuses(u) \
+                and not u.campuses.filter(pk=batch.campus_id).exists():
+            return Response({"detail": "Batch campus is out of scope."},
+                            status=http.HTTP_403_FORBIDDEN)
+
+        raw_ids = request.data.get("student_ids")
+        student_ids = None
+        if raw_ids is not None:
+            try:
+                student_ids = [int(v) for v in raw_ids]
+            except (TypeError, ValueError):
+                return Response({"student_ids": "Must be a list of integers."},
+                                status=http.HTTP_400_BAD_REQUEST)
+
+        result = graduate_batch(
+            batch=batch, semester=semester,
+            student_ids=student_ids, actor=u,
+        )
         return Response(result)

@@ -34,7 +34,8 @@ from .serializers import (
     StatusToggleSerializer,
 )
 from .services import (
-    generate_emp_code, make_thumbnail, regenerate_qr, render_id_card,
+    generate_emp_code, make_thumbnail, provision_portal_user, regenerate_qr,
+    render_id_card,
 )
 
 User = get_user_model()
@@ -228,11 +229,23 @@ class EmployeeListCreateView(APIView):
             if photo:
                 emp.photo.save("photo.jpg", make_thumbnail(photo), save=True)
             regenerate_qr(emp)
+            # Always provision a portal user so HR can grant extra access
+            # later from the Users page. `temp_password` is non-None only
+            # for freshly-created accounts.
+            user, temp_password = provision_portal_user(employee=emp)
 
-        return Response(
-            EmployeeDetailSerializer(emp, context={"request": request}).data,
-            status=http.HTTP_201_CREATED,
-        )
+        payload = EmployeeDetailSerializer(
+            emp, context={"request": request},
+        ).data
+        # Surface the new login once — the only chance to show it.
+        if temp_password:
+            payload["portal_account"] = {
+                "username": user.username,
+                "temporary_password": temp_password,
+                "note": ("Share this with the employee now. The password is "
+                         "shown once; reset it from the Users page later."),
+            }
+        return Response(payload, status=http.HTTP_201_CREATED)
 
 
 class EmployeeDetailView(APIView):

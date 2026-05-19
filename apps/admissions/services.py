@@ -308,18 +308,10 @@ def submit_application_from_lead(*, lead: Lead, payload: dict) -> tuple[Student,
         }
 
     # --- Create path: first-time submit ------------------------------------
-    seed = (payload.get("student_email") or lead.email or "").split("@")[0] \
-        or payload.get("student_name") or lead.name
-    username = _unique_username(seed=seed)
-    temp_password = secrets.token_urlsafe(12)
-    user = User.objects.create_user(
-        username=username,
-        email=payload.get("student_email") or lead.email,
-        full_name=payload.get("student_name") or lead.name,
-        password=temp_password,
-    )
-    user.campuses.add(campus)
-
+    # Portal credentials are NOT generated here. Per the revised flow,
+    # staff explicitly issues an institute-personalised login + password
+    # after the student is enrolled, via the
+    # `/api/students/<id>/send-portal-credentials/` endpoint.
     app_id = generate_application_form_id(institute_code=institute.code)
     student = Student.objects.create(
         application_form_id=app_id,
@@ -352,7 +344,6 @@ def submit_application_from_lead(*, lead: Lead, payload: dict) -> tuple[Student,
         mother_email=payload.get("mother_email", ""),
         father_occupation=payload.get("father_occupation", ""),
         mother_occupation=payload.get("mother_occupation", ""),
-        user_account=user,
         lead_origin=lead,
     )
 
@@ -378,9 +369,160 @@ def submit_application_from_lead(*, lead: Lead, payload: dict) -> tuple[Student,
         )
 
     return student, {
-        "username": username,
-        "temporary_password": temp_password,
-        "note": "Your portal account has been created. Save these credentials.",
+        "application_form_id": app_id,
+        "note": "Application submitted.",
+    }
+
+
+# --- Batch promotion + bulk graduation ---------------------------------
+
+@transaction.atomic
+def promote_batch(
+    *,
+    source_batch,
+    source_semester,
+    target_batch,
+    target_semester,
+    target_academic_year,
+    student_ids: list[int] | None = None,
+    actor=None,
+) -> dict:
+    """Promote ACTIVE enrollments from one (batch, semester) into a new
+    placement. Mirrors the JD_ERP PHP "Promote Students" screen.
+
+    For each promoted student:
+      1. The old Enrollment row is flipped to PROMOTED (audit trail
+         preserved — transcripts / attendance stay attached to it).
+      2. A new Enrollment row is created in the target with status=ACTIVE.
+
+    `student_ids` lets callers cherry-pick a subset; None = all ACTIVE
+    enrollments in the source.
+
+    The target's `program`, `course`, `campus` are inherited from the
+    target batch — only `semester` and `academic_year` are caller-
+    supplied, which keeps the API small but flexible enough for the
+    "next-sem within the same batch" use case.
+
+    Raises ValueError on configuration problems (target == source,
+    target batch with no program, etc.) so the view can surface a
+    400.
+    """
+    from datetime import date as _date
+
+    from .models import Enrollment
+
+    if (source_batch.id == target_batch.id
+            and source_semester.id == target_semester.id):
+        raise ValueError(
+            "Target placement matches the source — nothing to promote.",
+        )
+
+    qs = (
+        Enrollment.objects
+        .select_related("student")
+        .filter(
+            batch=source_batch,
+            semester=source_semester,
+            status=Enrollment.Status.ACTIVE,
+        )
+    )
+    if student_ids is not None:
+        qs = qs.filter(student_id__in=student_ids)
+
+    promoted = []
+    skipped = []
+    today = _date.today()
+    for old in qs:
+        # If the student already has an ACTIVE enrollment in the target,
+        # skip — don't create duplicates.
+        if Enrollment.objects.filter(
+            student=old.student,
+            batch=target_batch,
+            semester=target_semester,
+            academic_year=target_academic_year,
+        ).exclude(status=Enrollment.Status.DROPPED).exists():
+            skipped.append({
+                "student_id": old.student_id,
+                "student_name": old.student.student_name,
+                "reason": "Already has an enrollment in the target placement.",
+            })
+            continue
+
+        old.status = Enrollment.Status.PROMOTED
+        old.save(update_fields=["status", "updated_on"])
+
+        new = Enrollment.objects.create(
+            student=old.student,
+            program=target_batch.program,
+            course=old.course,
+            semester=target_semester,
+            campus=target_batch.campus,
+            batch=target_batch,
+            academic_year=target_academic_year,
+            status=Enrollment.Status.ACTIVE,
+            elective_subjects=old.elective_subjects,
+            entry_date=today,
+            entry_user=actor,
+        )
+        promoted.append({
+            "student_id": old.student_id,
+            "student_name": old.student.student_name,
+            "from_enrollment_id": old.id,
+            "to_enrollment_id": new.id,
+        })
+
+    return {
+        "promoted": promoted,
+        "skipped": skipped,
+        "totals": {
+            "promoted": len(promoted),
+            "skipped": len(skipped),
+        },
+    }
+
+
+@transaction.atomic
+def graduate_batch(
+    *,
+    batch,
+    semester=None,
+    student_ids: list[int] | None = None,
+    actor=None,
+) -> dict:
+    """Mark every ACTIVE enrollment in a batch (optionally filtered to
+    one semester or a subset of students) as ALUMNI, creating an
+    AlumniRecord per student via the existing `graduate_enrollment`
+    helper.
+
+    Idempotent: enrollments already in ALUMNI are skipped silently.
+    """
+    from apps.academics.cert_service import graduate_enrollment
+
+    from .models import Enrollment
+
+    qs = (
+        Enrollment.objects
+        .select_related("student", "academic_year", "program", "batch")
+        .filter(batch=batch, status=Enrollment.Status.ACTIVE)
+    )
+    if semester is not None:
+        qs = qs.filter(semester=semester)
+    if student_ids is not None:
+        qs = qs.filter(student_id__in=student_ids)
+
+    graduated = []
+    for enr in qs:
+        _, rec = graduate_enrollment(enrollment=enr, by_user=actor)
+        graduated.append({
+            "student_id": enr.student_id,
+            "student_name": enr.student.student_name,
+            "enrollment_id": enr.id,
+            "alumni_id": rec.id,
+        })
+
+    return {
+        "graduated": graduated,
+        "totals": {"graduated": len(graduated)},
     }
 
 
@@ -394,3 +536,112 @@ def can_enroll(student: Student) -> tuple[bool, str]:
     if not student.current_address:
         return False, "Current address is required before enrollment."
     return True, ""
+
+
+# --- Institute-personalised email + portal credentials -----------------
+
+def institute_email_domain(institute) -> str:
+    """Pick the email domain configured on the Institute, falling back to
+    `<code>.in` lowercased so a missing master value still produces a
+    usable address."""
+    return (institute.email_domain or "").strip() \
+        or f"{(institute.code or 'institute').lower()}.in"
+
+
+def _institute_local_part(student: Student) -> str:
+    """`firstname.lastname` flavoured local-part. Strips diacritics, keeps
+    letters and digits, lowercased. Falls back to the application form id
+    when the name produces nothing usable."""
+    raw = (student.student_name or "").strip().lower()
+    parts = [re.sub(r"[^a-z0-9]+", "", p) for p in raw.split()]
+    parts = [p for p in parts if p]
+    if parts:
+        local = ".".join(parts[:2]) if len(parts) >= 2 else parts[0]
+    else:
+        local = re.sub(r"[^a-z0-9]+", "", student.application_form_id.lower())
+    return local or "student"
+
+
+def _ensure_unique_username(seed: str, *, exclude_pk: int | None = None) -> str:
+    """Like `_unique_username` but also leaves an existing username alone
+    if it belongs to the user we're about to update (no churn on reset)."""
+    base = re.sub(r"[^a-z0-9._]+", "", (seed or "student").lower())[:64] or "student"
+    candidate = base
+    n = 1
+    while True:
+        qs = User.objects.filter(username__iexact=candidate)
+        if exclude_pk is not None:
+            qs = qs.exclude(pk=exclude_pk)
+        if not qs.exists():
+            return candidate
+        n += 1
+        candidate = f"{base}{n}"
+
+
+@transaction.atomic
+def provision_student_portal_credentials(*, student: Student) -> dict:
+    """Create (or rotate) the student's portal user, set the institute
+    email, and return `{ username, email, temporary_password }`.
+
+    Idempotent:
+      - First call → creates the User, populates `student.institute_email`,
+        generates a temp password.
+      - Subsequent calls → reuse the existing `user_account` and rotate
+        the password. `institute_email` is left alone unless empty.
+
+    The returned dict is plain so the view can hand it to the email
+    template *and* return it to staff once.
+    """
+    institute = student.institute
+    if institute is None:
+        raise ValueError(
+            "Student has no institute set — fix the record before issuing "
+            "portal credentials.",
+        )
+
+    domain = institute_email_domain(institute)
+    if not student.institute_email:
+        local = _institute_local_part(student)
+        email = f"{local}@{domain}"
+        # Guard against another student already owning the same address.
+        suffix = 2
+        while Student.objects.filter(
+            institute_email__iexact=email,
+        ).exclude(pk=student.pk).exists():
+            email = f"{local}{suffix}@{domain}"
+            suffix += 1
+        student.institute_email = email
+
+    temp_password = secrets.token_urlsafe(10)
+    if student.user_account_id is None:
+        username = _ensure_unique_username(student.institute_email)
+        user = User.objects.create_user(
+            username=username,
+            email=student.institute_email,
+            full_name=student.student_name,
+            password=temp_password,
+        )
+        if student.campus_id:
+            user.campuses.add(student.campus)
+        student.user_account = user
+    else:
+        user = student.user_account
+        user.set_password(temp_password)
+        # Keep the user's primary email + display name aligned with the
+        # latest institute email and student name.
+        user.email = student.institute_email
+        user.full_name = student.student_name
+        user.save(update_fields=["password", "email", "full_name"])
+
+    # Mirror the plaintext so staff can re-share it without forcing a
+    # rotation. See model field doc for the trade-off.
+    student.portal_temp_password = temp_password
+    student.save(update_fields=[
+        "institute_email", "user_account", "portal_temp_password",
+    ])
+
+    return {
+        "username": user.username,
+        "email": student.institute_email,
+        "temporary_password": temp_password,
+    }

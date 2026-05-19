@@ -6,6 +6,7 @@ class Lead(models.Model):
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
         INACTIVE = "inactive", "Inactive"
+        NON_RESPONSIVE = "non_responsive", "Non Responsive"
         APPLICATION_SUBMITTED = "application_submitted", "Application Submitted"
         ENROLLED = "enrolled", "Enrolled"
 

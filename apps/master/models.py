@@ -11,6 +11,14 @@ class Institute(models.Model):
         upload_to="institute/logos/", blank=True, null=True,
         help_text="Used on ID cards and printed reports.",
     )
+    email_domain = models.CharField(
+        max_length=120, blank=True,
+        help_text=(
+            "Domain used for personalised student portal emails — e.g. "
+            "`jdift.in`. When blank, falls back to `<code>.in` "
+            "lowercased."
+        ),
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
