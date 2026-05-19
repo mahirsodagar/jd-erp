@@ -45,6 +45,7 @@ class UserSerializer(serializers.ModelSerializer):
     modules = serializers.SerializerMethodField()
     campuses = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
     is_student = serializers.SerializerMethodField()
+    is_parent = serializers.SerializerMethodField()
     is_employee = serializers.SerializerMethodField()
 
     class Meta:
@@ -52,7 +53,7 @@ class UserSerializer(serializers.ModelSerializer):
         fields = [
             "id", "username", "email", "full_name",
             "is_active", "is_staff", "is_superuser",
-            "is_student", "is_employee",
+            "is_student", "is_parent", "is_employee",
             "campuses",
             "date_joined", "last_login",
             "roles", "permissions", "modules",
@@ -60,7 +61,7 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id", "is_superuser", "date_joined", "last_login",
             "roles", "permissions", "modules",
-            "campuses", "is_student", "is_employee",
+            "campuses", "is_student", "is_parent", "is_employee",
         ]
 
     def get_roles(self, obj):
@@ -84,6 +85,11 @@ class UserSerializer(serializers.ModelSerializer):
     def get_is_student(self, obj):
         # Reverse OneToOne from admissions.Student.user_account
         return getattr(obj, "student", None) is not None
+
+    def get_is_parent(self, obj):
+        # Reverse FK from admissions.Student.parent_user_account
+        from apps.admissions.models import Student
+        return Student.objects.filter(parent_user_account=obj).exists()
 
     def get_is_employee(self, obj):
         # Reverse OneToOne from employees.Employee.user_account
