@@ -585,6 +585,46 @@ class FeedbackLinkView(APIView):
         return Response({"enabled": True, "url": e.batch.feedback_link})
 
 
+class FeedbackOptionsView(APIView):
+    """Instructor + subject options the student can rate, derived from their
+    own published timetable. Avoids exposing the full employees/subjects
+    catalogue to portal users."""
+
+    permission_classes = [IsStudentOnly]
+
+    def get(self, request):
+        e = request.portal_ctx.enrollment
+        if e is None:
+            return Response({"instructors": [], "subjects": []})
+        slots = (ScheduleSlot.objects
+                 .filter(batch=e.batch,
+                         status=ScheduleSlot.Status.SCHEDULED)
+                 .select_related("instructor", "subject"))
+        instructors_by_id = {}
+        subjects_by_id = {}
+        for s in slots:
+            if s.instructor_id and s.instructor_id not in instructors_by_id:
+                instructors_by_id[s.instructor_id] = {
+                    "id": s.instructor_id,
+                    "name": s.instructor.full_name,
+                    "emp_code": getattr(s.instructor, "emp_code", "") or "",
+                }
+            if s.subject_id and s.subject_id not in subjects_by_id:
+                subjects_by_id[s.subject_id] = {
+                    "id": s.subject_id,
+                    "code": s.subject.code,
+                    "name": s.subject.name,
+                }
+        return Response({
+            "instructors": sorted(
+                instructors_by_id.values(), key=lambda x: x["name"],
+            ),
+            "subjects": sorted(
+                subjects_by_id.values(), key=lambda x: x["code"],
+            ),
+        })
+
+
 # --- Educational qualifications ------------------------------------
 
 class QualificationListCreateView(APIView):

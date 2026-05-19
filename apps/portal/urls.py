@@ -4,7 +4,8 @@ from .views import (
     AssignmentListView, AssignmentSubjectsView, AssignmentSubmitView,
     AttendanceCalendarView, AttendanceReportView,
     ChangePasswordView, CoursewareListView, CoursewareSubjectsView,
-    DashboardView, FeedbackLinkView, LeaveListCreateView, MeView,
+    DashboardView, FeedbackLinkView, FeedbackOptionsView,
+    LeaveListCreateView, MeView,
     QualificationListCreateView, TestDetailView, TestListView,
     TestResultView, TestSubjectsView, TestSubmitView, TimetableView,
 )
@@ -57,6 +58,8 @@ urlpatterns = [
     # Feedback link
     path("feedback-link/", FeedbackLinkView.as_view(),
          name="portal-feedback-link"),
+    path("feedback/options/", FeedbackOptionsView.as_view(),
+         name="portal-feedback-options"),
 
     # Qualifications (educational documents)
     path("qualifications/", QualificationListCreateView.as_view(),
