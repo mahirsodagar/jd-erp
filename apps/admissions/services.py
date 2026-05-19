@@ -530,11 +530,15 @@ def graduate_batch(
 
 def can_enroll(student: Student) -> tuple[bool, str]:
     """Has the student done enough to be enrolled? At minimum: form
-    must be filled (DOB realistic, address present)."""
+    must be filled (DOB realistic, address present). A student may
+    only be enrolled once — re-enrollment is not supported here; semester
+    progression is handled via promotion on the existing record."""
     if student.dob.year < 1950:
         return False, "Date of birth looks unset; student must complete the form first."
     if not student.current_address:
         return False, "Current address is required before enrollment."
+    if Enrollment.objects.filter(student=student).exists():
+        return False, "Student is already enrolled. Each student can be enrolled only once."
     return True, ""
 
 
