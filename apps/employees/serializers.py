@@ -17,10 +17,16 @@ class DepartmentSerializer(serializers.ModelSerializer):
 
 
 class DesignationSerializer(serializers.ModelSerializer):
+    role_name = serializers.CharField(source="role.name", read_only=True, default="")
+
     class Meta:
         model = Designation
-        fields = ["id", "name", "is_active", "created_at", "updated_at"]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        fields = [
+            "id", "name", "is_active",
+            "role", "role_name",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "role_name", "created_at", "updated_at"]
 
 
 class EmployeeListSerializer(serializers.ModelSerializer):

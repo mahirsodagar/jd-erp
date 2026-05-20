@@ -184,11 +184,13 @@ DEFAULT_EMPLOYEE_ROLE = "Faculty"
 
 
 def _unique_username_for(employee: Employee) -> str:
-    """`emp_code` lower-cased + de-dup suffix if taken. Username collision
-    is unlikely with code-based slugs but the User table is project-wide,
-    so we still defend against it."""
+    """Username = slugified `first_name`, with a numeric suffix on
+    collision. Falls back to `emp_code` and then `emp<id>` if the first
+    name is missing or only contains characters we can't slugify."""
     User = get_user_model()
-    base = re.sub(r"[^a-z0-9]+", "-", employee.emp_code.lower()).strip("-")
+    base = re.sub(r"[^a-z0-9]+", "-", (employee.first_name or "").lower()).strip("-")
+    if not base:
+        base = re.sub(r"[^a-z0-9]+", "-", employee.emp_code.lower()).strip("-")
     candidate = base or f"emp{employee.id}"
     n = 1
     while User.objects.filter(username__iexact=candidate).exists():
@@ -246,6 +248,13 @@ def provision_portal_user(
         role = Role.objects.filter(name=default_role_name).first()
         if role is not None:
             user.roles.add(role)
+    # Inherit the role attached to this employee's designation (if any),
+    # so a Faculty designation can grant the Faculty role automatically.
+    designation_role_id = (
+        employee.designation.role_id if employee.designation_id else None
+    )
+    if designation_role_id:
+        user.roles.add(designation_role_id)
 
     # Mirror the plaintext so HR can re-share it without forcing a
     # rotation. See model field doc for the trade-off.

@@ -30,6 +30,19 @@ class Department(models.Model):
 class Designation(models.Model):
     name = models.CharField(max_length=120, unique=True)
     is_active = models.BooleanField(default=True)
+    # Optional default role inherited by employees who hold this
+    # designation. Provisioning attaches it to the portal user account.
+    role = models.ForeignKey(
+        "roles.Role",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="designations",
+        help_text=(
+            "When set, the portal user for any employee with this "
+            "designation receives this role on provisioning."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
