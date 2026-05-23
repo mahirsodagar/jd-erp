@@ -76,6 +76,10 @@ class ChangePasswordView(APIView):
                             status=http.HTTP_400_BAD_REQUEST)
         user.set_password(s.validated_data["new_password"])
         user.save(update_fields=["password"])
+        # Student set their own password — wipe the plaintext mirror so
+        # staff can no longer read it back via Student.portal_temp_password.
+        from apps.admissions.services import clear_temp_password_for
+        clear_temp_password_for(user)
         return Response({"detail": "Password updated."})
 
 
