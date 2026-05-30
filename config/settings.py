@@ -230,8 +230,10 @@ INSTITUTE_PAYMENT_DETAILS = env.json(
 # https://www.bulksmsgateway.in — DLT-compliant transactional SMS.
 # Templates MUST be pre-registered with TRAI/DLT operators; the keys
 # below map our notification template_keys to the registered IDs.
-BULK_SMS_USER = env("BULK_SMS_USER", default="")
-BULK_SMS_PASSWORD = env("BULK_SMS_PASSWORD", default="")
+# Defaults mirror what the legacy PHP project used so the integration
+# works out of the box; override via env for any new environment.
+BULK_SMS_USER = env("BULK_SMS_USER", default="jdinstitute")
+BULK_SMS_PASSWORD = env("BULK_SMS_PASSWORD", default="JDInstitute321!")
 BULK_SMS_SENDER = env("BULK_SMS_SENDER", default="JDEDUC")
 BULK_SMS_TEMPLATE_IDS = {
     "lead.application_link.sms": env(
@@ -240,6 +242,46 @@ BULK_SMS_TEMPLATE_IDS = {
     "lead.fee_link.sms": env(
         "DLT_TPL_FEE_LINK", default="1307168958796572350",
     ),
+}
+
+
+# --- Email — MSG91 v5 transactional -----------------------------------
+
+# Legacy PHP project posts to https://control.msg91.com/api/v5/email/send
+# with hardcoded credentials. We default to the same values so the
+# template-based mails (`student_invoice_copy`, `assignment_assigned`,
+# `application_fee_receipt` etc.) keep working through the migration.
+# Override via env per environment — see apps/notifications/msg91.py.
+MSG91_AUTHKEY = env(
+    "MSG91_AUTHKEY", default="411327AvSZtxr9aUFW6669485dP1",
+)
+MSG91_SENDER_EMAIL = env(
+    "MSG91_SENDER_EMAIL", default="admin@mail.jdinstitute.com",
+)
+MSG91_DOMAIN = env(
+    "MSG91_DOMAIN", default="mail.jdinstitute.com",
+)
+MSG91_TIMEOUT = env.int("MSG91_TIMEOUT", default=10)
+
+# Mapping: our internal `template_key` → MSG91 template name (as
+# registered on MSG91's dashboard). Templates not listed here fall
+# through to plain SMTP via apps.notifications.email.send_email.
+#
+# Names come from the PHP wrappers — see admissions/save.php,
+# academics/asave.php, hr/hrsave.php in the JD_ERP source.
+MSG91_EMAIL_TEMPLATES = {
+    "fees.receipt.email":                "student_invoice_copy",
+    "fees.application_fee_receipt.email": "application_fee_receipt",
+    "academics.assignment_assigned.email": "assignment_assigned",
+    "leaves.application_employee.email":  "employee_leave_application",
+    "leaves.application_status_employee.email": "leave_application_status_employee",
+    "leaves.application_status_student.email":  "leave_application_status_student",
+    "hr.relieving.application.email":       "employee_relieving_application",
+    "hr.relieving.application_rejected.email": "employee_relieving_application_rejected",
+    "hr.relieving.experience_letter.email": "experience_letter_employee",
+    "hr.relieving.letter.email":            "relieving_letter_employee",
+    "tasks.assigned.email":   "task_assigned_2",
+    "tasks.completed.email":  "task_completed",
 }
 
 

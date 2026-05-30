@@ -103,11 +103,24 @@ def _dispatch_now(tmpl, recipient, cc, context, ct, oid,
         log.error = "" if ok else payload
         log.save(update_fields=["status", "error"])
     elif tmpl.channel == Channel.EMAIL:
-        from .email import send_email
-        ok, payload = send_email(
-            recipient=recipient, cc=cc, subject=subject, body=body,
-            is_html=False,
-        )
+        # Templated transactional mails go through MSG91 (legacy PHP
+        # behaviour); anything not in the registry falls back to plain
+        # SMTP. The MSG91 registry lives in settings.MSG91_EMAIL_TEMPLATES.
+        from .msg91 import send_msg91_template, template_for
+        msg91_name = template_for(tmpl.key)
+        if msg91_name:
+            ok, payload = send_msg91_template(
+                template_name=msg91_name,
+                recipient_email=recipient,
+                variables=context,
+                cc=cc,
+            )
+        else:
+            from .email import send_email
+            ok, payload = send_email(
+                recipient=recipient, cc=cc, subject=subject, body=body,
+                is_html=False,
+            )
         log.status = (NotificationDispatchLog.Status.SENT if ok
                       else NotificationDispatchLog.Status.FAILED)
         log.error = "" if ok else payload
