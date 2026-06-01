@@ -37,6 +37,21 @@ def _gfk_for(obj) -> tuple[ContentType | None, str]:
     return ContentType.objects.get_for_model(obj.__class__), str(obj.pk)
 
 
+def _guess_channel(template_key: str) -> str:
+    """Best-effort channel inference from a template_key suffix.
+    Used only when no NotificationTemplate row exists — so the
+    "missing template" log row at least picks the right column.
+    Accepts both dot- and underscore-namespacing."""
+    k = template_key.lower()
+    if k.endswith(".sms") or k.endswith("_sms"):
+        return "SMS"
+    if k.endswith(".wa") or k.endswith("_wa") or k.endswith(".whatsapp"):
+        return "WHATSAPP"
+    if k.endswith(".in_crm") or k.endswith("_in_crm"):
+        return "IN_CRM"
+    return "EMAIL"
+
+
 def queue_notification(
     *, template_key: str, recipient: str, context: dict | None = None,
     cc: str = "", fire_at: datetime | None = None, related=None,
@@ -52,16 +67,20 @@ def queue_notification(
         tmpl = NotificationTemplate.objects.get(key=template_key, is_active=True)
     except NotificationTemplate.DoesNotExist:
         # Templates can be added later; we still want to queue the intent
-        # so the row shows up in the dispatch log for diagnosis.
+        # so the row shows up in the dispatch log for diagnosis. The
+        # `channel` value is a best-effort guess from the key suffix so
+        # the log row is filterable; the actual send didn't happen.
         ct, oid = _gfk_for(related)
         return NotificationDispatchLog.objects.create(
-            channel="EMAIL",
+            channel=_guess_channel(template_key),
             template_key=template_key,
             recipient=recipient, cc=cc,
             subject="(template missing)",
             body=f"Template '{template_key}' not registered.",
             status=NotificationDispatchLog.Status.FAILED,
-            error=f"Template '{template_key}' not registered.",
+            error=f"Template '{template_key}' not registered. "
+                  f"Run `python manage.py seed_notification_templates` "
+                  f"or add it via Django admin.",
             content_type=ct, object_id=oid,
         )
 

@@ -68,6 +68,37 @@ TEMPLATES = [
      "Dear Parent,\n\nYour ward {name} was marked absent for "
      "{subject} ({slot}) on {date}, at our {campus} campus.\n\n"
      "Please contact the batch mentor if this is unexpected."),
+
+    # Lead → student conversion: application + fee link send-out
+    # (keys use dot-namespacing — different convention to the older
+    # snake_case keys above. Source of truth = the callers in
+    # apps/leads/send_links.py.)
+    ("lead.application_link.sms", "SMS", "",
+     "Dear {name}, Thank you for selecting JD, Your inquiry has been "
+     "submitted. Please click the link to complete your application - "
+     "{url}"),
+    ("lead.application_link.email", "EMAIL",
+     "JD Student Application Link : {name}",
+     "Greetings from JD!\nDear {name},\n\n"
+     "Thank you for selecting JD, Your inquiry has been submitted.\n\n"
+     "Please click the link to complete your application - {url}\n\n"
+     "With Regards,\nJD"),
+    ("lead.fee_link.sms", "SMS", "",
+     "Dear student, Greetings of the day! Thank you for choosing "
+     "{institute} for your Design/Art/Media course. Click the "
+     "following link {url} to pay your fees and complete the "
+     "admission process. Best Regards JD Admissions Team"),
+    ("lead.welcome.email", "EMAIL",
+     "Welcome Note for New Students and Parents",
+     "Dear {name},\n\n"
+     "Thank you for choosing JD as the place to pursue further "
+     "education! We are happy to welcome you onboard.\n\n"
+     "Our endeavours have always been to provide our students with a "
+     "cohesive learning environment that encompasses practical and "
+     "theoretical education.\n\n"
+     "For any clarifications or queries you can reach out to your "
+     "administrative office.\n\n"
+     "See you very soon!\n\nRegards,\nJD"),
 ]
 
 
