@@ -114,8 +114,12 @@ def _dispatch_now(tmpl, recipient, cc, context, ct, oid,
     Channel = NotificationTemplate.Channel
     if tmpl.channel == Channel.SMS:
         from .sms import send_sms
+        # MSG91 SMS uses positional vars (var1/var2/...) from the raw
+        # context dict — it ignores `body`. BulkSMS uses the rendered
+        # body. We pass both so the facade can route correctly.
         ok, payload = send_sms(
             recipient=recipient, body=body, template_key=tmpl.key,
+            context=context,
         )
         log.status = (NotificationDispatchLog.Status.SENT if ok
                       else NotificationDispatchLog.Status.FAILED)

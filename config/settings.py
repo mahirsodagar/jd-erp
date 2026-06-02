@@ -234,7 +234,17 @@ INSTITUTE_PAYMENT_DETAILS = env.json(
 )
 
 
-# --- SMS — Bulk SMS Gateway India --------------------------------------
+# --- SMS provider selection --------------------------------------------
+
+# Which gateway to use for outbound SMS:
+#   "msg91"   — control.msg91.com /api/v5/flow/  (works on PA free; uses
+#               a separate authkey + per-template flow IDs)
+#   "bulksms" — api.bulksmsgateway.in            (blocked on PA free's
+#               outbound proxy; only works on paid PA plans)
+SMS_PROVIDER = env("SMS_PROVIDER", default="msg91")
+
+
+# --- SMS — Bulk SMS Gateway India (legacy / fallback) ------------------
 
 # https://www.bulksmsgateway.in — DLT-compliant transactional SMS.
 # Templates MUST be pre-registered with TRAI/DLT operators; the keys
@@ -251,6 +261,36 @@ BULK_SMS_TEMPLATE_IDS = {
     "lead.fee_link.sms": env(
         "DLT_TPL_FEE_LINK", default="1307168958796572350",
     ),
+}
+
+
+# --- SMS — MSG91 v5 flow API ------------------------------------------
+
+# Separate authkey from the email one; MSG91 lets you mint per-purpose
+# keys ("SMS" row in the dashboard). Falls back to MSG91_AUTHKEY if the
+# SMS-specific key isn't set.
+MSG91_SMS_AUTHKEY = env("MSG91_SMS_AUTHKEY", default="")
+MSG91_SMS_SENDER_ID = env("MSG91_SMS_SENDER_ID", default="JDEDUC")
+
+# Map our internal template_key → the MSG91 *flow ID* (24-char hex from
+# the MSG91 dashboard after a DLT template has been linked). MSG91
+# stores the DLT-approved body on their side; we just send variables.
+# Leave a key empty until the corresponding flow is registered on the
+# MSG91 dashboard — `send_sms` will then return a clear "not configured"
+# error in the dispatch log instead of a 4xx from the provider.
+MSG91_SMS_TEMPLATE_IDS = {
+    "lead.application_link.sms": env("MSG91_FLOW_APPLICATION_LINK", default=""),
+    "lead.fee_link.sms":         env("MSG91_FLOW_FEE_LINK", default=""),
+}
+
+# Positional variable mapping per template. The template body
+# registered on MSG91's dashboard uses `{#var#}` placeholders which
+# become `var1`, `var2`, … on the wire. Order must match the order in
+# the DLT-approved body. Keys reference our context dict; missing keys
+# render as empty strings.
+MSG91_SMS_VAR_ORDER = {
+    "lead.application_link.sms": ["name", "url"],
+    "lead.fee_link.sms":         ["short_name", "url"],
 }
 
 
