@@ -83,11 +83,22 @@ TEMPLATES = [
      "Thank you for selecting JD, Your inquiry has been submitted.\n\n"
      "Please click the link to complete your application - {url}\n\n"
      "With Regards,\nJD"),
+    # Verbatim DLT-approved wording — must match what was registered
+    # with BulkSMS (template_id 1307168958796572350) or the SMS won't
+    # leave the gateway. Variables: {short_name}, {url}.
     ("lead.fee_link.sms", "SMS", "",
      "Dear student, Greetings of the day! Thank you for choosing "
-     "{institute} for your Design/Art/Media course. Click the "
+     "{short_name} for your Design/Art/Media course. Click the "
      "following link {url} to pay your fees and complete the "
      "admission process. Best Regards JD Admissions Team"),
+    ("lead.fee_link.email", "EMAIL",
+     "{institute} — Application fee payment link",
+     "Dear {name},\n\n"
+     "Thank you for choosing {institute} for your Design/Art/Media "
+     "course.\n\n"
+     "Click the link below to pay your fees and complete the "
+     "admission process:\n\n{url}\n\n"
+     "Best Regards,\nJD Admissions Team"),
     ("lead.welcome.email", "EMAIL",
      "Welcome Note for New Students and Parents",
      "Dear {name},\n\n"

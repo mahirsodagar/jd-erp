@@ -264,22 +264,100 @@ def _fee_email_text(*, lead: Lead, payment: dict, amount: str) -> str:
 
 
 def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
-    """Email the student UPI / bank / QR payment instructions, send a
-    short SMS pointing them at the email."""
+    """Send the fee-payment link to the lead by both SMS and email.
+
+    Matches `send_application_link`'s pattern: both legs go through
+    `queue_notification(...)` (so they land in the dispatch log and use
+    the registered templates), and both reference the same per-institute
+    short URL from `settings.FEE_LINK_URLS`. The SMS body matches the
+    legacy PHP DLT-approved wording (template_id 1307168958796572350).
+    """
     payment = _payment_details(institute_key)
     institute_label = payment["payee_name"]
-    # Pull from the matching FeeTemplate (lead.campus + lead.program)
-    # so admissions can edit the fee from Master Data without a deploy.
+    short_name = payment.get("short_name", institute_label)
+
+    fee_urls = getattr(settings, "FEE_LINK_URLS", {}) or {}
+    url = fee_urls.get(institute_key)
+    if not url:
+        raise ValueError(
+            f"No fee-link URL configured for institute '{institute_key}'. "
+            f"Set FEE_LINK_URLS[{institute_key!r}] in settings or env.",
+        )
+
+    # SMS — verbatim DLT wording from PHP (`sendfeelink.php`).
+    sms_body = (
+        f"Dear student, Greetings of the day! Thank you for choosing "
+        f"{short_name} for your Design/Art/Media course. Click the "
+        f"following link {url} to pay your fees and complete the "
+        f"admission process. Best Regards JD Admissions Team"
+    )
+    sms_log = queue_notification(
+        template_key="lead.fee_link.sms",
+        recipient=lead.phone,
+        context={
+            "name": lead.name, "url": url,
+            "institute": institute_label, "short_name": short_name,
+        },
+        related=lead,
+    )
+
+    # Email — same pattern as send_application_link: short body, link
+    # in plain text, routed through the dispatcher.
+    email_subject = f"{institute_label} — Application fee payment link"
+    email_body = (
+        f"Dear {lead.name},\n\n"
+        f"Thank you for choosing {institute_label} for your Design/Art/"
+        f"Media course.\n\n"
+        f"Click the link below to pay your fees and complete the "
+        f"admission process:\n\n{url}\n\n"
+        f"Best Regards,\nJD Admissions Team"
+    )
+    email_log = None
+    if lead.email:
+        email_log = queue_notification(
+            template_key="lead.fee_link.email",
+            recipient=lead.email,
+            context={
+                "name": lead.name, "url": url,
+                "institute": institute_label,
+            },
+            related=lead,
+        )
+
+    comm = LeadCommunication.objects.create(
+        lead=lead,
+        type=LeadCommunication.Type.SMS,
+        subject=email_subject,
+        message=sms_body,
+        sent_at=timezone.now(),
+        logged_by=actor,
+    )
+
+    return {
+        "sms_log_id": getattr(sms_log, "id", None),
+        "email_log_id": getattr(email_log, "id", None),
+        "communication_id": comm.id,
+        "url": url,
+        "institute": institute_label,
+    }
+
+
+# Kept for any callers that still want a rich UPI/QR HTML email — not
+# wired into send_fee_link any more. Use this directly when you need
+# the embedded QR + bank-transfer block.
+def send_fee_payment_instructions_email(
+    *, lead: Lead, institute_key: str, actor=None,
+) -> dict:
+    """Rich HTML email with UPI deeplink, QR code, and bank-transfer
+    details. Use this when a counsellor wants the student to have full
+    payment-method options instead of just a short URL."""
+    payment = _payment_details(institute_key)
+    institute_label = payment["payee_name"]
     amount = _application_fee_for_lead(lead, payment)
 
     if not lead.email:
-        raise ValueError(
-            "Lead has no email on file — fee instructions are sent by "
-            "email (with QR + bank details). Capture an email first.",
-        )
+        raise ValueError("Lead has no email on file.")
 
-    # Build UPI URI + QR PNG, attach inline so the QR image actually
-    # renders in the recipient's mail client.
     upi_uri = _upi_deeplink(
         vpa=payment["vpa"],
         payee_name=payment["payee_name"],
@@ -314,24 +392,6 @@ def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
     except Exception as e:
         email_err = f"{type(e).__name__}: {e}"
 
-    # SMS notice — short, just tells them to check their email.
-    # NOTE: This new template needs DLT registration before SMS will
-    # actually deliver. Until then it sits queued.
-    sms_body = (
-        f"Dear {lead.name}, JD has emailed you the application fee "
-        f"payment details (UPI / bank). Please check {lead.email}. "
-        f"— JD Admissions"
-    )
-    sms_log = queue_notification(
-        template_key="lead.fee_link.sms",
-        recipient=lead.phone,
-        context={
-            "name": lead.name, "email": lead.email,
-            "institute": institute_label,
-        },
-        related=lead,
-    )
-
     comm = LeadCommunication.objects.create(
         lead=lead,
         type=LeadCommunication.Type.EMAIL,
@@ -342,7 +402,6 @@ def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
     )
 
     return {
-        "sms_log_id": getattr(sms_log, "id", None),
         "email_sent": email_ok,
         "email_error": email_err,
         "communication_id": comm.id,

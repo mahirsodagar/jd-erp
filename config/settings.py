@@ -191,6 +191,15 @@ FRONTEND_BASE_URL = env(
     "FRONTEND_BASE_URL", default="https://jdsd.netlify.app",
 )
 
+# Per-institute short payment URLs used by the fee-link flow. Defaults
+# match the legacy PHP project's DLT-approved short links so we don't
+# need fresh approvals from BulkSMS. Override per environment via env
+# vars when you have new short URLs.
+FEE_LINK_URLS = {
+    "JDIFT": env("FEE_LINK_URL_JDIFT", default="https://9cfb.short.gy/jdinst"),
+    "JDSD":  env("FEE_LINK_URL_JDSD",  default="https://9cfb.short.gy/jdsd"),
+}
+
 
 # --- Application-fee payment instructions ------------------------------
 
