@@ -7,6 +7,7 @@ for dev and a real SMTP backend in prod.
 
 from __future__ import annotations
 
+from email.utils import formataddr, parseaddr
 from typing import Iterable
 
 from django.conf import settings
@@ -19,18 +20,40 @@ Attachment = tuple[str, bytes, str]
 
 
 def _resolve_from_email() -> str:
-    """Pick a non-empty From address — DEFAULT_FROM_EMAIL first, then
-    EMAIL_HOST_USER (Workspace mailbox), else empty (which will surface
-    a clear error rather than ValueError('Invalid address \"\"'))."""
-    candidate = (
-        getattr(settings, "DEFAULT_FROM_EMAIL", "") or ""
+    """Build the canonical From header so recipients always see a
+    friendly display name, not the bare local-part of the address.
+
+    Priority:
+      1. DEFAULT_FROM_EMAIL — if it already includes a display name
+         (e.g. `"JD Communications <admin.a@jdinstitute.edu.in>"`),
+         use it verbatim.
+      2. DEFAULT_FROM_EMAIL is just a bare address → wrap it with
+         DEFAULT_FROM_NAME (defaults to "JD Communications").
+      3. Otherwise fall back to EMAIL_HOST_USER (Workspace mailbox we
+         authenticate with) wrapped with DEFAULT_FROM_NAME.
+      4. If both are empty, return "" — the caller surfaces a clean
+         error rather than letting Django raise `ValueError("Invalid
+         address \"\"")` deep inside the SMTP code path.
+    """
+    display_name = (
+        getattr(settings, "DEFAULT_FROM_NAME", "") or "JD Communications"
     ).strip()
+
+    candidate = (getattr(settings, "DEFAULT_FROM_EMAIL", "") or "").strip()
     if candidate:
-        return candidate
-    fallback = (
-        getattr(settings, "EMAIL_HOST_USER", "") or ""
-    ).strip()
-    return fallback
+        name, addr = parseaddr(candidate)
+        if name:
+            # Already has a display name — keep it intact.
+            return candidate
+        if addr:
+            # Bare address → wrap with our default display name.
+            return formataddr((display_name, addr))
+
+    fallback = (getattr(settings, "EMAIL_HOST_USER", "") or "").strip()
+    if fallback:
+        return formataddr((display_name, fallback))
+
+    return ""
 
 
 def send_email(

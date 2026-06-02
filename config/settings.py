@@ -314,6 +314,10 @@ DEFAULT_FROM_EMAIL = env(
     "DEFAULT_FROM_EMAIL",
     default="JD Communications <admin.a@jdinstitute.edu.in>",
 )
+# Display name applied when DEFAULT_FROM_EMAIL is just a bare address
+# or only EMAIL_HOST_USER is configured. Keeps the recipient from
+# seeing "admin.a" auto-derived from the email's local-part.
+DEFAULT_FROM_NAME = env("DEFAULT_FROM_NAME", default="JD Communications")
 
 
 # --- django-axes --------------------------------------------------------
