@@ -18,6 +18,21 @@ from django.core.mail import EmailMessage
 Attachment = tuple[str, bytes, str]
 
 
+def _resolve_from_email() -> str:
+    """Pick a non-empty From address — DEFAULT_FROM_EMAIL first, then
+    EMAIL_HOST_USER (Workspace mailbox), else empty (which will surface
+    a clear error rather than ValueError('Invalid address \"\"'))."""
+    candidate = (
+        getattr(settings, "DEFAULT_FROM_EMAIL", "") or ""
+    ).strip()
+    if candidate:
+        return candidate
+    fallback = (
+        getattr(settings, "EMAIL_HOST_USER", "") or ""
+    ).strip()
+    return fallback
+
+
 def send_email(
     *,
     recipient: str,
@@ -30,10 +45,17 @@ def send_email(
     if not recipient:
         return False, "No recipient address."
 
+    from_email = _resolve_from_email()
+    if not from_email:
+        return False, (
+            "No sender address — set DEFAULT_FROM_EMAIL or EMAIL_HOST_USER "
+            "in your environment."
+        )
+
     msg = EmailMessage(
         subject=subject,
         body=body,
-        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+        from_email=from_email,
         to=[recipient],
         cc=[c.strip() for c in cc.split(",") if c.strip()],
     )
