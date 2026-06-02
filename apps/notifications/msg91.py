@@ -100,6 +100,11 @@ def send_msg91_template(
         return True, json.dumps(payload, indent=2)
 
     data = json.dumps(payload).encode("utf-8")
+    # Cloudflare (in front of control.msg91.com) flags requests with
+    # `Python-urllib/3.x` as bot traffic and returns 403 / error 1010.
+    # Set a generic browser-shaped User-Agent so the request looks like
+    # any HTTP client. Real browsers don't send `authkey` headers, but
+    # CF only fingerprints UA + IP, so this is enough on its own.
     req = urllib.request.Request(
         _MSG91_URL,
         data=data,
@@ -108,6 +113,10 @@ def send_msg91_template(
             "Content-Type": "application/json",
             "Accept": "application/json",
             "authkey": authkey,
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ),
         },
     )
     try:
