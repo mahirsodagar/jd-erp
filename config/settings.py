@@ -332,6 +332,7 @@ MSG91_EMAIL_TEMPLATES = {
     "tasks.assigned.email":   "task_assigned_2",
     "tasks.completed.email":  "task_completed",
     "account.password_reset_by_admin.email": "password_reset_by_admin",
+    "student.portal_credentials.email":      "student_portal_credentials",
 }
 
 

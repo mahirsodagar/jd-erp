@@ -1,29 +1,19 @@
-"""Email body + dispatcher for "Send portal credentials".
+"""Dispatcher for "Send portal credentials".
 
-Splits the templating off the view so the wording lives in one place
-and the view stays focused on auth + the side-effect chain.
+Routes through the notifications layer (`queue_notification`) so the
+email goes via MSG91 when `MSG91_EMAIL_TEMPLATES["student.portal_credentials.email"]`
+is registered, and falls back to plain SMTP otherwise. Either way a
+NotificationDispatchLog row is written for audit.
 """
 
 from __future__ import annotations
 
-from apps.notifications.email import send_email
+from django.conf import settings
+
+from apps.notifications.models import NotificationDispatchLog
+from apps.notifications.services import queue_notification
 
 from .models import Student
-
-
-def _build_body(*, student: Student, creds: dict) -> str:
-    institute = getattr(student.institute, "name", "the institute")
-    return (
-        f"Hi {student.student_name},\n\n"
-        f"Welcome to {institute}. Your student portal account is ready.\n\n"
-        "You can log in using the credentials below:\n\n"
-        f"  Login email : {creds['email']}\n"
-        f"  Username    : {creds['username']}\n"
-        f"  Password    : {creds['temporary_password']}\n\n"
-        "Please change your password after the first login.\n\n"
-        "If you didn't request this, contact your admissions office.\n\n"
-        "— JD Admissions"
-    )
 
 
 def send_portal_credentials_email(
@@ -32,9 +22,25 @@ def send_portal_credentials_email(
     recipient = (student.student_email or "").strip()
     if not recipient:
         return False, "Student has no personal email on file."
-    subject = "Your student portal login"
-    return send_email(
+
+    institute = getattr(student.institute, "name", "the institute")
+    base = getattr(
+        settings, "FRONTEND_BASE_URL", "http://localhost:5173",
+    ).rstrip("/")
+
+    log = queue_notification(
+        template_key="student.portal_credentials.email",
         recipient=recipient,
-        subject=subject,
-        body=_build_body(student=student, creds=creds),
+        context={
+            "name": student.student_name,
+            "email": creds["email"],
+            "username": creds["username"],
+            "password": creds["temporary_password"],
+            "institute": institute,
+            "login_url": base,
+        },
+        related=student,
     )
+    sent = NotificationDispatchLog.Status.SENT
+    ok = getattr(log, "status", "") == sent
+    return ok, "" if ok else (getattr(log, "error", "") or "")

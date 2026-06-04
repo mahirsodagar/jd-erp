@@ -126,6 +126,22 @@ TEMPLATES = [
      "Sign in at: {login_url}\n\n"
      "If you didn't expect this, contact the admin team.\n\n"
      "— JD Admissions"),
+
+    # Student portal credentials (Student Detail → Reset & send creds).
+    # Same routing pattern as the admin reset above. Variables:
+    # {name}, {email}, {username}, {password}, {institute}, {login_url}.
+    ("student.portal_credentials.email", "EMAIL",
+     "Your student portal login",
+     "Hi {name},\n\n"
+     "Welcome to {institute}. Your student portal account is ready.\n\n"
+     "You can log in using the credentials below:\n\n"
+     "  Login email : {email}\n"
+     "  Username    : {username}\n"
+     "  Password    : {password}\n\n"
+     "Please change your password after the first login.\n\n"
+     "Sign in at: {login_url}\n\n"
+     "If you didn't request this, contact your admissions office.\n\n"
+     "— JD Admissions"),
 ]
 
 
