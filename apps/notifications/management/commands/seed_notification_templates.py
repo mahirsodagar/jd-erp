@@ -110,6 +110,22 @@ TEMPLATES = [
      "For any clarifications or queries you can reach out to your "
      "administrative office.\n\n"
      "See you very soon!\n\nRegards,\nJD"),
+
+    # Admin-issued password reset (Admin → Users → Reset password).
+    # Goes through MSG91 when MSG91_EMAIL_TEMPLATES has the matching
+    # key registered — otherwise falls back to plain SMTP. Variables:
+    # {name}, {username}, {password}, {login_url}.
+    ("account.password_reset_by_admin.email", "EMAIL",
+     "Your JD ERP password has been reset",
+     "Hi {name},\n\n"
+     "An administrator has reset your JD ERP password.\n\n"
+     "You can log in using the credentials below:\n\n"
+     "  Username : {username}\n"
+     "  Password : {password}\n\n"
+     "Please change your password after logging in.\n\n"
+     "Sign in at: {login_url}\n\n"
+     "If you didn't expect this, contact the admin team.\n\n"
+     "— JD Admissions"),
 ]
 
 

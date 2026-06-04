@@ -194,7 +194,13 @@ class UserDetailView(APIView):
 
 
 class AdminResetPasswordView(APIView):
-    """Admin issues a temporary password for any user."""
+    """Admin issues a temporary password for any user.
+
+    Best-effort emails the new password to the target user so they
+    don't depend on the admin reading it out. Goes through MSG91 when
+    settings.MSG91_EMAIL_TEMPLATES has the matching key registered;
+    otherwise falls back to plain SMTP via the notifications layer.
+    """
 
     permission_classes = [IsAuthenticated, HasPerm]
     required_perm = "accounts.user.manage"
@@ -208,7 +214,37 @@ class AdminResetPasswordView(APIView):
         target.save(update_fields=["password"])
         mirror_plaintext_password(target, new_pw)
         record_password_reset(request, actor=request.user, target=target)
-        return Response(status=status.HTTP_204_NO_CONTENT)
+
+        delivery = {
+            "delivered": False,
+            "delivery_error": "",
+            "recipient": (target.email or "").strip(),
+        }
+        if delivery["recipient"]:
+            from apps.notifications.services import queue_notification
+            from apps.notifications.models import NotificationDispatchLog
+            base = getattr(
+                dj_settings, "FRONTEND_BASE_URL", "http://localhost:5173",
+            ).rstrip("/")
+            log = queue_notification(
+                template_key="account.password_reset_by_admin.email",
+                recipient=delivery["recipient"],
+                context={
+                    "name": target.full_name or target.username,
+                    "username": target.username,
+                    "password": new_pw,
+                    "login_url": base,
+                },
+                related=target,
+            )
+            sent = NotificationDispatchLog.Status.SENT
+            delivery["delivered"] = getattr(log, "status", "") == sent
+            if not delivery["delivered"]:
+                delivery["delivery_error"] = getattr(log, "error", "") or ""
+        else:
+            delivery["delivery_error"] = "User has no email on file."
+
+        return Response(delivery, status=status.HTTP_200_OK)
 
 
 # --- Self-service forgot-password ----------------------------------------

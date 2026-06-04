@@ -331,6 +331,7 @@ MSG91_EMAIL_TEMPLATES = {
     "hr.relieving.letter.email":            "relieving_letter_employee",
     "tasks.assigned.email":   "task_assigned_2",
     "tasks.completed.email":  "task_completed",
+    "account.password_reset_by_admin.email": "password_reset_by_admin",
 }
 
 
