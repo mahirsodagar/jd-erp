@@ -191,6 +191,14 @@ FRONTEND_BASE_URL = env(
     "FRONTEND_BASE_URL", default="https://jdsd.netlify.app",
 )
 
+# Where students land when they click a "log in to portal" link in an
+# email (portal credentials, password resets, etc.). Different from the
+# staff frontend — the student SPA is hosted separately.
+STUDENT_PORTAL_LOGIN_URL = env(
+    "STUDENT_PORTAL_LOGIN_URL",
+    default="https://jdsd.netlify.app/#/portal/login/",
+)
+
 # Per-institute short payment URLs used by the fee-link flow. Defaults
 # match the legacy PHP project's DLT-approved short links so we don't
 # need fresh approvals from BulkSMS. Override per environment via env
@@ -261,6 +269,33 @@ BULK_SMS_TEMPLATE_IDS = {
     "lead.fee_link.sms": env(
         "DLT_TPL_FEE_LINK", default="1307168958796572350",
     ),
+    "attendance.student_absent.sms": env(
+        "DLT_TPL_STUDENT_ABSENT", default="1307167524495832485",
+    ),
+    "attendance.parent_absent.sms": env(
+        "DLT_TPL_PARENT_ABSENT", default="1307167525522133170",
+    ),
+    "attendance.student_absent_v2.sms": env(
+        "DLT_TPL_STUDENT_ABSENT_V2", default="1307168612006682942",
+    ),
+    "attendance.parent_absent_v2.sms": env(
+        "DLT_TPL_PARENT_ABSENT_V2", default="1307168611999645882",
+    ),
+    "fees.installment_due_student.sms": env(
+        "DLT_TPL_INSTALLMENT_DUE_STUDENT", default="1307167525346509509",
+    ),
+    "fees.installment_due_parent.sms": env(
+        "DLT_TPL_INSTALLMENT_DUE_PARENT", default="1307167525541582049",
+    ),
+    "fees.installment_paid_student.sms": env(
+        "DLT_TPL_INSTALLMENT_PAID_STUDENT", default="1307167525451487583",
+    ),
+    "fees.installment_paid_parent.sms": env(
+        "DLT_TPL_INSTALLMENT_PAID_PARENT", default="1307167525469517516",
+    ),
+    "fees.bulk_reminder.sms": env(
+        "DLT_TPL_FEE_BULK_REMINDER", default="1707177090290548299",
+    ),
 }
 
 
@@ -279,8 +314,17 @@ MSG91_SMS_SENDER_ID = env("MSG91_SMS_SENDER_ID", default="JDEDUC")
 # MSG91 dashboard — `send_sms` will then return a clear "not configured"
 # error in the dispatch log instead of a 4xx from the provider.
 MSG91_SMS_TEMPLATE_IDS = {
-    "lead.application_link.sms": env("MSG91_FLOW_APPLICATION_LINK", default=""),
-    "lead.fee_link.sms":         env("MSG91_FLOW_FEE_LINK", default=""),
+    "lead.application_link.sms":       env("MSG91_FLOW_APPLICATION_LINK", default=""),
+    "lead.fee_link.sms":               env("MSG91_FLOW_FEE_LINK", default=""),
+    "attendance.student_absent.sms":   env("MSG91_FLOW_STUDENT_ABSENT", default=""),
+    "attendance.parent_absent.sms":    env("MSG91_FLOW_PARENT_ABSENT", default=""),
+    "attendance.student_absent_v2.sms": env("MSG91_FLOW_STUDENT_ABSENT_V2", default=""),
+    "attendance.parent_absent_v2.sms":  env("MSG91_FLOW_PARENT_ABSENT_V2", default=""),
+    "fees.installment_due_student.sms":   env("MSG91_FLOW_INSTALLMENT_DUE_STUDENT", default=""),
+    "fees.installment_due_parent.sms":    env("MSG91_FLOW_INSTALLMENT_DUE_PARENT", default=""),
+    "fees.installment_paid_student.sms":  env("MSG91_FLOW_INSTALLMENT_PAID_STUDENT", default=""),
+    "fees.installment_paid_parent.sms":   env("MSG91_FLOW_INSTALLMENT_PAID_PARENT", default=""),
+    "fees.bulk_reminder.sms":             env("MSG91_FLOW_FEE_BULK_REMINDER", default=""),
 }
 
 # Positional variable mapping per template. The template body
@@ -291,6 +335,46 @@ MSG91_SMS_TEMPLATE_IDS = {
 MSG91_SMS_VAR_ORDER = {
     "lead.application_link.sms": ["name", "url"],
     "lead.fee_link.sms":         ["short_name", "url"],
+
+    # Attendance — student/parent (legacy variant; matches DLT body)
+    # "Dear {name}, You have been marked absent for {date} for module {subject}..."
+    "attendance.student_absent.sms": ["name", "date", "subject"],
+    # "Dear Parent, Please be informed {name}, of {batch} is absent on {date}..."
+    "attendance.parent_absent.sms":  ["name", "batch", "date"],
+
+    # Attendance v2 — newer DLT variants ("JD Academic Team" footer)
+    "attendance.student_absent_v2.sms": ["name", "date", "subject"],
+    "attendance.parent_absent_v2.sms":  ["name", "batch", "date"],
+
+    # Fees — installment due
+    # Student: "Dear {name},{registration_no}, {installment} Installment
+    #          of INR {amount}, for the course {course}, is due on {due_date}..."
+    "fees.installment_due_student.sms": [
+        "name", "registration_no", "installment", "amount", "course", "due_date",
+    ],
+    # Parent: "Dear Parent, {installment} Installment of INR {amount} of
+    #         your ward, {ward_name} {registration_no} for the course
+    #         {course}, is due on {due_date}..."
+    "fees.installment_due_parent.sms": [
+        "installment", "amount", "ward_name", "registration_no",
+        "course", "due_date",
+    ],
+
+    # Fees — installment paid
+    # Student: "Dear {name},{registration_no}, Thank you for the payment
+    #          of INR {amount} towards your {installment} installment..."
+    "fees.installment_paid_student.sms": [
+        "name", "registration_no", "amount", "installment",
+    ],
+    # Parent: "Dear Parent, Thank you for the payment of INR {amount}
+    #         towards the {installment} installment, of your ward
+    #         {ward_name},{registration_no}, for the course {course}..."
+    "fees.installment_paid_parent.sms": [
+        "amount", "installment", "ward_name", "registration_no", "course",
+    ],
+
+    # Fees — bulk reminder. Static body, no vars.
+    "fees.bulk_reminder.sms": [],
 }
 
 

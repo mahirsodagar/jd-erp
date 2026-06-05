@@ -24,9 +24,10 @@ def send_portal_credentials_email(
         return False, "Student has no personal email on file."
 
     institute = getattr(student.institute, "name", "the institute")
-    base = getattr(
-        settings, "FRONTEND_BASE_URL", "http://localhost:5173",
-    ).rstrip("/")
+    login_url = getattr(
+        settings, "STUDENT_PORTAL_LOGIN_URL",
+        "https://jdsd.netlify.app/#/portal/login/",
+    )
 
     log = queue_notification(
         template_key="student.portal_credentials.email",
@@ -37,7 +38,7 @@ def send_portal_credentials_email(
             "username": creds["username"],
             "password": creds["temporary_password"],
             "institute": institute,
-            "login_url": base,
+            "login_url": login_url,
         },
         related=student,
     )

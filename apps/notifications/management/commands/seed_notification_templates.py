@@ -142,6 +142,60 @@ TEMPLATES = [
      "Sign in at: {login_url}\n\n"
      "If you didn't request this, contact your admissions office.\n\n"
      "— JD Admissions"),
+
+    # ------------------------------------------------------------------
+    # SMS templates — bodies match DLT-approved wording exactly (any
+    # drift causes BulkSMS / MSG91 to garble or reject the send).
+    # MSG91 stores its own copy of the body — the body_template here is
+    # used (a) for SMTP/BulkSMS dispatch and (b) for the audit row.
+    # ------------------------------------------------------------------
+
+    # Attendance — student/parent (legacy DLT variants from PHP project)
+    ("attendance.student_absent.sms", "SMS", "",
+     "Dear {name}, You have been marked absent for {date} for module "
+     "{subject}. Regards JD Admissions Team"),
+    ("attendance.parent_absent.sms", "SMS", "",
+     "Dear Parent, Please be informed {name}, of {batch} is absent on "
+     "{date}. Regards JD Admissions Team"),
+
+    # Attendance v2 — newer DLT variants ("JD Academic Team" footer)
+    ("attendance.student_absent_v2.sms", "SMS", "",
+     "Dear {name} You have been marked absent for {date} for module "
+     "{subject}. Regards, JD Academic Team"),
+    ("attendance.parent_absent_v2.sms", "SMS", "",
+     "Dear Parent Please be informed {name}, of batch {batch} is "
+     "ABSENT ON {date}, Regards, JD Academic Team"),
+
+    # Fees — installment due (student + parent)
+    ("fees.installment_due_student.sms", "SMS", "",
+     "Dear {name},{registration_no}, {installment} Installment of INR "
+     "{amount}, for the course {course}, is due on {due_date}. Request "
+     "you to kindly make the payment on time. Kindly ignore if the "
+     "payment is made. Regards JD Accounts Department"),
+    ("fees.installment_due_parent.sms", "SMS", "",
+     "Dear Parent, {installment} Installment of INR {amount} of your "
+     "ward, {ward_name} {registration_no} for the course {course}, is "
+     "due on {due_date}. Request you to kindly make the payment on "
+     "time. Kindly ignore if the payment is made. Regards JD Accounts "
+     "Department"),
+
+    # Fees — installment paid (student + parent)
+    ("fees.installment_paid_student.sms", "SMS", "",
+     "Dear {name},{registration_no}, Thank you for the payment of INR "
+     "{amount} towards your {installment} installment. Regards JD "
+     "Accounts Department"),
+    ("fees.installment_paid_parent.sms", "SMS", "",
+     "Dear Parent, Thank you for the payment of INR {amount} towards "
+     "the {installment} installment, of your ward {ward_name},"
+     "{registration_no}, for the course {course}. Regards JD Accounts "
+     "Department"),
+
+    # Fees — bulk reminder (no variables; static body)
+    ("fees.bulk_reminder.sms", "SMS", "",
+     "Dear Parents and Students, The installment payment is due. "
+     "Kindly clear the same on or before the due date to avoid late "
+     "payment charges. For queries, please contact the office. Thank "
+     "you. JD"),
 ]
 
 

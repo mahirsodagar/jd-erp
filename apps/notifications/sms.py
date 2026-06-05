@@ -31,6 +31,24 @@ from django.conf import settings
 
 _BULK_SMS_URL = "https://api.bulksmsgateway.in/sendmessage.php"
 
+# BulkSMS treats `&`, `+`, `#` in the message body as URL syntax and
+# garbles them. Their docs require base64-encoded substitutions instead
+# of standard percent-encoding. Without this, URLs containing query
+# strings (?a=1&b=2) or hash fragments (#/portal/login/) arrive broken.
+_BULK_SMS_MESSAGE_SUBSTITUTIONS = (
+    ("&", "Jg=="),
+    ("+", "Kw=="),
+    ("#", "Iw=="),
+)
+
+
+def _bulksms_safe_message(text: str) -> str:
+    """Apply BulkSMS's required body substitutions before URL-encoding."""
+    out = text
+    for raw, encoded in _BULK_SMS_MESSAGE_SUBSTITUTIONS:
+        out = out.replace(raw, encoded)
+    return out
+
 
 # ---------------------------------------------------------------------
 # Public entry point — dispatched by SMS_PROVIDER
@@ -103,7 +121,7 @@ def _send_via_bulksms(
         "user": user,
         "password": password,
         "mobile": recipient,
-        "message": body,
+        "message": _bulksms_safe_message(body),
         "sender": sender,
         "type": "3",  # transactional
         "template_id": template_id,

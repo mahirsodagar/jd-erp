@@ -12,3 +12,6 @@ class FeesConfig(AppConfig):
         auditlog.register(Installment)
         auditlog.register(FeeReceipt)
         auditlog.register(Concession)
+        # Importing the module registers the post_save signal that
+        # fires payment-confirmation SMS on FeeReceipt creation.
+        from . import notifications  # noqa: F401
