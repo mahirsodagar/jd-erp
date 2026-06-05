@@ -396,27 +396,53 @@ MSG91_DOMAIN = env(
 )
 MSG91_TIMEOUT = env.int("MSG91_TIMEOUT", default=10)
 
-# Mapping: our internal `template_key` → MSG91 template name (as
-# registered on MSG91's dashboard). Templates not listed here fall
-# through to plain SMTP via apps.notifications.email.send_email.
+# Routing policy:
 #
-# Names come from the PHP wrappers — see admissions/save.php,
-# academics/asave.php, hr/hrsave.php in the JD_ERP source.
+#   * MSG91 (mail.jdinstitute.com) — transactional mail to EXTERNAL
+#     recipients (leads, students, parents). Anything in this dict
+#     goes through the MSG91 v5 email API.
+#
+#   * SMTP (admin.a@jdinstitute.edu.in via Workspace) — INTERNAL
+#     mail to faculty / employees (HR workflows, leave notifications
+#     to employees, task assignments, staff password resets, etc.).
+#     Any template NOT listed below falls through to plain SMTP via
+#     apps.notifications.email.send_email.
+#
+# Don't bypass this policy by adding internal-staff templates here —
+# the two domains have different reputations + branding for a reason.
 MSG91_EMAIL_TEMPLATES = {
-    "fees.receipt.email":                "student_invoice_copy",
-    "fees.application_fee_receipt.email": "application_fee_receipt",
+    # Fees — to students / parents
+    "fees.receipt.email":                  "student_invoice_copy",
+    "fees.application_fee_receipt.email":  "application_fee_receipt",
+
+    # Academics — to students
     "academics.assignment_assigned.email": "assignment_assigned",
-    "leaves.application_employee.email":  "employee_leave_application",
-    "leaves.application_status_employee.email": "leave_application_status_employee",
-    "leaves.application_status_student.email":  "leave_application_status_student",
-    "hr.relieving.application.email":       "employee_relieving_application",
-    "hr.relieving.application_rejected.email": "employee_relieving_application_rejected",
-    "hr.relieving.experience_letter.email": "experience_letter_employee",
-    "hr.relieving.letter.email":            "relieving_letter_employee",
-    "tasks.assigned.email":   "task_assigned_2",
-    "tasks.completed.email":  "task_completed",
-    "account.password_reset_by_admin.email": "password_reset_by_admin",
-    "student.portal_credentials.email":      "student_portal_credentials",
+
+    # Leaves — STUDENT leave status (employee leave stays on SMTP).
+    "leaves.application_status_student.email": "leave_application_status_student",
+
+    # Student portal credential + reset (student-facing).
+    "student.portal_credentials.email": "student_portal_credentials",
+
+    # Lead / CRM — to leads (external prospects).
+    "lead.application_link.email": "lead_application_link",
+    "lead.fee_link.email":         "lead_fee_link",
+    "lead.welcome.email":          "lead_welcome",
+}
+
+# Templates that *intentionally* route through SMTP — listed here so
+# the dispatcher logs a warning if someone tries to add them to
+# MSG91_EMAIL_TEMPLATES by mistake. Keep in sync with the policy above.
+SMTP_INTERNAL_TEMPLATE_KEYS = {
+    "leaves.application_employee.email",
+    "leaves.application_status_employee.email",
+    "hr.relieving.application.email",
+    "hr.relieving.application_rejected.email",
+    "hr.relieving.experience_letter.email",
+    "hr.relieving.letter.email",
+    "tasks.assigned.email",
+    "tasks.completed.email",
+    "account.password_reset_by_admin.email",
 }
 
 
