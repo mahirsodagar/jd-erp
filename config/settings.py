@@ -249,7 +249,7 @@ INSTITUTE_PAYMENT_DETAILS = env.json(
 #               a separate authkey + per-template flow IDs)
 #   "bulksms" — api.bulksmsgateway.in            (blocked on PA free's
 #               outbound proxy; only works on paid PA plans)
-SMS_PROVIDER = env("SMS_PROVIDER", default="msg91")
+SMS_PROVIDER = env("SMS_PROVIDER", default="bulksms")
 
 
 # --- SMS — Bulk SMS Gateway India (legacy / fallback) ------------------
