@@ -430,6 +430,106 @@ MSG91_EMAIL_TEMPLATES = {
     "lead.welcome.email":          "lead_welcome",
 }
 
+# --- Email — per-trigger sender domain routing ------------------------
+#
+# The From *domain* varies by trigger, and for fee / admission mail it
+# varies by the student's course type (institute spec):
+#
+#   Diploma courses        → jdinstitute.edu.in
+#   Degree / Bachelors     → jdindia.com
+#   student password reset → mail.jdinstitute.com
+#   HR / leave / relieving → jdinstitute.edu.in
+#
+# See apps/notifications/sender.py for the resolver. The provider
+# (MSG91 / SMTP) split above is orthogonal: it decides the *transport*,
+# this decides the *From domain*.
+# Whether this host can open outbound SMTP connections. PythonAnywhere
+# *free* accounts block all non-HTTP egress, so SMTP (Zoho 465 / Gmail
+# 587) can't connect there — set this False on such hosts and the
+# dispatcher downgrades SMTP-routed triggers to MSG91 (HTTPS) when a
+# template exists, keeping mail flowing. Set True on any host with full
+# outbound (local dev, paid PA, a VPS) to use the proper From domains.
+EMAIL_SMTP_OUTBOUND_ENABLED = env.bool("EMAIL_SMTP_OUTBOUND_ENABLED", default=True)
+
+EMAIL_DOMAIN_DIPLOMA = env("EMAIL_DOMAIN_DIPLOMA", default="jdinstitute.edu.in")
+EMAIL_DOMAIN_DEGREE = env("EMAIL_DOMAIN_DEGREE", default="jdindia.com")
+EMAIL_DOMAIN_PORTAL = env("EMAIL_DOMAIN_PORTAL", default="mail.jdinstitute.com")
+EMAIL_DOMAIN_HR = env("EMAIL_DOMAIN_HR", default="jdinstitute.edu.in")
+
+# trigger template_key → routing token. COURSE = pick diploma/degree by
+# course type; PORTAL / HR = fixed domain; any other value = literal
+# domain. Triggers absent here keep the provider's default From.
+EMAIL_SENDER_DOMAIN_POLICY = {
+    # Fees + admission, to students/parents — domain by course type.
+    "lead.fee_link.email":                "COURSE",
+    "lead.application_link.email":         "COURSE",
+    "fees.receipt.email":                 "COURSE",
+    "fees.application_fee_receipt.email":  "COURSE",
+    "admissions.form_submitted.email":     "COURSE",  # "admission form filled"
+    "fees.installment_undertaking.email":  "COURSE",  # installment pattern / undertaking
+    "fees.installment_pending.email":      "COURSE",  # installment-pending reminder
+    # Student credentials / password reset → mail.jdinstitute.com.
+    "student.portal_credentials.email":    "PORTAL",
+    # HR / leave / relieving workflows → jdinstitute.edu.in.
+    "leaves.application_employee.email":          "HR",
+    "leaves.application_status_employee.email":   "HR",
+    "leaves.application_status_student.email":    "HR",
+    "hr.relieving.application.email":             "HR",
+    "hr.relieving.application_rejected.email":     "HR",
+    "hr.relieving.experience_letter.email":        "HR",
+    "hr.relieving.letter.email":                   "HR",
+}
+
+# From-address to use for each sending domain. ONLY list domains that
+# are actually verified with the transport (MSG91 cross-checks the From
+# domain against its registered senders; SMTP must be authorised to send
+# as the address). Domains absent here resolve to a blank From and the
+# dispatcher falls back to the provider default — so the routing policy
+# above can ship before jdinstitute.edu.in / jdindia.com are verified on
+# MSG91. Add the verified From-address here to make a domain live.
+EMAIL_SENDER_BY_DOMAIN = {
+    "mail.jdinstitute.com": env(
+        "SENDER_MAIL_JDINSTITUTE", default="admin@mail.jdinstitute.com",
+    ),
+    # Pending MSG91 domain verification — set the env var to go live:
+    "jdinstitute.edu.in": env("SENDER_JDINSTITUTE_EDU", default=""),
+    "jdindia.com":        env("SENDER_JDINDIA", default=""),
+}
+
+# Per-domain dedicated SMTP servers. Some sending domains (e.g.
+# jdindia.com) deliver through their *own* mailbox/host rather than
+# MSG91 or the default internal Gmail relay. When a trigger resolves
+# (via EMAIL_SENDER_DOMAIN_POLICY) to a domain listed here, the
+# dispatcher opens a dedicated SMTP connection with these credentials —
+# this TAKES PRECEDENCE over the MSG91 registry for that domain.
+#
+# A domain is only active when its *_HOST env var is set; until then the
+# entry is omitted and routing falls back to MSG91 / default SMTP.
+EMAIL_SMTP_BY_DOMAIN = {}
+_jdindia_smtp_host = env("SMTP_JDINDIA_HOST", default="")
+if _jdindia_smtp_host:
+    _jdindia_user = env("SMTP_JDINDIA_USER", default="")
+    EMAIL_SMTP_BY_DOMAIN["jdindia.com"] = {
+        "host": _jdindia_smtp_host,
+        "port": env.int("SMTP_JDINDIA_PORT", default=587),
+        "username": _jdindia_user,
+        "password": env("SMTP_JDINDIA_PASSWORD", default=""),
+        "use_tls": env.bool("SMTP_JDINDIA_USE_TLS", default=True),
+        "use_ssl": env.bool("SMTP_JDINDIA_USE_SSL", default=False),
+        # From-address recipients see; defaults to the auth username.
+        "from_email": env("SMTP_JDINDIA_FROM", default=_jdindia_user),
+    }
+
+# Department / role group inboxes used as additional recipients or CC on
+# certain triggers (spec: fee receipt → +Accounts, admission filled →
+# +Operations, relieving → Ops/Principal/VP/Academic Manager). Blank =
+# not wired; the caller skips that recipient rather than erroring.
+ACCOUNTS_INBOX = env("ACCOUNTS_INBOX", default="")
+OPERATIONS_INBOX = env("OPERATIONS_INBOX", default="")
+PRINCIPAL_INBOX = env("PRINCIPAL_INBOX", default="")
+VICE_PRINCIPAL_INBOX = env("VICE_PRINCIPAL_INBOX", default="")
+ACADEMIC_MANAGER_INBOX = env("ACADEMIC_MANAGER_INBOX", default="")
+
 # Templates that *intentionally* route through SMTP — listed here so
 # the dispatcher logs a warning if someone tries to add them to
 # MSG91_EMAIL_TEMPLATES by mistake. Keep in sync with the policy above.

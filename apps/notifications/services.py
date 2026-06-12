@@ -96,6 +96,81 @@ def queue_notification(
     return _dispatch_now(tmpl, recipient, cc, context or {}, ct, oid)
 
 
+def _send_email(tmpl, recipient, cc, subject, body, context) -> tuple[bool, str]:
+    """Deliver one email, choosing the transport from the resolved From
+    domain (institute domain↔service table — see sender.transport_for):
+
+        jdindia.com          → dedicated Zoho SMTP
+        mail.jdinstitute.com → MSG91 templated API
+        jdinstitute.edu.in   → default SMTP (Gmail/Workspace)
+
+    A trigger with no domain policy keeps the legacy behaviour: MSG91 if
+    it's in the MSG91 template registry, else default SMTP.
+    """
+    from django.conf import settings
+    from .msg91 import send_msg91_template, template_for
+    from .sender import resolve_sender, transport_for
+
+    # Per-trigger From domain (course-type aware). `degree_type` is
+    # carried in the context by callers that know the student's program;
+    # absent → treated as a degree course.
+    sender = resolve_sender(tmpl.key, degree_type=context.get("degree_type", ""))
+    msg91_name = template_for(tmpl.key)
+
+    if sender is None:
+        # No domain policy → legacy routing by MSG91 registry membership.
+        if msg91_name:
+            return send_msg91_template(
+                template_name=msg91_name, recipient_email=recipient,
+                variables=context, cc=cc,
+            )
+        from .email import send_email
+        return send_email(
+            recipient=recipient, cc=cc, subject=subject, body=body,
+            is_html=False,
+        )
+
+    kind, smtp_cfg = transport_for(sender.domain)
+
+    # Hosts without SMTP egress (e.g. PythonAnywhere free tier) can't open
+    # the Zoho/Gmail connections. When SMTP is disabled, downgrade an
+    # SMTP-routed trigger back to MSG91 *if* it has a registered template,
+    # so live mail keeps flowing (from mail.jdinstitute.com) until SMTP
+    # egress is available — flip EMAIL_SMTP_OUTBOUND_ENABLED=True to send
+    # from the proper course/HR domain once the host can reach SMTP.
+    smtp_ok = getattr(settings, "EMAIL_SMTP_OUTBOUND_ENABLED", True)
+    if kind == "smtp" and not smtp_ok and msg91_name:
+        kind, smtp_cfg = "msg91", None
+
+    if kind == "msg91" and msg91_name:
+        # Only override MSG91's From when the resolved domain IS the
+        # verified MSG91 sender domain — a course domain (jdindia.com /
+        # jdinstitute.edu.in) is not a valid MSG91 sender, so a downgraded
+        # trigger sends from the configured MSG91 default instead.
+        use_override = (
+            sender.is_live
+            and sender.domain == getattr(settings, "MSG91_DOMAIN", "")
+        )
+        sender_kw = (
+            {"sender_email": sender.from_email, "domain": sender.domain}
+            if use_override else {}
+        )
+        return send_msg91_template(
+            template_name=msg91_name, recipient_email=recipient,
+            variables=context, cc=cc, **sender_kw,
+        )
+
+    # SMTP — dedicated per-domain connection (smtp_cfg) or default backend.
+    # (Also reached when a MSG91-domain trigger has no registered template,
+    # or SMTP is disabled but no MSG91 template exists to downgrade to.)
+    from .email import send_email
+    return send_email(
+        recipient=recipient, cc=cc, subject=subject, body=body,
+        is_html=False, smtp=smtp_cfg,
+        from_email=(sender.from_email if sender.is_live else ""),
+    )
+
+
 def _dispatch_now(tmpl, recipient, cc, context, ct, oid,
                   scheduled=None) -> NotificationDispatchLog:
     subject = _render(tmpl.subject_template, context)
@@ -126,24 +201,7 @@ def _dispatch_now(tmpl, recipient, cc, context, ct, oid,
         log.error = "" if ok else payload
         log.save(update_fields=["status", "error"])
     elif tmpl.channel == Channel.EMAIL:
-        # Templated transactional mails go through MSG91 (legacy PHP
-        # behaviour); anything not in the registry falls back to plain
-        # SMTP. The MSG91 registry lives in settings.MSG91_EMAIL_TEMPLATES.
-        from .msg91 import send_msg91_template, template_for
-        msg91_name = template_for(tmpl.key)
-        if msg91_name:
-            ok, payload = send_msg91_template(
-                template_name=msg91_name,
-                recipient_email=recipient,
-                variables=context,
-                cc=cc,
-            )
-        else:
-            from .email import send_email
-            ok, payload = send_email(
-                recipient=recipient, cc=cc, subject=subject, body=body,
-                is_html=False,
-            )
+        ok, payload = _send_email(tmpl, recipient, cc, subject, body, context)
         log.status = (NotificationDispatchLog.Status.SENT if ok
                       else NotificationDispatchLog.Status.FAILED)
         log.error = "" if ok else payload

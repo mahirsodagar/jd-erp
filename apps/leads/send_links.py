@@ -136,6 +136,11 @@ def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict
             context={
                 "name": lead.name, "url": long_url,
                 "institute": institute_label,
+                # Drives the From domain (Diploma → jdinstitute.edu.in,
+                # Degree/Bachelors → jdindia.com). See notifications.sender.
+                "degree_type": (
+                    lead.program.degree_type if lead.program_id else ""
+                ),
             },
             related=lead,
         )
@@ -320,6 +325,11 @@ def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
             context={
                 "name": lead.name, "url": url,
                 "institute": institute_label,
+                # Drives the From domain (Diploma → jdinstitute.edu.in,
+                # Degree/Bachelors → jdindia.com). See notifications.sender.
+                "degree_type": (
+                    lead.program.degree_type if lead.program_id else ""
+                ),
             },
             related=lead,
         )
