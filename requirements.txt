@@ -9,3 +9,7 @@ Pillow>=10.4
 qrcode[pil]>=7.4
 fpdf2>=2.7
 python-magic>=0.4.27
+
+# --- Production deployment ---
+gunicorn>=22.0
+mysqlclient>=2.2
