@@ -25,7 +25,9 @@ NotificationDispatchLog row records the provider's reply verbatim.
 
 from __future__ import annotations
 
+import http.client
 import json
+import socket
 import urllib.error
 import urllib.request
 
@@ -33,6 +35,46 @@ from django.conf import settings
 
 
 _MSG91_URL = "https://control.msg91.com/api/v5/email/send"
+
+
+# control.msg91.com is dual-stack (Cloudflare A + AAAA records). On a
+# dual-stack host the default resolver prefers IPv6, so the request
+# egresses from the host's IPv6 address — which MSG91's per-authkey "IP
+# Security" whitelist (IPv4 only) does not recognise, and every call is
+# rejected with HTTP 401 / apiError 418. Forcing the connection to IPv4
+# pins egress to the whitelisted A-record IP. Harmless on IPv4-only
+# hosts (getaddrinfo just returns the v4 address). Toggle with
+# settings.MSG91_FORCE_IPV4 (default True).
+class _IPv4HTTPSConnection(http.client.HTTPSConnection):
+    def connect(self):
+        infos = socket.getaddrinfo(
+            self.host, self.port, socket.AF_INET, socket.SOCK_STREAM,
+        )
+        af, socktype, proto, _canon, sa = infos[0]
+        sock = socket.socket(af, socktype, proto)
+        if self.timeout is not None:
+            sock.settimeout(self.timeout)
+        if self.source_address:
+            sock.bind(self.source_address)
+        sock.connect(sa)
+        # Preserve SNI / cert hostname matching against the real host.
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+class _IPv4HTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_IPv4HTTPSConnection, req)
+
+
+# Built once; reused across calls.
+_ipv4_opener = urllib.request.build_opener(_IPv4HTTPSHandler())
+
+
+def _urlopen(req, timeout):
+    """Open `req`, forcing IPv4 unless explicitly disabled in settings."""
+    if getattr(settings, "MSG91_FORCE_IPV4", True):
+        return _ipv4_opener.open(req, timeout=timeout)
+    return urllib.request.urlopen(req, timeout=timeout)
 
 
 def _split_csv(s: str) -> list[str]:
@@ -120,7 +162,7 @@ def send_msg91_template(
         },
     )
     try:
-        with urllib.request.urlopen(
+        with _urlopen(
             req, timeout=timeout or getattr(settings, "MSG91_TIMEOUT", 10),
         ) as resp:
             body = resp.read().decode("utf-8", errors="replace").strip()
