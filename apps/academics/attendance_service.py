@@ -124,6 +124,28 @@ def notify_absent_students(slot: ScheduleSlot) -> int:
                 recipient=s.student_mobile, context=ctx, related=a,
             )
             n += 1
+            # DLT-approved SMS to the absent student (BulkSMS / MSG91 per
+            # settings.SMS_PROVIDER). Same context as email/WA — the
+            # template uses {name}/{date}/{subject}.
+            queue_notification(
+                template_key="attendance.student_absent_v2.sms",
+                recipient=s.student_mobile, context=ctx, related=a,
+            )
+            n += 1
+
+        # SMS to parent(s). Father first; only message the mother if her
+        # number differs, so we don't double-charge a shared handset.
+        parent_mobiles = []
+        if s.father_mobile:
+            parent_mobiles.append(s.father_mobile)
+        if s.mother_mobile and s.mother_mobile != s.father_mobile:
+            parent_mobiles.append(s.mother_mobile)
+        for mobile in parent_mobiles:
+            queue_notification(
+                template_key="attendance.parent_absent_v2.sms",
+                recipient=mobile, context=ctx, related=a,
+            )
+            n += 1
     return n
 
 
