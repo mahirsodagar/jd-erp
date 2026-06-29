@@ -378,6 +378,60 @@ MSG91_SMS_VAR_ORDER = {
 }
 
 
+# --- WhatsApp — XIRCLS trigger API ------------------------------------
+#
+# XIRCLS bridges to the WhatsApp Business API. Each send references a
+# pre-configured *trigger* (campaign) on the XIRCLS platform plus named
+# *parameters* that fill the approved template. See
+# apps/notifications/whatsapp.py for the client.
+#
+# Master gate: WA-channel notifications stay queue-only (no transport)
+# until this is True — flip it on AFTER the triggers/keys below are set,
+# so enabling the integration doesn't suddenly message every new lead.
+WHATSAPP_ENABLED = env.bool("WHATSAPP_ENABLED", default=False)
+
+XIRCLS_API_URL = env(
+    "XIRCLS_API_URL",
+    default="https://api.xircls.com/talk/api/v1/send_trigger_message/",
+)
+# Api-key: XIRCLS Profile → Global Settings → Generate API Key.
+XIRCLS_API_KEY = env("XIRCLS_API_KEY", default="")
+# Whatsapp-Project-Key: WhatsApp by XIRCLS → Settings → Projects → Token.
+XIRCLS_WHATSAPP_PROJECT_KEY = env("XIRCLS_WHATSAPP_PROJECT_KEY", default="")
+XIRCLS_DEFAULT_COUNTRY_CODE = env("XIRCLS_DEFAULT_COUNTRY_CODE", default="91")
+XIRCLS_TIMEOUT = env.int("XIRCLS_TIMEOUT", default=10)
+
+# our template_key → XIRCLS trigger (campaign) name as created on the
+# XIRCLS platform. Leave blank until the trigger exists there — an unset
+# trigger yields a clear "not mapped" error in the dispatch log rather
+# than a provider rejection. These are the WHATSAPP-channel keys already
+# queued across the app (signals.py, attendance_service.py, seeder).
+XIRCLS_WA_TRIGGERS = {
+    "lead_welcome_wa":          env("XIRCLS_TRIGGER_LEAD_WELCOME", default=""),
+    "hot_followup_reminder":    env("XIRCLS_TRIGGER_HOT_FOLLOWUP", default=""),
+    "campus_visit_reminder":    env("XIRCLS_TRIGGER_CAMPUS_VISIT", default=""),
+    "post_visit_thanks_wa":     env("XIRCLS_TRIGGER_POST_VISIT", default=""),
+    "not_answered_followup":    env("XIRCLS_TRIGGER_NOT_ANSWERED", default=""),
+    "enrolled_confirmation_wa": env("XIRCLS_TRIGGER_ENROLLED", default=""),
+    "student_absent_wa":        env("XIRCLS_TRIGGER_STUDENT_ABSENT", default=""),
+}
+
+# our template_key → {xircls_param_name: our_context_key}. The LEFT side
+# is the parameter name as configured in that XIRCLS template; the RIGHT
+# side is the key in the context dict we queue with. Adjust the left-hand
+# names to match each XIRCLS template. A template_key absent here sends
+# the whole context dict as-is (param names == context keys).
+XIRCLS_WA_PARAM_MAP = {
+    "lead_welcome_wa":          {"name": "name", "program": "program"},
+    "hot_followup_reminder":    {"name": "name"},
+    "campus_visit_reminder":    {"name": "name"},
+    "post_visit_thanks_wa":     {"name": "name"},
+    "not_answered_followup":    {"name": "name"},
+    "enrolled_confirmation_wa": {"name": "name", "program": "program"},
+    "student_absent_wa":        {"name": "name", "date": "date", "subject": "subject"},
+}
+
+
 # --- Email — MSG91 v5 transactional -----------------------------------
 
 # Legacy PHP project posts to https://control.msg91.com/api/v5/email/send

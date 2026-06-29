@@ -184,8 +184,8 @@ def _dispatch_now(tmpl, recipient, cc, context, ct, oid,
         content_type=ct, object_id=oid, scheduled=scheduled,
     )
 
-    # Real outbound: SMS / EMAIL. Other channels (WhatsApp, in-CRM)
-    # stay queued until a driver lands.
+    # Real outbound: SMS / EMAIL / WhatsApp. In-CRM stays queued (no
+    # transport — it's read in the CRM UI).
     Channel = NotificationTemplate.Channel
     if tmpl.channel == Channel.SMS:
         from .sms import send_sms
@@ -200,6 +200,22 @@ def _dispatch_now(tmpl, recipient, cc, context, ct, oid,
                       else NotificationDispatchLog.Status.FAILED)
         log.error = "" if ok else payload
         log.save(update_fields=["status", "error"])
+    elif tmpl.channel == Channel.WHATSAPP:
+        # XIRCLS is trigger+parameter based (it stores the approved body
+        # on their side), so it ignores `body` and uses the raw context.
+        # While WHATSAPP_ENABLED is off the row stays QUEUED — same as
+        # before this driver landed — so turning the feature on is the only
+        # thing that starts real sends.
+        from django.conf import settings as _settings
+        if getattr(_settings, "WHATSAPP_ENABLED", False):
+            from .whatsapp import send_whatsapp
+            ok, payload = send_whatsapp(
+                recipient=recipient, template_key=tmpl.key, context=context,
+            )
+            log.status = (NotificationDispatchLog.Status.SENT if ok
+                          else NotificationDispatchLog.Status.FAILED)
+            log.error = "" if ok else payload
+            log.save(update_fields=["status", "error"])
     elif tmpl.channel == Channel.EMAIL:
         ok, payload = _send_email(tmpl, recipient, cc, subject, body, context)
         log.status = (NotificationDispatchLog.Status.SENT if ok
