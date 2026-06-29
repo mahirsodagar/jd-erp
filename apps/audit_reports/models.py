@@ -346,3 +346,123 @@ class ComplianceFlag(models.Model):
 
     def __str__(self):
         return f"[{self.severity}/{self.category}] {self.description[:40]}"
+
+
+# --- 8. Dynamic audit form builder ----------------------------------
+#
+# A generic, user-defined form: an authorised user designs fields of
+# arbitrary types, any employee fills a published form, and submissions
+# surface in the Audit area. Shape mirrors the entrance-exam feature
+# (apps/leads/exam_models.py): definition -> typed fields -> per-user
+# submission -> one answer row per field.
+
+class AuditForm(models.Model):
+    """Staff-built audit / feedback form. Field rows hang off this."""
+
+    class Status(models.TextChoices):
+        DRAFT = "DRAFT", "Draft"
+        PUBLISHED = "PUBLISHED", "Published"
+        CLOSED = "CLOSED", "Closed"
+
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    status = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.DRAFT,
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="audit_forms_created",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["status"])]
+
+    def __str__(self):
+        return self.title
+
+
+class AuditFormField(models.Model):
+    """A single field in an AuditForm."""
+
+    class Type(models.TextChoices):
+        TEXT = "TEXT", "Text box"
+        TEXTAREA = "TEXTAREA", "Long text"
+        RADIO = "RADIO", "Radio (single choice)"
+        DROPDOWN = "DROPDOWN", "Dropdown (single select)"
+        MULTISELECT = "MULTISELECT", "Multi-select"
+        CHECKBOX = "CHECKBOX", "Checkboxes (multi choice)"
+        RATING = "RATING", "Star rating"
+        DATE = "DATE", "Date"
+        TIME = "TIME", "Time"
+        DATETIME = "DATETIME", "Date & time"
+
+    # Field types that draw their value from `options`.
+    SINGLE_CHOICE_TYPES = {"RADIO", "DROPDOWN"}
+    MULTI_CHOICE_TYPES = {"MULTISELECT", "CHECKBOX"}
+
+    form = models.ForeignKey(
+        AuditForm, on_delete=models.CASCADE, related_name="fields",
+    )
+    label = models.CharField(max_length=300)
+    field_type = models.CharField(max_length=12, choices=Type.choices)
+    options = models.JSONField(
+        default=list, blank=True,
+        help_text="Choice types: list of option strings. Others: ignored.",
+    )
+    required = models.BooleanField(default=False)
+    help_text = models.CharField(max_length=300, blank=True)
+    config = models.JSONField(
+        default=dict, blank=True,
+        help_text='Type-specific config, e.g. {"max_rating": 5}.',
+    )
+    sort_order = models.PositiveSmallIntegerField(default=100)
+
+    class Meta:
+        ordering = ("form", "sort_order", "id")
+
+    def __str__(self):
+        return f"{self.label} ({self.field_type})"
+
+
+class AuditSubmission(models.Model):
+    """One fill of an AuditForm. Employees may submit more than once."""
+
+    form = models.ForeignKey(
+        AuditForm, on_delete=models.CASCADE, related_name="submissions",
+    )
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="audit_submissions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["form", "created_at"])]
+
+    def __str__(self):
+        return f"submission {self.id} of {self.form_id}"
+
+
+class AuditAnswer(models.Model):
+    """One answer per (submission, field). `value` is normalised per
+    field type: scalar for text/choice/rating/date, list for multi."""
+
+    submission = models.ForeignKey(
+        AuditSubmission, on_delete=models.CASCADE, related_name="answers",
+    )
+    field = models.ForeignKey(
+        AuditFormField, on_delete=models.CASCADE, related_name="answers",
+    )
+    value = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("submission", "field__sort_order", "field_id")
+        unique_together = (("submission", "field"),)
+
+    def __str__(self):
+        return f"answer {self.id} of submission {self.submission_id}"

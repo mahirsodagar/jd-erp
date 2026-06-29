@@ -11,17 +11,22 @@ from rest_framework.views import APIView
 from apps.employees.models import Employee
 from apps.master.models import Batch
 
+from django.db import transaction
+
 from .models import (
-    AdminDailyReport, BatchMentorReport, ComplianceFlag, CourseEndReport,
+    AdminDailyReport, AuditAnswer, AuditForm, AuditSubmission,
+    BatchMentorReport, ComplianceFlag, CourseEndReport,
     FacultyDailyReport, FacultySelfAppraisal, StudentFeedback,
 )
 from .permissions import has_perm
 from .serializers import (
-    AdminDailyReportSerializer, BatchMentorReportSerializer,
+    AdminDailyReportSerializer, AuditFormSerializer, AuditSubmissionSerializer,
+    BatchMentorReportSerializer,
     ComplianceFlagSerializer, CourseEndReportSerializer,
     CourseEndReviewSerializer, FacultyDailyReportSerializer,
     FacultySelfAppraisalSerializer, ResolveFlagSerializer,
     SelfAppraisalReviewSerializer, StudentFeedbackSerializer,
+    SubmitAuditFormSerializer,
 )
 from .services import (
     batch_progression, consolidated_monthly,
@@ -491,3 +496,127 @@ class ConsolidatedMonthlyView(APIView):
         except ValueError as e:
             return Response({"detail": str(e)},
                             status=http.HTTP_400_BAD_REQUEST)
+
+
+# === Dynamic Audit Form Builder =====================================
+
+def _can_manage_forms(user) -> bool:
+    return user.is_superuser or has_perm(user, "audit.form.manage")
+
+
+def _can_view_all_submissions(user) -> bool:
+    return user.is_superuser or has_perm(user, "audit.submission.view_all")
+
+
+class AuditFormListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        qs = AuditForm.objects.prefetch_related("fields")
+        # Managers see every form; everyone else only published ones.
+        if not _can_manage_forms(request.user):
+            qs = qs.filter(status=AuditForm.Status.PUBLISHED)
+        if v := request.query_params.get("status"):
+            qs = qs.filter(status=v)
+        return Response(AuditFormSerializer(qs, many=True).data)
+
+    def post(self, request):
+        if not _can_manage_forms(request.user):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = AuditFormSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        s.save(created_by=request.user)
+        return Response(s.data, status=http.HTTP_201_CREATED)
+
+
+class AuditFormDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _obj(self, pk):
+        try:
+            return AuditForm.objects.prefetch_related("fields").get(pk=pk)
+        except AuditForm.DoesNotExist as e:
+            raise Http404 from e
+
+    def get(self, request, pk):
+        form = self._obj(pk)
+        if (form.status != AuditForm.Status.PUBLISHED
+                and not _can_manage_forms(request.user)):
+            return Response({"detail": "Not found."},
+                            status=http.HTTP_404_NOT_FOUND)
+        return Response(AuditFormSerializer(form).data)
+
+    def patch(self, request, pk):
+        if not _can_manage_forms(request.user):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = AuditFormSerializer(self._obj(pk), data=request.data, partial=True)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(s.data)
+
+    def delete(self, request, pk):
+        if not _can_manage_forms(request.user):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        self._obj(pk).delete()
+        return Response(status=http.HTTP_204_NO_CONTENT)
+
+
+class AuditFormSubmitView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            form = AuditForm.objects.prefetch_related("fields").get(pk=pk)
+        except AuditForm.DoesNotExist as e:
+            raise Http404 from e
+        if form.status != AuditForm.Status.PUBLISHED:
+            return Response({"detail": "This form is not open for submission."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        s = SubmitAuditFormSerializer(data=request.data, context={"form": form})
+        s.is_valid(raise_exception=True)
+        cleaned = s.validated_data["cleaned"]  # {field_id: value}
+        with transaction.atomic():
+            submission = AuditSubmission.objects.create(
+                form=form, submitted_by=request.user,
+            )
+            AuditAnswer.objects.bulk_create([
+                AuditAnswer(submission=submission, field_id=fid, value=val)
+                for fid, val in cleaned.items()
+            ])
+        return Response(AuditSubmissionSerializer(submission).data,
+                        status=http.HTTP_201_CREATED)
+
+
+class AuditSubmissionListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        qs = (AuditSubmission.objects
+              .select_related("form", "submitted_by")
+              .prefetch_related("answers__field"))
+        if not _can_view_all_submissions(request.user):
+            qs = qs.filter(submitted_by=request.user)
+        if v := request.query_params.get("form"):
+            qs = qs.filter(form_id=v)
+        return Response(AuditSubmissionSerializer(qs[:1000], many=True).data)
+
+
+class AuditSubmissionDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            obj = (AuditSubmission.objects
+                   .select_related("form", "submitted_by")
+                   .prefetch_related("answers__field")
+                   .get(pk=pk))
+        except AuditSubmission.DoesNotExist as e:
+            raise Http404 from e
+        if not (_can_view_all_submissions(request.user)
+                or obj.submitted_by_id == request.user.id):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        return Response(AuditSubmissionSerializer(obj).data)

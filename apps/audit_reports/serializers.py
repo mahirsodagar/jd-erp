@@ -1,7 +1,9 @@
+from django.utils.dateparse import parse_date, parse_datetime, parse_time
 from rest_framework import serializers
 
 from .models import (
-    AdminDailyReport, BatchMentorReport, ComplianceFlag, CourseEndReport,
+    AdminDailyReport, AuditAnswer, AuditForm, AuditFormField, AuditSubmission,
+    BatchMentorReport, ComplianceFlag, CourseEndReport,
     FacultyDailyReport, FacultySelfAppraisal, StudentFeedback,
 )
 
@@ -168,3 +170,182 @@ class ComplianceFlagSerializer(serializers.ModelSerializer):
 
 class ResolveFlagSerializer(serializers.Serializer):
     resolution_remarks = serializers.CharField(min_length=3, max_length=2000)
+
+
+# === Dynamic audit form builder =====================================
+
+class AuditFormFieldSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AuditFormField
+        fields = [
+            "id", "label", "field_type", "options", "required",
+            "help_text", "config", "sort_order",
+        ]
+        read_only_fields = ["id"]
+
+    def validate(self, attrs):
+        ftype = attrs.get("field_type")
+        options = attrs.get("options") or []
+        choice_types = (
+            AuditFormField.SINGLE_CHOICE_TYPES
+            | AuditFormField.MULTI_CHOICE_TYPES
+        )
+        if ftype in choice_types and not options:
+            raise serializers.ValidationError(
+                {"options": f"{ftype} fields need at least one option."}
+            )
+        return attrs
+
+
+class AuditFormSerializer(serializers.ModelSerializer):
+    fields = AuditFormFieldSerializer(many=True)
+    field_count = serializers.IntegerField(
+        source="fields.count", read_only=True,
+    )
+    created_by_name = serializers.CharField(
+        source="created_by.full_name", read_only=True, default="",
+    )
+
+    class Meta:
+        model = AuditForm
+        fields = [
+            "id", "title", "description", "status",
+            "fields", "field_count",
+            "created_by", "created_by_name", "created_at", "updated_at",
+        ]
+        read_only_fields = [
+            "id", "field_count",
+            "created_by", "created_by_name", "created_at", "updated_at",
+        ]
+
+    def _write_fields(self, form, fields_data):
+        form.fields.all().delete()
+        AuditFormField.objects.bulk_create([
+            AuditFormField(form=form, **fd) for fd in fields_data
+        ])
+
+    def create(self, validated_data):
+        fields_data = validated_data.pop("fields", [])
+        form = AuditForm.objects.create(**validated_data)
+        self._write_fields(form, fields_data)
+        return form
+
+    def update(self, instance, validated_data):
+        fields_data = validated_data.pop("fields", None)
+        for attr, val in validated_data.items():
+            setattr(instance, attr, val)
+        instance.save()
+        if fields_data is not None:
+            self._write_fields(instance, fields_data)
+        return instance
+
+
+class AuditAnswerSerializer(serializers.ModelSerializer):
+    field_label = serializers.CharField(source="field.label", read_only=True)
+    field_type = serializers.CharField(source="field.field_type", read_only=True)
+
+    class Meta:
+        model = AuditAnswer
+        fields = ["id", "field", "field_label", "field_type", "value"]
+        read_only_fields = fields
+
+
+class AuditSubmissionSerializer(serializers.ModelSerializer):
+    form_title = serializers.CharField(source="form.title", read_only=True)
+    submitted_by_name = serializers.CharField(
+        source="submitted_by.full_name", read_only=True, default="",
+    )
+    answers = AuditAnswerSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = AuditSubmission
+        fields = [
+            "id", "form", "form_title",
+            "submitted_by", "submitted_by_name",
+            "created_at", "answers",
+        ]
+        read_only_fields = fields
+
+
+class SubmitAnswerSerializer(serializers.Serializer):
+    field = serializers.IntegerField()
+    value = serializers.JSONField(required=False, allow_null=True)
+
+
+class SubmitAuditFormSerializer(serializers.Serializer):
+    """Validates a fill against the form's field definitions. Pass the
+    AuditForm in the serializer context as `form`."""
+
+    answers = SubmitAnswerSerializer(many=True)
+
+    def validate(self, attrs):
+        form = self.context["form"]
+        fields = {f.id: f for f in form.fields.all()}
+        by_field = {}
+        for ans in attrs["answers"]:
+            fid = ans["field"]
+            if fid not in fields:
+                raise serializers.ValidationError(
+                    f"Field {fid} does not belong to this form."
+                )
+            by_field[fid] = self._clean_value(fields[fid], ans.get("value"))
+
+        # Required-field enforcement.
+        for fid, field in fields.items():
+            if field.required and self._is_empty(by_field.get(fid)):
+                raise serializers.ValidationError(
+                    {str(fid): f"'{field.label}' is required."}
+                )
+        attrs["cleaned"] = by_field
+        return attrs
+
+    @staticmethod
+    def _is_empty(value):
+        return value is None or value == "" or value == []
+
+    def _clean_value(self, field, value):
+        ftype = field.field_type
+        if self._is_empty(value):
+            return None
+        if ftype in AuditFormField.SINGLE_CHOICE_TYPES:
+            if value not in field.options:
+                raise serializers.ValidationError(
+                    {field.label: f"'{value}' is not a valid option."}
+                )
+            return value
+        if ftype in AuditFormField.MULTI_CHOICE_TYPES:
+            if not isinstance(value, list):
+                raise serializers.ValidationError(
+                    {field.label: "Expected a list of options."}
+                )
+            bad = [v for v in value if v not in field.options]
+            if bad:
+                raise serializers.ValidationError(
+                    {field.label: f"Invalid option(s): {bad}."}
+                )
+            return value
+        if ftype == "RATING":
+            try:
+                n = int(value)
+            except (TypeError, ValueError):
+                raise serializers.ValidationError(
+                    {field.label: "Rating must be a number."}
+                )
+            max_rating = int(field.config.get("max_rating", 5))
+            if not (1 <= n <= max_rating):
+                raise serializers.ValidationError(
+                    {field.label: f"Rating must be 1–{max_rating}."}
+                )
+            return n
+        if ftype in ("DATE", "TIME", "DATETIME"):
+            parser = {
+                "DATE": parse_date, "TIME": parse_time,
+                "DATETIME": parse_datetime,
+            }[ftype]
+            if not isinstance(value, str) or parser(value) is None:
+                raise serializers.ValidationError(
+                    {field.label: f"Invalid {ftype.lower()} value."}
+                )
+            return value
+        # TEXT / TEXTAREA
+        return str(value)

@@ -3,6 +3,11 @@ from django.urls import path
 from .views import (
     AdminDailyReportDetailView,
     AdminDailyReportListCreateView,
+    AuditFormDetailView,
+    AuditFormListCreateView,
+    AuditFormSubmitView,
+    AuditSubmissionDetailView,
+    AuditSubmissionListView,
     BatchMentorReportListCreateView,
     BatchProgressionView,
     ComplianceFlagListCreateView,
@@ -21,6 +26,18 @@ from .views import (
 )
 
 urlpatterns = [
+    # Dynamic audit form builder
+    path("forms/", AuditFormListCreateView.as_view(),
+         name="audit-form-list-create"),
+    path("forms/<int:pk>/", AuditFormDetailView.as_view(),
+         name="audit-form-detail"),
+    path("forms/<int:pk>/submit/", AuditFormSubmitView.as_view(),
+         name="audit-form-submit"),
+    path("submissions/", AuditSubmissionListView.as_view(),
+         name="audit-submission-list"),
+    path("submissions/<int:pk>/", AuditSubmissionDetailView.as_view(),
+         name="audit-submission-detail"),
+
     # Logs
     path("faculty-daily/", FacultyDailyReportListCreateView.as_view(),
          name="faculty-daily-list-create"),

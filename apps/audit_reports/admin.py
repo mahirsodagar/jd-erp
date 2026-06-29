@@ -1,7 +1,8 @@
 from django.contrib import admin
 
 from .models import (
-    AdminDailyReport, BatchMentorReport, ComplianceFlag, CourseEndReport,
+    AdminDailyReport, AuditAnswer, AuditForm, AuditFormField, AuditSubmission,
+    BatchMentorReport, ComplianceFlag, CourseEndReport,
     FacultyDailyReport, FacultySelfAppraisal, StudentFeedback,
 )
 
@@ -74,3 +75,34 @@ class ComplianceFlagAdmin(admin.ModelAdmin):
                            "raised_by", "resolved_by")
     readonly_fields = ("resolved_at", "resolved_by",
                        "raised_by", "created_at", "updated_at")
+
+
+class AuditFormFieldInline(admin.TabularInline):
+    model = AuditFormField
+    extra = 0
+
+
+@admin.register(AuditForm)
+class AuditFormAdmin(admin.ModelAdmin):
+    list_display = ("title", "status", "created_by", "created_at")
+    list_filter = ("status",)
+    search_fields = ("title", "description")
+    autocomplete_fields = ("created_by",)
+    inlines = (AuditFormFieldInline,)
+    readonly_fields = ("created_by", "created_at", "updated_at")
+
+
+class AuditAnswerInline(admin.TabularInline):
+    model = AuditAnswer
+    extra = 0
+    readonly_fields = ("field", "value")
+    can_delete = False
+
+
+@admin.register(AuditSubmission)
+class AuditSubmissionAdmin(admin.ModelAdmin):
+    list_display = ("id", "form", "submitted_by", "created_at")
+    search_fields = ("form__title", "submitted_by__username")
+    autocomplete_fields = ("form", "submitted_by")
+    readonly_fields = ("form", "submitted_by", "created_at")
+    inlines = (AuditAnswerInline,)

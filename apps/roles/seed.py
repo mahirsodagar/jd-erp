@@ -149,6 +149,8 @@ CATALOGUE = [
     ("audit", "audit.compliance.flag", "Raise compliance flags"),
     ("audit", "audit.compliance.resolve", "Resolve compliance flags"),
     ("audit", "audit.report.consolidated", "View dashboards / consolidated reports"),
+    ("audit", "audit.form.manage", "Create / edit / delete audit forms"),
+    ("audit", "audit.submission.view_all", "View all audit form submissions"),
 
     # Module HR — Relieving (exit workflow + experience letter)
     ("hr", "hr.relieving.submit_for_others", "Submit relieving on behalf of others"),
