@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "apps.common",
     "apps.courseware",
     "apps.student_leaves",
+    "apps.student_documents",
     "apps.portal",
     "apps.tasks",
 ]

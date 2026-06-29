@@ -24,14 +24,16 @@ from .marks_service import (
     build_transcript, grade_submission, publish_marks,
     submission_status_after_save, unpublish_marks,
 )
+from . import lesson_service
 from .models import (
     AlumniRecord, Assignment, AssignmentSubmission, Attendance,
-    Certificate, MarksEntry, ScheduleSlot,
+    Certificate, Lesson, MarksEntry, ScheduleSlot,
 )
 from .permissions import ScheduleAccess, has_perm
 from .serializers import (
     AlumniRecordSerializer, AlumniSelfUpdateSerializer,
     AssignmentSerializer, AssignmentSubmissionSerializer,
+    LessonSerializer, LessonReviewSerializer,
     AttendanceSerializer, BulkMarkAttendanceSerializer,
     BulkWeeklyPublishSerializer, CertificateIssueSerializer,
     CertificateRejectSerializer, CertificateRequestSerializer,
@@ -1694,3 +1696,146 @@ class ResponseReviewView(APIView):
             return Response({"detail": str(e)},
                             status=http.HTTP_400_BAD_REQUEST)
         return Response(TestResponseSerializer(r).data)
+
+
+# === G.5 — Lessons ===================================================
+
+def _is_lesson_owner(user, lesson) -> bool:
+    return user.is_superuser or lesson.created_by_id == user.id
+
+
+def _lesson_roles_for(user, lesson) -> set:
+    """Reviewer roles this user may act as on the given lesson."""
+    roles = set()
+    emp = getattr(user, "employee", None)
+    if emp is not None:
+        if lesson.hod_id == emp.id:
+            roles.add("HOD")
+        if lesson.class_mentor_id == emp.id:
+            roles.add("MENTOR")
+    if user.is_superuser or has_perm(user, "academics.lesson.manage_any"):
+        roles.update({"HOD", "MENTOR"})
+    return roles
+
+
+class LessonListCreateView(APIView):
+    """Faculty/staff: list + create lesson plans. Students read approved
+    lessons via `/api/portal/lessons/`."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        u = request.user
+        qs = Lesson.objects.select_related(
+            "batch", "hod", "class_mentor", "created_by",
+        )
+        params = request.query_params
+        if v := params.get("batch"):
+            qs = qs.filter(batch_id=v)
+        if params.get("mine"):
+            qs = qs.filter(created_by=u)
+        if params.get("to_review"):
+            from django.db.models import Q
+            cond = Q()
+            emp = getattr(u, "employee", None)
+            if emp is not None:
+                cond |= Q(hod_id=emp.id,
+                          hod_status=Lesson.ReviewStatus.PENDING)
+                cond |= Q(class_mentor_id=emp.id,
+                          mentor_status=Lesson.ReviewStatus.PENDING)
+            if u.is_superuser or has_perm(u, "academics.lesson.manage_any"):
+                cond |= (Q(hod_status=Lesson.ReviewStatus.PENDING)
+                         | Q(mentor_status=Lesson.ReviewStatus.PENDING))
+            qs = qs.filter(cond) if cond.children else qs.none()
+
+        # Campus scope for non-privileged users.
+        if not (u.is_superuser
+                or has_perm(u, "academics.lesson.view_all")
+                or has_perm(u, "academics.schedule.view_all")):
+            qs = qs.filter(batch__campus__in=u.campuses.all())
+
+        rows = list(qs[:500])
+        if v := params.get("status"):
+            rows = [lsn for lsn in rows if lsn.overall_status == v]
+        return Response(LessonSerializer(rows, many=True).data)
+
+    def post(self, request):
+        if not has_perm(request.user, "academics.lesson.create"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = LessonSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        s.save(created_by=request.user)
+        return Response(s.data, status=http.HTTP_201_CREATED)
+
+
+class LessonDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _obj(self, pk):
+        try:
+            return Lesson.objects.select_related(
+                "batch", "hod", "class_mentor", "created_by",
+            ).get(pk=pk)
+        except Lesson.DoesNotExist as e:
+            raise Http404 from e
+
+    def get(self, request, pk):
+        return Response(LessonSerializer(self._obj(pk)).data)
+
+    def patch(self, request, pk):
+        lesson = self._obj(pk)
+        if not (_is_lesson_owner(request.user, lesson)
+                or has_perm(request.user, "academics.lesson.manage_any")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = LessonSerializer(lesson, data=request.data, partial=True)
+        s.is_valid(raise_exception=True)
+        s.save()
+        # Editing the plan invalidates prior reviews — send it back for
+        # a fresh decision from both reviewers.
+        lesson_service.reset_reviews(lesson=lesson)
+        lesson.refresh_from_db()
+        return Response(LessonSerializer(lesson).data)
+
+    def delete(self, request, pk):
+        lesson = self._obj(pk)
+        if not (_is_lesson_owner(request.user, lesson)
+                or has_perm(request.user, "academics.lesson.manage_any")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        lesson.delete()
+        return Response(status=http.HTTP_204_NO_CONTENT)
+
+
+class LessonReviewView(APIView):
+    """HOD / Class Mentor records their decision on a lesson plan."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            lesson = Lesson.objects.select_related(
+                "batch", "hod", "class_mentor",
+            ).get(pk=pk)
+        except Lesson.DoesNotExist as e:
+            raise Http404 from e
+        s = LessonReviewSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        role = s.validated_data["role"]
+        allowed = _lesson_roles_for(request.user, lesson)
+        if role not in allowed:
+            return Response(
+                {"detail": "You are not assigned to review this lesson "
+                           "in that role."},
+                status=http.HTTP_403_FORBIDDEN,
+            )
+        try:
+            lesson_service.review_lesson(
+                lesson=lesson, role=role,
+                decision=s.validated_data["decision"],
+                remarks=s.validated_data.get("remarks", ""),
+                reviewer=request.user,
+            )
+        except ValueError as e:
+            return Response({"detail": str(e)},
+                            status=http.HTTP_400_BAD_REQUEST)
+        return Response(LessonSerializer(lesson).data)

@@ -16,9 +16,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.academics.models import (
-    Assignment, AssignmentSubmission, Attendance, ScheduleSlot,
+    Assignment, AssignmentSubmission, Attendance, Lesson, ScheduleSlot,
     Test, TestAttempt, TestQuestion, TestResponse,
 )
+from apps.academics.serializers import PortalLessonSerializer
 from apps.academics import test_service as test_svc
 from apps.admissions.models import Student, StudentDocument
 from apps.common.throttles import PasswordChangeThrottle
@@ -26,6 +27,11 @@ from apps.courseware.models import CoursewareMapping, CoursewareTopic
 from apps.master.models import Batch, Subject
 from apps.student_leaves import services as leave_svc
 from apps.student_leaves.models import StudentLeaveApplication
+from apps.student_documents import services as document_svc
+from apps.student_documents.models import DocumentRequest
+from apps.student_documents.serializers import (
+    ApplyDocumentSerializer, PortalDocumentRequestSerializer,
+)
 
 from .helpers import resolve_portal_context
 from .permissions import IsStudentOnly, IsStudentOrParent
@@ -575,6 +581,74 @@ class LeaveListCreateView(APIView):
                             status=http.HTTP_400_BAD_REQUEST)
         return Response(PortalLeaveSerializer(app).data,
                         status=http.HTTP_201_CREATED)
+
+
+# --- Document requests ---------------------------------------------
+
+class DocumentRequestListCreateView(APIView):
+    """Student: apply for an institute-issued document and list own
+    requests. Admins review/approve from the staff side."""
+
+    permission_classes = [IsStudentOnly]
+
+    def get(self, request):
+        student = request.portal_ctx.student
+        qs = DocumentRequest.objects.filter(student=student)
+        return Response(
+            PortalDocumentRequestSerializer(
+                qs, many=True, context={"request": request}).data
+        )
+
+    def post(self, request):
+        student = request.portal_ctx.student
+        s = ApplyDocumentSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        d = s.validated_data
+        try:
+            obj = document_svc.apply_document(
+                student=student,
+                doc_type=d["doc_type"],
+                doc_type_other=d.get("doc_type_other", ""),
+                purpose=d["purpose"],
+            )
+        except ValueError as e:
+            return Response({"detail": str(e)},
+                            status=http.HTTP_400_BAD_REQUEST)
+        return Response(
+            PortalDocumentRequestSerializer(
+                obj, context={"request": request}).data,
+            status=http.HTTP_201_CREATED,
+        )
+
+
+# --- Lessons (read-only, approved plans for the student's batch) ---
+
+class LessonListView(APIView):
+    """Students/parents: approved lesson plans for the student's active
+    batches. Hidden until display_date when one is set."""
+
+    permission_classes = [IsStudentOrParent]
+
+    def get(self, request):
+        from django.db.models import Q
+
+        from apps.admissions.models import Enrollment
+        student = request.portal_ctx.student
+        batch_ids = list(
+            Enrollment.objects.filter(
+                student=student, status=Enrollment.Status.ACTIVE,
+            ).values_list("batch_id", flat=True)
+        )
+        today = timezone.localdate()
+        qs = (Lesson.objects
+              .filter(batch_id__in=batch_ids,
+                      hod_status=Lesson.ReviewStatus.APPROVED,
+                      mentor_status=Lesson.ReviewStatus.APPROVED)
+              .filter(Q(display_date__isnull=True)
+                      | Q(display_date__lte=today))
+              .select_related("batch")
+              .order_by("-created_at"))
+        return Response(PortalLessonSerializer(qs, many=True).data)
 
 
 # --- Feedback link -------------------------------------------------

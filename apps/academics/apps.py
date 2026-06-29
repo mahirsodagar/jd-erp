@@ -10,13 +10,14 @@ class AcademicsConfig(AppConfig):
         from auditlog.registry import auditlog
         from .models import (
             AlumniRecord, Assignment, AssignmentSubmission, Attendance,
-            Certificate, MarksEntry, ScheduleSlot, Test, TestAttempt,
+            Certificate, Lesson, MarksEntry, ScheduleSlot, Test, TestAttempt,
             TestQuestion, TestResponse,
         )
         auditlog.register(ScheduleSlot)
         auditlog.register(Attendance)
         auditlog.register(Assignment)
         auditlog.register(AssignmentSubmission)
+        auditlog.register(Lesson)
         auditlog.register(MarksEntry)
         auditlog.register(Certificate)
         auditlog.register(AlumniRecord)

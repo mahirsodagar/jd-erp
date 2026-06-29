@@ -47,13 +47,14 @@ class UserSerializer(serializers.ModelSerializer):
     is_student = serializers.SerializerMethodField()
     is_parent = serializers.SerializerMethodField()
     is_employee = serializers.SerializerMethodField()
+    employee_id = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = [
             "id", "username", "email", "full_name",
             "is_active", "is_staff", "is_superuser",
-            "is_student", "is_parent", "is_employee",
+            "is_student", "is_parent", "is_employee", "employee_id",
             "campuses",
             "date_joined", "last_login",
             "roles", "permissions", "modules",
@@ -62,6 +63,7 @@ class UserSerializer(serializers.ModelSerializer):
             "id", "is_superuser", "date_joined", "last_login",
             "roles", "permissions", "modules",
             "campuses", "is_student", "is_parent", "is_employee",
+            "employee_id",
         ]
 
     def get_roles(self, obj):
@@ -94,6 +96,10 @@ class UserSerializer(serializers.ModelSerializer):
     def get_is_employee(self, obj):
         # Reverse OneToOne from employees.Employee.user_account
         return getattr(obj, "employee", None) is not None
+
+    def get_employee_id(self, obj):
+        emp = getattr(obj, "employee", None)
+        return emp.id if emp is not None else None
 
 
 class UserCreateSerializer(serializers.ModelSerializer):

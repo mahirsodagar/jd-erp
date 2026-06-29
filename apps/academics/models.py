@@ -585,3 +585,116 @@ class TestResponse(models.Model):
         indexes = [
             models.Index(fields=["attempt", "is_auto_graded"]),
         ]
+
+
+# === G.5 — Lessons (lesson plans with dual approval) ================
+
+class Lesson(models.Model):
+    """A faculty-authored lesson plan for a batch. Goes through a
+    two-reviewer approval workflow (HOD + Class Mentor); only when BOTH
+    approve does it become visible to students of the batch.
+
+    Similar in spirit to Assignment, but the value is the plan itself
+    (unit, projects, schedule) rather than per-student submissions."""
+
+    class ReviewStatus(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        APPROVED = "APPROVED", "Approved"
+        REJECTED = "REJECTED", "Rejected"
+        IMPROVE = "IMPROVE", "Needs improvement"
+
+    batch = models.ForeignKey(
+        "master.Batch", on_delete=models.PROTECT, related_name="lessons",
+    )
+    # Core plan content.
+    unit = models.CharField(max_length=200)
+    assignment = models.TextField(
+        help_text="The assignment / work described in this lesson plan.",
+    )
+    # Submission deadline — either a concrete datetime OR a descriptive
+    # note such as "after the 4th session". At least one is required.
+    submission_due_date = models.DateTimeField(null=True, blank=True)
+    submission_due_desc = models.CharField(max_length=200, blank=True)
+
+    # Reviewers (employees who must approve before students see the plan).
+    hod = models.ForeignKey(
+        "employees.Employee", on_delete=models.PROTECT,
+        related_name="lessons_as_hod",
+        help_text="HOD / senior faculty reviewer.",
+    )
+    class_mentor = models.ForeignKey(
+        "employees.Employee", on_delete=models.PROTECT,
+        related_name="lessons_as_mentor",
+        help_text="Class / batch mentor reviewer.",
+    )
+
+    # Projects + extras.
+    module_project = models.TextField(blank=True)
+    module_project_due = models.DateField(null=True, blank=True)
+    sem_end_project = models.TextField(blank=True)
+    sem_end_project_due = models.DateField(null=True, blank=True)
+    display_date = models.DateField(
+        null=True, blank=True,
+        help_text="When set, students only see the lesson on/after this date.",
+    )
+    visits_workshops = models.TextField(
+        blank=True,
+        help_text="Visits / workshops / seminars, if any.",
+    )
+
+    # Review state — one (status, remarks, decided_at) per reviewer.
+    hod_status = models.CharField(
+        max_length=10, choices=ReviewStatus.choices,
+        default=ReviewStatus.PENDING, db_index=True,
+    )
+    hod_remarks = models.TextField(blank=True)
+    hod_decided_at = models.DateTimeField(null=True, blank=True)
+
+    mentor_status = models.CharField(
+        max_length=10, choices=ReviewStatus.choices,
+        default=ReviewStatus.PENDING, db_index=True,
+    )
+    mentor_remarks = models.TextField(blank=True)
+    mentor_decided_at = models.DateTimeField(null=True, blank=True)
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="lessons_created",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["batch", "hod_status", "mentor_status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.unit} ({self.batch.short_name or self.batch_id})"
+
+    @property
+    def overall_status(self) -> str:
+        """Aggregate of the two reviews, for display and gating.
+
+        REJECTED if either rejected; APPROVED only when both approved;
+        IMPROVE if either asked for changes (and none rejected); else
+        SUBMITTED (still awaiting at least one review)."""
+        s = self.ReviewStatus
+        statuses = {self.hod_status, self.mentor_status}
+        if s.REJECTED in statuses:
+            return "REJECTED"
+        if self.hod_status == s.APPROVED and self.mentor_status == s.APPROVED:
+            return "APPROVED"
+        if s.IMPROVE in statuses:
+            return "IMPROVE"
+        return "SUBMITTED"
+
+    @property
+    def is_visible_to_students(self) -> bool:
+        from django.utils import timezone
+        if self.overall_status != "APPROVED":
+            return False
+        if self.display_date and self.display_date > timezone.localdate():
+            return False
+        return True

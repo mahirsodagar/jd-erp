@@ -82,6 +82,13 @@ CATALOGUE = [
     ("leads", "leads.pool.manage", "Manage counsellor pools"),
     ("leads", "leads.escalation.receive", "Receive escalation alerts (managers)"),
     ("leads", "leads.report.view", "View lead reports / dashboards"),
+
+    # Entrance Exams (Leads pipeline)
+    ("leads", "leads.exam.create", "Create / edit entrance exams"),
+    ("leads", "leads.exam.publish", "Publish / close / map entrance exams"),
+    ("leads", "leads.exam.review", "Review short-answer exam responses"),
+    ("leads", "leads.exam.view_all", "View all entrance exams / attempts / reports"),
+    ("leads", "leads.exam.manage_any", "Edit / delete any entrance exam"),
     ("notifications", "notifications.template.manage", "Manage notification templates"),
     ("notifications", "notifications.dispatch.view", "View notification dispatch log"),
 
@@ -102,6 +109,9 @@ CATALOGUE = [
     ("academics", "academics.assignment.create", "Create / edit assignments"),
     ("academics", "academics.assignment.grade", "Grade any submission (HOD override)"),
     ("academics", "academics.assignment.manage_any", "Edit / delete any assignment"),
+    ("academics", "academics.lesson.create", "Create / edit lesson plans"),
+    ("academics", "academics.lesson.view_all", "View all lesson plans"),
+    ("academics", "academics.lesson.manage_any", "Edit / delete / review any lesson plan"),
     ("academics", "academics.marks.enter", "Enter / edit draft marks"),
     ("academics", "academics.marks.publish", "Publish / unpublish marks"),
     ("academics", "academics.marks.edit_published", "Edit published marks"),
@@ -150,6 +160,8 @@ CATALOGUE = [
     ("courseware", "courseware.manage", "Publish / edit / delete courseware topics"),
     ("student_leaves", "student_leaves.view_all", "View all student leave applications"),
     ("student_leaves", "student_leaves.decide", "Approve / reject student leaves"),
+    ("student_documents", "student_documents.view_all", "View all student document requests"),
+    ("student_documents", "student_documents.decide", "Approve / reject document requests"),
     ("admissions", "admissions.parent.manage", "Provision / link parent user accounts"),
 ]
 

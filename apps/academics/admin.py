@@ -2,7 +2,7 @@ from django.contrib import admin
 
 from .models import (
     AlumniRecord, Assignment, AssignmentSubmission, Attendance, Certificate,
-    MarksEntry, ScheduleSlot,
+    Lesson, MarksEntry, ScheduleSlot,
 )
 
 
@@ -39,6 +39,17 @@ class AssignmentAdmin(admin.ModelAdmin):
     list_filter = ("is_published", "subject", "batch")
     search_fields = ("title", "subject__name", "subject__code", "batch__name")
     autocomplete_fields = ("subject", "batch", "created_by")
+
+
+@admin.register(Lesson)
+class LessonAdmin(admin.ModelAdmin):
+    list_display = ("unit", "batch", "hod", "class_mentor",
+                    "hod_status", "mentor_status", "created_at")
+    list_filter = ("hod_status", "mentor_status", "batch")
+    search_fields = ("unit", "assignment", "batch__name")
+    autocomplete_fields = ("batch", "hod", "class_mentor", "created_by")
+    readonly_fields = ("hod_decided_at", "mentor_decided_at",
+                       "created_at", "updated_at")
 
 
 @admin.register(AssignmentSubmission)

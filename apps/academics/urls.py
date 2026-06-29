@@ -20,6 +20,9 @@ from .views import (
     CertificateRejectView,
     ConflictCheckView,
     EnrollmentGraduateView,
+    LessonDetailView,
+    LessonListCreateView,
+    LessonReviewView,
     MarksDetailView,
     MarksListCreateView,
     MarksPublishView,
@@ -70,6 +73,12 @@ urlpatterns = [
          name="assignment-submit"),
     path("submissions/<int:pk>/grade/", SubmissionGradeView.as_view(),
          name="submission-grade"),
+
+    # G.5 — Lessons (lesson plans + dual approval)
+    path("lessons/", LessonListCreateView.as_view(), name="lesson-list-create"),
+    path("lessons/<int:pk>/", LessonDetailView.as_view(), name="lesson-detail"),
+    path("lessons/<int:pk>/review/", LessonReviewView.as_view(),
+         name="lesson-review"),
 
     path("marks/", MarksListCreateView.as_view(), name="marks-list-create"),
     path("marks/<int:pk>/", MarksDetailView.as_view(), name="marks-detail"),

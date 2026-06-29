@@ -297,3 +297,13 @@ class LeadUtm(models.Model):
     utm_medium = models.CharField(max_length=120, blank=True)
     utm_term = models.CharField(max_length=160, blank=True)
     utm_content = models.CharField(max_length=200, blank=True)
+
+
+# Entrance Exam models live in a separate module for readability; re-export
+# them here so Django registers them under the `leads` app_label.
+from .exam_models import (  # noqa: E402,F401
+    EntranceExam,
+    EntranceExamAttempt,
+    EntranceExamQuestion,
+    EntranceExamResponse,
+)

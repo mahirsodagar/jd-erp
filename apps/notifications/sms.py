@@ -131,10 +131,46 @@ def _send_via_bulksms(
     try:
         with urllib.request.urlopen(url, timeout=10) as resp:
             text = resp.read().decode("utf-8", errors="replace").strip()
-        # Provider returns plain text; non-2xx status raises above.
-        # Treat any response containing "submitted" / a job id as success;
-        # otherwise log it as failure for triage.
-        ok = bool(text) and "error" not in text.lower()
-        return ok, text or "(empty response)"
     except Exception as e:  # network, timeout, DNS, etc.
         return False, f"{type(e).__name__}: {e}"
+
+    return _interpret_bulksms_response(text)
+
+
+def _interpret_bulksms_response(text: str) -> tuple[bool, str]:
+    """Decide ok/payload from BulkSMS's reply.
+
+    BulkSMS replies with JSON on the happy path:
+        {"status":"success", ..., "refid":807..., "response":[...]}
+    and on rejection either JSON ({"status":"failed","response":"Invalid
+    Template Id"}) or a bare sentence ("Invalid Template ID, Enter
+    Correct ..."). Crucially, NONE of the failure strings contain the
+    word "error", so the old `"error" not in text` heuristic logged every
+    rejection as SENT. We now require an explicit success signal and
+    surface the refid so a send can be traced in the BulkSMS panel / DLR.
+
+    Note: `status:success` means BulkSMS ACCEPTED + billed the message —
+    not that the operator delivered it. Final delivery is in the DLR.
+    """
+    import json
+
+    if not text:
+        return False, "(empty response)"
+
+    try:
+        data = json.loads(text)
+    except (ValueError, TypeError):
+        # Non-JSON reply — these are always rejections in practice
+        # (e.g. "Invalid Template ID, Enter Correct ...").
+        return False, text
+
+    if isinstance(data, dict):
+        status = str(data.get("status", "")).lower()
+        if status == "success":
+            refid = data.get("refid", "")
+            return True, f"accepted refid={refid} :: {text}"
+        # Explicit failure — bubble up the provider's reason verbatim.
+        return False, str(data.get("response") or data.get("message") or text)
+
+    # Unknown JSON shape — treat conservatively as failure for triage.
+    return False, text

@@ -1,6 +1,20 @@
 from django.urls import path
 
 from .bulk_message import LeadBulkMessageView
+from .exam_views import (
+    ExamAttemptDetailView,
+    ExamAttemptsListView,
+    ExamCloseView,
+    ExamDetailView,
+    ExamListCreateView,
+    ExamMapView,
+    ExamPublishView,
+    ExamQuestionDetailView,
+    ExamQuestionListCreateView,
+    ExamReportView,
+    ExamResponseReviewView,
+    LeadExamAttemptsView,
+)
 from .reports import (
     ConversionFunnelView,
     CounsellorLeaderboardView,
@@ -53,6 +67,26 @@ urlpatterns = [
     path("reports/duplicates/", DuplicateFrequencyView.as_view(), name="report-duplicates"),
     path("reports/summary/", SummaryView.as_view(), name="report-summary"),
 
+    # Entrance Exams — authoring, mapping, attempts, review.
+    path("exams/", ExamListCreateView.as_view(), name="exam-list-create"),
+    path("exams/<int:pk>/", ExamDetailView.as_view(), name="exam-detail"),
+    path("exams/<int:pk>/publish/", ExamPublishView.as_view(),
+         name="exam-publish"),
+    path("exams/<int:pk>/close/", ExamCloseView.as_view(), name="exam-close"),
+    path("exams/<int:pk>/questions/", ExamQuestionListCreateView.as_view(),
+         name="exam-question-list-create"),
+    path("exams/<int:pk>/map/", ExamMapView.as_view(), name="exam-map"),
+    path("exams/<int:pk>/attempts/", ExamAttemptsListView.as_view(),
+         name="exam-attempts"),
+    path("exams/<int:pk>/report/", ExamReportView.as_view(),
+         name="exam-report"),
+    path("exam-questions/<int:pk>/", ExamQuestionDetailView.as_view(),
+         name="exam-question-detail"),
+    path("exam-attempts/<int:pk>/", ExamAttemptDetailView.as_view(),
+         name="exam-attempt-detail"),
+    path("exam-responses/<int:pk>/review/", ExamResponseReviewView.as_view(),
+         name="exam-response-review"),
+
     path("", LeadListCreateView.as_view(), name="lead-list-create"),
     path("<int:pk>/", LeadDetailView.as_view(), name="lead-detail"),
     path("<int:pk>/status/", LeadStatusView.as_view(), name="lead-status"),
@@ -85,4 +119,8 @@ urlpatterns = [
 
     path("<int:pk>/communications/",
          LeadCommunicationListCreateView.as_view(), name="lead-communication-list-create"),
+
+    # Entrance-exam attempts for a single lead (lead-detail panel).
+    path("<int:pk>/exams/",
+         LeadExamAttemptsView.as_view(), name="lead-exam-attempts"),
 ]

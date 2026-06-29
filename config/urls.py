@@ -4,12 +4,22 @@ from django.contrib import admin
 from django.urls import include, path
 
 from apps.admissions.public_views import PublicApplicationView
+from apps.leads.exam_views import (
+    PublicExamStartView, PublicExamSubmitView, PublicExamView,
+)
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     # Public, no-auth student application form (tokenized).
     path("api/public/application/<uuid:token>/",
          PublicApplicationView.as_view(), name="public-application"),
+    # Public, no-auth entrance exam (tokenized per-attempt link).
+    path("api/public/exam/<uuid:token>/",
+         PublicExamView.as_view(), name="public-exam"),
+    path("api/public/exam/<uuid:token>/start/",
+         PublicExamStartView.as_view(), name="public-exam-start"),
+    path("api/public/exam/<uuid:token>/submit/",
+         PublicExamSubmitView.as_view(), name="public-exam-submit"),
     path("api/", include("apps.accounts.urls")),
     path("api/", include("apps.roles.urls")),
     path("api/audit/", include("apps.audit.urls")),
@@ -24,6 +34,7 @@ urlpatterns = [
     path("api/hr/relieving/", include("apps.relieving.urls")),
     path("api/courseware/", include("apps.courseware.urls")),
     path("api/student-leaves/", include("apps.student_leaves.urls")),
+    path("api/student-documents/", include("apps.student_documents.urls")),
     path("api/portal/", include("apps.portal.urls")),
     path("api/common/", include("apps.common.urls")),
     path("api/tasks/", include("apps.tasks.urls")),

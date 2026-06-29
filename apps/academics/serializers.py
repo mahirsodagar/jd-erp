@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from .models import (
     AlumniRecord, Assignment, AssignmentSubmission, Attendance, Certificate,
-    MarksEntry, ScheduleSlot,
+    Lesson, MarksEntry, ScheduleSlot,
 )
 
 
@@ -542,3 +542,94 @@ class TestResponseSerializer(serializers.ModelSerializer):
 class ReviewResponseSerializer(serializers.Serializer):
     marks_awarded = serializers.DecimalField(max_digits=5, decimal_places=1)
     feedback = serializers.CharField(required=False, allow_blank=True, max_length=2000)
+
+
+# === Lessons ========================================================
+
+class LessonSerializer(serializers.ModelSerializer):
+    """Staff-facing lesson plan, including both review states."""
+
+    batch_name = serializers.CharField(source="batch.name", read_only=True)
+    hod_name = serializers.CharField(source="hod.full_name", read_only=True)
+    class_mentor_name = serializers.CharField(
+        source="class_mentor.full_name", read_only=True,
+    )
+    overall_status = serializers.CharField(read_only=True)
+    is_visible_to_students = serializers.BooleanField(read_only=True)
+    created_by_name = serializers.CharField(
+        source="created_by.username", read_only=True, default="",
+    )
+
+    class Meta:
+        model = Lesson
+        fields = [
+            "id", "batch", "batch_name",
+            "unit", "assignment",
+            "submission_due_date", "submission_due_desc",
+            "hod", "hod_name", "class_mentor", "class_mentor_name",
+            "module_project", "module_project_due",
+            "sem_end_project", "sem_end_project_due",
+            "display_date", "visits_workshops",
+            "hod_status", "hod_remarks", "hod_decided_at",
+            "mentor_status", "mentor_remarks", "mentor_decided_at",
+            "overall_status", "is_visible_to_students",
+            "created_by", "created_by_name", "created_at", "updated_at",
+        ]
+        read_only_fields = [
+            "id", "batch_name", "hod_name", "class_mentor_name",
+            "hod_status", "hod_remarks", "hod_decided_at",
+            "mentor_status", "mentor_remarks", "mentor_decided_at",
+            "overall_status", "is_visible_to_students",
+            "created_by", "created_by_name", "created_at", "updated_at",
+        ]
+
+    def validate(self, attrs):
+        # At least one form of submission deadline must be provided. On a
+        # partial update, fall back to the instance's existing values.
+        inst = self.instance
+        due_date = attrs.get(
+            "submission_due_date",
+            getattr(inst, "submission_due_date", None),
+        )
+        due_desc = attrs.get(
+            "submission_due_desc",
+            getattr(inst, "submission_due_desc", ""),
+        )
+        if not due_date and not (due_desc or "").strip():
+            raise serializers.ValidationError({
+                "submission_due_desc": (
+                    "Provide a submission date or a descriptive note "
+                    "(e.g. 'after the 4th session')."
+                ),
+            })
+        return attrs
+
+
+class LessonReviewSerializer(serializers.Serializer):
+    role = serializers.ChoiceField(choices=[("HOD", "HOD"),
+                                            ("MENTOR", "Mentor")])
+    decision = serializers.ChoiceField(
+        choices=[("APPROVED", "Approved"), ("REJECTED", "Rejected"),
+                 ("IMPROVE", "Needs improvement")],
+    )
+    remarks = serializers.CharField(required=False, allow_blank=True,
+                                    max_length=2000)
+
+
+class PortalLessonSerializer(serializers.ModelSerializer):
+    """Read-only lesson plan for students of an approved lesson's batch."""
+
+    batch_name = serializers.CharField(source="batch.name", read_only=True)
+
+    class Meta:
+        model = Lesson
+        fields = [
+            "id", "batch", "batch_name",
+            "unit", "assignment",
+            "submission_due_date", "submission_due_desc",
+            "module_project", "module_project_due",
+            "sem_end_project", "sem_end_project_due",
+            "display_date", "visits_workshops",
+            "created_at",
+        ]
+        read_only_fields = fields
