@@ -3,32 +3,48 @@
 from .models import Permission, Role
 
 
+def _crud(module, base, noun):
+    """Four granular CRUD permission rows for a resource.
+
+    Mirrors the `perm_base` mechanism in `apps.accounts.permissions.HasPerm`,
+    which maps HTTP method -> {view, add, edit, delete}.
+    """
+    return [
+        (module, f"{base}.view", f"View {noun}"),
+        (module, f"{base}.add", f"Add {noun}"),
+        (module, f"{base}.edit", f"Edit {noun}"),
+        (module, f"{base}.delete", f"Delete {noun}"),
+    ]
+
+
 # Permission catalogue. Add new entries as new modules ship.
 CATALOGUE = [
     # Module A — Authentication & Access Control
-    ("accounts", "accounts.user.manage", "Manage users"),
     ("accounts", "accounts.user.view", "View users"),
-    ("roles", "roles.role.manage", "Manage roles & permissions"),
+    ("accounts", "accounts.user.add", "Add users"),
+    ("accounts", "accounts.user.edit", "Edit users"),
+    ("accounts", "accounts.user.delete", "Delete users"),
+    *_crud("roles", "roles.role", "roles & permissions"),
     ("audit", "audit.log.view", "View audit logs"),
 
     # Module B — Lead Management / CRM
-    ("master", "master.campus.manage", "Manage campuses"),
-    ("master", "master.program.manage", "Manage programs"),
-    ("master", "master.source.manage", "Manage lead sources"),
+    *_crud("master", "master.campus", "campuses"),
+    *_crud("master", "master.program", "programs"),
+    *_crud("master", "master.source", "lead sources"),
     ("leads", "leads.lead.create", "Create leads"),
     ("leads", "leads.lead.view", "View own assigned leads"),
     ("leads", "leads.lead.view_all", "View all leads (managers)"),
     ("leads", "leads.lead.edit", "Edit lead fields"),
     ("leads", "leads.lead.reassign", "Reassign leads to another counselor"),
     ("leads", "leads.lead.change_status", "Change lead status"),
-    ("leads", "leads.followup.manage", "Add/edit follow-ups"),
+    *_crud("leads", "leads.followup", "follow-ups"),
     ("leads", "leads.communication.log", "Log communications"),
 
     # Module C — Employee Management / HR
-    ("master", "master.institute.manage", "Manage institutes"),
-    ("master", "master.state.manage", "Manage states"),
-    ("master", "master.city.manage", "Manage cities"),
-    ("employees", "employees.master.manage", "Manage departments & designations"),
+    *_crud("master", "master.institute", "institutes"),
+    *_crud("master", "master.state", "states"),
+    *_crud("master", "master.city", "cities"),
+    *_crud("employees", "employees.master", "departments & designations"),
     ("employees", "employees.employee.view", "View employees in own campus(es)"),
     ("employees", "employees.employee.view_all_campuses", "View all employees across campuses"),
     ("employees", "employees.employee.create", "Create employees"),
@@ -39,8 +55,8 @@ CATALOGUE = [
     ("employees", "employees.employee.manage_deleted", "View / manage soft-deleted employees"),
 
     # Module D — Leaves
-    ("leaves", "leaves.type.manage", "Manage leave-type catalogue"),
-    ("leaves", "leaves.session.manage", "Manage academic sessions"),
+    *_crud("leaves", "leaves.type", "leave types"),
+    *_crud("leaves", "leaves.session", "academic sessions"),
     ("leaves", "leaves.allocation.add", "Allocate leaves (HR)"),
     ("leaves", "leaves.allocation.delete", "Delete unconsumed allocations"),
     ("leaves", "leaves.application.view_all", "View all leave applications"),
@@ -49,27 +65,28 @@ CATALOGUE = [
     ("leaves", "leaves.application.backdate_apply", "Apply leaves with from_date in the past"),
     ("leaves", "leaves.compoff.view_all", "View all comp-off applications"),
     ("leaves", "leaves.compoff.approve_any", "Approve any comp-off (HR override)"),
-    ("leaves", "leaves.holiday.manage", "Manage the holiday calendar"),
+    *_crud("leaves", "leaves.holiday", "holidays"),
     ("leaves", "leaves.report.view", "View leave reports for own campuses"),
     ("leaves", "leaves.report.view_all", "View leave reports across all campuses"),
 
     # Module E.1 — Admissions + new masters
-    ("master", "master.academicyear.manage", "Manage academic years"),
-    ("master", "master.degree.manage", "Manage degrees"),
-    ("master", "master.semester.manage", "Manage semesters"),
-    ("master", "master.batch.manage", "Manage batches"),
+    *_crud("master", "master.academicyear", "academic years"),
+    *_crud("master", "master.degree", "degrees"),
+    *_crud("master", "master.course", "courses"),
+    *_crud("master", "master.semester", "semesters"),
+    *_crud("master", "master.batch", "batches"),
 
     ("admissions", "admissions.student.create", "Create students (promote leads)"),
     ("admissions", "admissions.student.view", "View students in own campus(es)"),
     ("admissions", "admissions.student.view_all_campuses", "View students across all campuses"),
     ("admissions", "admissions.student.edit", "Edit student records (HR)"),
     ("admissions", "admissions.student.promote", "Move students between status / batches"),
-    ("admissions", "admissions.document.manage", "Upload / delete student documents"),
-    ("admissions", "admissions.enrollment.manage", "Create / edit enrollments"),
+    *_crud("admissions", "admissions.document", "student documents"),
+    *_crud("admissions", "admissions.enrollment", "enrollments"),
 
     # Module E.2 — Fees
-    ("master", "master.feetemplate.manage", "Manage fee templates"),
-    ("fees", "fees.installment.manage", "Create / edit per-student installments"),
+    *_crud("master", "master.feetemplate", "fee templates"),
+    *_crud("fees", "fees.installment", "per-student installments"),
     ("fees", "fees.receipt.create", "Record fee payments"),
     ("fees", "fees.receipt.view", "View receipts in own campus(es)"),
     ("fees", "fees.receipt.view_all", "View receipts across all campuses"),
@@ -79,7 +96,7 @@ CATALOGUE = [
     ("fees", "fees.concession.approve", "Approve / reject concession requests"),
 
     # Module F — Lead Management Hardening
-    ("leads", "leads.pool.manage", "Manage counsellor pools"),
+    *_crud("leads", "leads.pool", "counsellor pools"),
     ("leads", "leads.escalation.receive", "Receive escalation alerts (managers)"),
     ("leads", "leads.report.view", "View lead reports / dashboards"),
 
@@ -88,15 +105,18 @@ CATALOGUE = [
     ("leads", "leads.exam.publish", "Publish / close / map entrance exams"),
     ("leads", "leads.exam.review", "Review short-answer exam responses"),
     ("leads", "leads.exam.view_all", "View all entrance exams / attempts / reports"),
-    ("leads", "leads.exam.manage_any", "Edit / delete any entrance exam"),
-    ("notifications", "notifications.template.manage", "Manage notification templates"),
+    ("leads", "leads.exam.edit_any", "Edit any entrance exam (not just own)"),
+    ("leads", "leads.exam.delete_any", "Delete any entrance exam (not just own)"),
+    *_crud("notifications", "notifications.template", "notification templates"),
     ("notifications", "notifications.dispatch.view", "View notification dispatch log"),
 
     # Module G.1 — Course Scheduling
-    ("master", "master.subject.manage", "Manage subjects"),
-    ("master", "master.classroom.manage", "Manage classrooms"),
-    ("master", "master.timeslot.manage", "Manage time slots"),
-    ("academics", "academics.schedule.manage", "Create / edit class schedule"),
+    *_crud("master", "master.subject", "subjects"),
+    *_crud("master", "master.classroom", "classrooms"),
+    *_crud("master", "master.timeslot", "time slots"),
+    ("academics", "academics.schedule.add", "Create class schedule entries"),
+    ("academics", "academics.schedule.edit", "Edit class schedule entries"),
+    ("academics", "academics.schedule.delete", "Delete class schedule entries"),
     ("academics", "academics.schedule.view_all", "View schedules across all campuses"),
 
     # Module G.2 — Attendance
@@ -108,10 +128,12 @@ CATALOGUE = [
     # Module G.3 — Assignments + Marks
     ("academics", "academics.assignment.create", "Create / edit assignments"),
     ("academics", "academics.assignment.grade", "Grade any submission (HOD override)"),
-    ("academics", "academics.assignment.manage_any", "Edit / delete any assignment"),
+    ("academics", "academics.assignment.edit_any", "Edit any assignment (not just own)"),
+    ("academics", "academics.assignment.delete_any", "Delete any assignment (not just own)"),
     ("academics", "academics.lesson.create", "Create / edit lesson plans"),
     ("academics", "academics.lesson.view_all", "View all lesson plans"),
-    ("academics", "academics.lesson.manage_any", "Edit / delete / review any lesson plan"),
+    ("academics", "academics.lesson.edit_any", "Edit / review any lesson plan (not just own)"),
+    ("academics", "academics.lesson.delete_any", "Delete any lesson plan (not just own)"),
     ("academics", "academics.marks.enter", "Enter / edit draft marks"),
     ("academics", "academics.marks.publish", "Publish / unpublish marks"),
     ("academics", "academics.marks.edit_published", "Edit published marks"),
@@ -124,14 +146,16 @@ CATALOGUE = [
     ("academics", "academics.certificate.view_all", "View any student's certificates"),
     ("academics", "academics.certificate.request_for_others", "Raise certificate requests for others"),
     ("academics", "academics.alumni.view_all", "View all alumni records"),
-    ("academics", "academics.alumni.manage", "Edit any alumni record"),
+    ("academics", "academics.alumni.edit", "Edit any alumni record"),
+    ("academics", "academics.alumni.delete", "Delete any alumni record"),
 
     # Module G.4 — Online Tests
     ("academics", "academics.test.create", "Create / edit tests"),
     ("academics", "academics.test.publish", "Publish / close / map tests"),
     ("academics", "academics.test.review", "Review short-answer responses"),
     ("academics", "academics.test.view_all", "View all tests / attempts / reports"),
-    ("academics", "academics.test.manage_any", "Edit / delete any test"),
+    ("academics", "academics.test.edit_any", "Edit any test (not just own)"),
+    ("academics", "academics.test.delete_any", "Delete any test (not just own)"),
 
     # Module H — Auditor / Reports
     ("audit", "audit.faculty_daily.view_all", "View all faculty daily reports"),
@@ -149,7 +173,7 @@ CATALOGUE = [
     ("audit", "audit.compliance.flag", "Raise compliance flags"),
     ("audit", "audit.compliance.resolve", "Resolve compliance flags"),
     ("audit", "audit.report.consolidated", "View dashboards / consolidated reports"),
-    ("audit", "audit.form.manage", "Create / edit / delete audit forms"),
+    *_crud("audit", "audit.form", "audit forms"),
     ("audit", "audit.submission.view_all", "View all audit form submissions"),
 
     # Module HR — Relieving (exit workflow + experience letter)
@@ -159,12 +183,12 @@ CATALOGUE = [
     ("hr", "hr.relieving.override", "Override approval sequence (skip levels)"),
 
     # Student & Parent Portal
-    ("courseware", "courseware.manage", "Publish / edit / delete courseware topics"),
+    *_crud("courseware", "courseware", "courseware topics"),
     ("student_leaves", "student_leaves.view_all", "View all student leave applications"),
     ("student_leaves", "student_leaves.decide", "Approve / reject student leaves"),
     ("student_documents", "student_documents.view_all", "View all student document requests"),
     ("student_documents", "student_documents.decide", "Approve / reject document requests"),
-    ("admissions", "admissions.parent.manage", "Provision / link parent user accounts"),
+    *_crud("admissions", "admissions.parent", "parent accounts"),
 ]
 
 

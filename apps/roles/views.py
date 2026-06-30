@@ -12,7 +12,7 @@ from .serializers import PermissionSerializer, RoleSerializer
 
 class PermissionListView(APIView):
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "roles.role.manage"
+    perm_base = "roles.role"
 
     def get(self, request):
         return Response(PermissionSerializer(Permission.objects.all(), many=True).data)
@@ -20,7 +20,7 @@ class PermissionListView(APIView):
 
 class RoleListCreateView(APIView):
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "roles.role.manage"
+    perm_base = "roles.role"
 
     def get(self, request):
         return Response(RoleSerializer(Role.objects.all(), many=True).data)
@@ -35,7 +35,7 @@ class RoleListCreateView(APIView):
 
 class RoleDetailView(APIView):
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "roles.role.manage"
+    perm_base = "roles.role"
 
     def get(self, request, pk):
         return Response(RoleSerializer(Role.objects.get(pk=pk)).data)

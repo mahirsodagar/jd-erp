@@ -44,7 +44,7 @@ class InstallmentListCreateView(APIView):
         return Response(InstallmentSerializer(qs[:500], many=True).data)
 
     def post(self, request):
-        if not has_perm(request.user, "fees.installment.manage"):
+        if not has_perm(request.user, "fees.installment.add"):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         s = InstallmentSerializer(data=request.data)
         s.is_valid(raise_exception=True)
@@ -70,7 +70,7 @@ class InstallmentBulkCreateView(APIView):
     permission_classes = [IsAuthenticated, FeeAccessPolicy]
 
     def post(self, request):
-        if not has_perm(request.user, "fees.installment.manage"):
+        if not has_perm(request.user, "fees.installment.add"):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
 
         enrollment_id = request.data.get("enrollment")
@@ -134,7 +134,7 @@ class InstallmentDetailView(APIView):
         return Response(InstallmentSerializer(self._obj(request, pk)).data)
 
     def patch(self, request, pk):
-        if not has_perm(request.user, "fees.installment.manage"):
+        if not has_perm(request.user, "fees.installment.edit"):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         inst = self._obj(request, pk)
         s = InstallmentSerializer(inst, data=request.data, partial=True)
@@ -143,7 +143,7 @@ class InstallmentDetailView(APIView):
         return Response(s.data)
 
     def delete(self, request, pk):
-        if not has_perm(request.user, "fees.installment.manage"):
+        if not has_perm(request.user, "fees.installment.delete"):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         inst = self._obj(request, pk)
         if inst.receipts.filter(status=FeeReceipt.Status.ACTIVE).exists():

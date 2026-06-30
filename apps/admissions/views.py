@@ -156,7 +156,7 @@ class StudentDocumentsView(APIView):
 
     def post(self, request, pk):
         student = self._student(request, pk)
-        if not has_perm(request.user, "admissions.document.manage"):
+        if not has_perm(request.user, "admissions.document.add"):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         s = StudentDocumentSerializer(data=request.data)
         s.is_valid(raise_exception=True)
@@ -175,7 +175,7 @@ class StudentDocumentDetailView(APIView):
         u = request.user
         if not (
             u.is_superuser
-            or has_perm(u, "admissions.document.manage")
+            or has_perm(u, "admissions.document.delete")
             or is_self_student(u, doc.student)
         ):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
@@ -245,7 +245,7 @@ class EnrollmentListCreateView(APIView):
         return Response(EnrollmentSerializer(qs[:500], many=True).data)
 
     def post(self, request):
-        if not has_perm(request.user, "admissions.enrollment.manage"):
+        if not has_perm(request.user, "admissions.enrollment.add"):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         s = EnrollmentSerializer(data=request.data)
         s.is_valid(raise_exception=True)
@@ -276,7 +276,7 @@ class EnrollmentDetailView(APIView):
         return Response(EnrollmentSerializer(obj).data)
 
     def patch(self, request, pk):
-        if not has_perm(request.user, "admissions.enrollment.manage"):
+        if not has_perm(request.user, "admissions.enrollment.edit"):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         obj = self._obj(pk)
         s = EnrollmentSerializer(obj, data=request.data, partial=True)
@@ -453,7 +453,7 @@ class BatchPromoteView(APIView):
     def post(self, request):
         u = request.user
         if not (u.is_superuser
-                or has_perm(u, "admissions.enrollment.manage")
+                or has_perm(u, "admissions.enrollment.edit")
                 or has_perm(u, "admissions.student.promote")):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
@@ -533,7 +533,7 @@ class BatchGraduateView(APIView):
     def post(self, request):
         u = request.user
         if not (u.is_superuser
-                or has_perm(u, "admissions.enrollment.manage")
+                or has_perm(u, "admissions.enrollment.edit")
                 or has_perm(u, "academics.certificate.issue")):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)

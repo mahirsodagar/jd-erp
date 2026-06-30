@@ -168,7 +168,7 @@ class BulkWeeklyPublishView(APIView):
     permission_classes = [IsAuthenticated, ScheduleAccess]
 
     def post(self, request):
-        if not has_perm(request.user, "academics.schedule.manage"):
+        if not has_perm(request.user, "academics.schedule.add"):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         s = BulkWeeklyPublishSerializer(data=request.data)
         s.is_valid(raise_exception=True)
@@ -206,7 +206,7 @@ class WeeklyGridPublishView(APIView):
     permission_classes = [IsAuthenticated, ScheduleAccess]
 
     def post(self, request):
-        if not has_perm(request.user, "academics.schedule.manage"):
+        if not has_perm(request.user, "academics.schedule.add"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         s = WeeklyGridPublishSerializer(data=request.data)
@@ -547,7 +547,8 @@ class MyAttendanceView(APIView):
 
 def _is_assignment_owner(user, assignment) -> bool:
     """A faculty 'owns' an assignment they created. Used to gate
-    grade/edit. Superusers and `academics.assignment.manage_any` bypass."""
+    grade/edit. Superusers and holders of `academics.assignment.edit_any`
+    / `academics.assignment.delete_any` bypass."""
     if user.is_superuser:
         return True
     return assignment.created_by_id == user.id
@@ -606,7 +607,7 @@ class AssignmentDetailView(APIView):
     def patch(self, request, pk):
         a = self._obj(pk)
         if not (_is_assignment_owner(request.user, a)
-                or has_perm(request.user, "academics.assignment.manage_any")):
+                or has_perm(request.user, "academics.assignment.edit_any")):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         s = AssignmentSerializer(a, data=request.data, partial=True)
@@ -617,7 +618,7 @@ class AssignmentDetailView(APIView):
     def delete(self, request, pk):
         a = self._obj(pk)
         if not (_is_assignment_owner(request.user, a)
-                or has_perm(request.user, "academics.assignment.manage_any")):
+                or has_perm(request.user, "academics.assignment.delete_any")):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         a.delete()
@@ -1167,7 +1168,7 @@ class EnrollmentGraduateView(APIView):
         from apps.admissions.models import Enrollment
         u = request.user
         if not (u.is_superuser
-                or has_perm(u, "admissions.enrollment.manage")):
+                or has_perm(u, "admissions.enrollment.edit")):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         try:
@@ -1241,7 +1242,7 @@ class AlumniDetailView(APIView):
         a = self._obj(pk)
         u = request.user
         is_self = (a.student.user_account_id == u.id)
-        if u.is_superuser or has_perm(u, "academics.alumni.manage"):
+        if u.is_superuser or has_perm(u, "academics.alumni.edit"):
             s = AlumniRecordSerializer(a, data=request.data, partial=True)
         elif is_self:
             s = AlumniSelfUpdateSerializer(a, data=request.data, partial=True)
@@ -1340,7 +1341,7 @@ class TestDetailView(APIView):
     def patch(self, request, pk):
         t = self._obj(pk)
         if not (_is_test_owner(request.user, t)
-                or has_perm(request.user, "academics.test.manage_any")):
+                or has_perm(request.user, "academics.test.edit_any")):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         if t.status != _Test.Status.DRAFT:
@@ -1356,7 +1357,7 @@ class TestDetailView(APIView):
     def delete(self, request, pk):
         t = self._obj(pk)
         if not (_is_test_owner(request.user, t)
-                or has_perm(request.user, "academics.test.manage_any")):
+                or has_perm(request.user, "academics.test.delete_any")):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         if t.attempts.exists():
@@ -1440,7 +1441,7 @@ class TestQuestionListCreateView(APIView):
             return Response({"detail": "Only DRAFT tests can take new questions."},
                             status=http.HTTP_400_BAD_REQUEST)
         if not (_is_test_owner(request.user, t)
-                or has_perm(request.user, "academics.test.manage_any")):
+                or has_perm(request.user, "academics.test.edit_any")):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         data = {**request.data, "test": t.id}
@@ -1467,7 +1468,7 @@ class TestQuestionDetailView(APIView):
             return Response({"detail": "Only DRAFT tests can be edited."},
                             status=http.HTTP_400_BAD_REQUEST)
         if not (_is_test_owner(request.user, q.test)
-                or has_perm(request.user, "academics.test.manage_any")):
+                or has_perm(request.user, "academics.test.edit_any")):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         s = TestQuestionSerializer(q, data=request.data, partial=True)
@@ -1482,7 +1483,7 @@ class TestQuestionDetailView(APIView):
             return Response({"detail": "Only DRAFT tests can be edited."},
                             status=http.HTTP_400_BAD_REQUEST)
         if not (_is_test_owner(request.user, q.test)
-                or has_perm(request.user, "academics.test.manage_any")):
+                or has_perm(request.user, "academics.test.edit_any")):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         t = q.test
@@ -1713,7 +1714,7 @@ def _lesson_roles_for(user, lesson) -> set:
             roles.add("HOD")
         if lesson.class_mentor_id == emp.id:
             roles.add("MENTOR")
-    if user.is_superuser or has_perm(user, "academics.lesson.manage_any"):
+    if user.is_superuser or has_perm(user, "academics.lesson.edit_any"):
         roles.update({"HOD", "MENTOR"})
     return roles
 
@@ -1742,7 +1743,7 @@ class LessonListCreateView(APIView):
                           hod_status=Lesson.ReviewStatus.PENDING)
                 cond |= Q(class_mentor_id=emp.id,
                           mentor_status=Lesson.ReviewStatus.PENDING)
-            if u.is_superuser or has_perm(u, "academics.lesson.manage_any"):
+            if u.is_superuser or has_perm(u, "academics.lesson.edit_any"):
                 cond |= (Q(hod_status=Lesson.ReviewStatus.PENDING)
                          | Q(mentor_status=Lesson.ReviewStatus.PENDING))
             qs = qs.filter(cond) if cond.children else qs.none()
@@ -1785,7 +1786,7 @@ class LessonDetailView(APIView):
     def patch(self, request, pk):
         lesson = self._obj(pk)
         if not (_is_lesson_owner(request.user, lesson)
-                or has_perm(request.user, "academics.lesson.manage_any")):
+                or has_perm(request.user, "academics.lesson.edit_any")):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         s = LessonSerializer(lesson, data=request.data, partial=True)
@@ -1800,7 +1801,7 @@ class LessonDetailView(APIView):
     def delete(self, request, pk):
         lesson = self._obj(pk)
         if not (_is_lesson_owner(request.user, lesson)
-                or has_perm(request.user, "academics.lesson.manage_any")):
+                or has_perm(request.user, "academics.lesson.delete_any")):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         lesson.delete()

@@ -219,7 +219,7 @@ class LeadApplicationOpenView(APIView):
 
 class LeadFollowupListCreateView(APIView):
     permission_classes = [IsAuthenticated, LeadVisibility, HasPerm]
-    required_perm = "leads.followup.manage"
+    perm_base = "leads.followup"
 
     def _lead(self, request, pk):
         lead = Lead.objects.get(pk=pk)
@@ -241,7 +241,7 @@ class LeadFollowupListCreateView(APIView):
 
 class LeadFollowupDetailView(APIView):
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "leads.followup.manage"
+    perm_base = "leads.followup"
 
     def patch(self, request, pk):
         f = LeadFollowup.objects.select_related("lead").get(pk=pk)
@@ -298,7 +298,7 @@ class PoolListCreateView(APIView):
     def post(self, request):
         u = request.user
         if not (u.is_superuser
-                or u.roles.filter(permissions__key="leads.pool.manage").exists()):
+                or u.roles.filter(permissions__key="leads.pool.add").exists()):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         s = CounsellorPoolSerializer(data=request.data)
         s.is_valid(raise_exception=True)
@@ -319,7 +319,7 @@ class PoolDetailView(APIView):
     def patch(self, request, pk):
         u = request.user
         if not (u.is_superuser
-                or u.roles.filter(permissions__key="leads.pool.manage").exists()):
+                or u.roles.filter(permissions__key="leads.pool.edit").exists()):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         try:
             pool = CounsellorPool.objects.get(pk=pk)
@@ -345,7 +345,7 @@ class PoolMembershipListCreateView(APIView):
     def post(self, request):
         u = request.user
         if not (u.is_superuser
-                or u.roles.filter(permissions__key="leads.pool.manage").exists()):
+                or u.roles.filter(permissions__key="leads.pool.add").exists()):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         s = CounsellorPoolMembershipSerializer(data=request.data)
         s.is_valid(raise_exception=True)
@@ -359,7 +359,7 @@ class PoolMembershipDetailView(APIView):
     def patch(self, request, pk):
         u = request.user
         if not (u.is_superuser
-                or u.roles.filter(permissions__key="leads.pool.manage").exists()):
+                or u.roles.filter(permissions__key="leads.pool.edit").exists()):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         try:
             m = CounsellorPoolMembership.objects.get(pk=pk)
@@ -373,7 +373,7 @@ class PoolMembershipDetailView(APIView):
     def delete(self, request, pk):
         u = request.user
         if not (u.is_superuser
-                or u.roles.filter(permissions__key="leads.pool.manage").exists()):
+                or u.roles.filter(permissions__key="leads.pool.delete").exists()):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         try:
             m = CounsellorPoolMembership.objects.get(pk=pk)
