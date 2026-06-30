@@ -58,7 +58,7 @@ class _MasterDetailMixin:
 
 class CampusListCreateView(APIView):
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "master.campus.manage"
+    perm_base = "master.campus"
 
     def get(self, request):
         qs = Campus.objects.all()
@@ -75,7 +75,7 @@ class CampusListCreateView(APIView):
 
 class CampusDetailView(_MasterDetailMixin, APIView):
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "master.campus.manage"
+    perm_base = "master.campus"
     model = Campus
     serializer = CampusSerializer
 
@@ -96,7 +96,7 @@ class CampusProgramsView(APIView):
 
 class ProgramListCreateView(APIView):
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "master.program.manage"
+    perm_base = "master.program"
 
     def get(self, request):
         qs = Program.objects.all()
@@ -115,7 +115,7 @@ class ProgramListCreateView(APIView):
 
 class ProgramDetailView(_MasterDetailMixin, APIView):
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "master.program.manage"
+    perm_base = "master.program"
     model = Program
     serializer = ProgramSerializer
 
@@ -126,7 +126,7 @@ class ProgramDetailView(_MasterDetailMixin, APIView):
 
 class InstituteListCreateView(APIView):
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "master.institute.manage"
+    perm_base = "master.institute"
 
     def get(self, request):
         qs = Institute.objects.all()
@@ -143,7 +143,7 @@ class InstituteListCreateView(APIView):
 
 class InstituteDetailView(_MasterDetailMixin, APIView):
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "master.institute.manage"
+    perm_base = "master.institute"
     model = Institute
     serializer = InstituteSerializer
 
@@ -160,7 +160,7 @@ class StateListView(APIView):
 
 class StateManageView(APIView):
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "master.state.manage"
+    perm_base = "master.state"
 
     def post(self, request):
         s = StateSerializer(data=request.data)
@@ -171,7 +171,7 @@ class StateManageView(APIView):
 
 class StateDetailView(_MasterDetailMixin, APIView):
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "master.state.manage"
+    perm_base = "master.state"
     model = State
     serializer = StateSerializer
 
@@ -187,7 +187,7 @@ class CityListCreateView(APIView):
         from rest_framework.permissions import IsAuthenticated as _IA
         return [_IA(), HasPerm()]
 
-    required_perm = "master.city.manage"
+    perm_base = "master.city"
 
     def get(self, request):
         qs = City.objects.select_related("state")
@@ -206,7 +206,7 @@ class CityListCreateView(APIView):
 
 class CityDetailView(_MasterDetailMixin, APIView):
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "master.city.manage"
+    perm_base = "master.city"
     model = City
     serializer = CitySerializer
 
@@ -275,55 +275,55 @@ class _DetailBase(APIView):
 class AcademicYearListCreateView(_ListCreateBase):
     model = AcademicYear
     serializer = AcademicYearSerializer
-    required_perm = "master.academicyear.manage"
+    perm_base = "master.academicyear"
 
 
 class AcademicYearDetailView(_DetailBase):
     model = AcademicYear
     serializer = AcademicYearSerializer
-    required_perm = "master.academicyear.manage"
+    perm_base = "master.academicyear"
 
 
 class DegreeListCreateView(_ListCreateBase):
     model = Degree
     serializer = DegreeSerializer
-    required_perm = "master.degree.manage"
+    perm_base = "master.degree"
 
 
 class DegreeDetailView(_DetailBase):
     model = Degree
     serializer = DegreeSerializer
-    required_perm = "master.degree.manage"
+    perm_base = "master.degree"
 
 
 class CourseListCreateView(_ListCreateBase):
     model = Course
     serializer = CourseSerializer
-    required_perm = "master.course.manage"
+    perm_base = "master.course"
 
 
 class CourseDetailView(_DetailBase):
     model = Course
     serializer = CourseSerializer
-    required_perm = "master.course.manage"
+    perm_base = "master.course"
 
 
 class SemesterListCreateView(_ListCreateBase):
     model = Semester
     serializer = SemesterSerializer
-    required_perm = "master.semester.manage"
+    perm_base = "master.semester"
 
 
 class SemesterDetailView(_DetailBase):
     model = Semester
     serializer = SemesterSerializer
-    required_perm = "master.semester.manage"
+    perm_base = "master.semester"
 
 
 class BatchListCreateView(_ListCreateBase):
     model = Batch
     serializer = BatchSerializer
-    required_perm = "master.batch.manage"
+    perm_base = "master.batch"
 
     def get(self, request):
         qs = Batch.objects.select_related("program", "campus", "academic_year", "mentor")
@@ -341,25 +341,25 @@ class BatchListCreateView(_ListCreateBase):
 class BatchDetailView(_DetailBase):
     model = Batch
     serializer = BatchSerializer
-    required_perm = "master.batch.manage"
+    perm_base = "master.batch"
 
 
 class SubjectListCreateView(_ListCreateBase):
     model = Subject
     serializer = SubjectSerializer
-    required_perm = "master.subject.manage"
+    perm_base = "master.subject"
 
 
 class SubjectDetailView(_DetailBase):
     model = Subject
     serializer = SubjectSerializer
-    required_perm = "master.subject.manage"
+    perm_base = "master.subject"
 
 
 class ClassroomListCreateView(_ListCreateBase):
     model = Classroom
     serializer = ClassroomSerializer
-    required_perm = "master.classroom.manage"
+    perm_base = "master.classroom"
 
     def get(self, request):
         qs = Classroom.objects.select_related("campus")
@@ -373,13 +373,13 @@ class ClassroomListCreateView(_ListCreateBase):
 class ClassroomDetailView(_DetailBase):
     model = Classroom
     serializer = ClassroomSerializer
-    required_perm = "master.classroom.manage"
+    perm_base = "master.classroom"
 
 
 class TimeSlotListCreateView(_ListCreateBase):
     model = TimeSlot
     serializer = TimeSlotSerializer
-    required_perm = "master.timeslot.manage"
+    perm_base = "master.timeslot"
 
     def get(self, request):
         qs = TimeSlot.objects.select_related("academic_year")
@@ -393,13 +393,13 @@ class TimeSlotListCreateView(_ListCreateBase):
 class TimeSlotDetailView(_DetailBase):
     model = TimeSlot
     serializer = TimeSlotSerializer
-    required_perm = "master.timeslot.manage"
+    perm_base = "master.timeslot"
 
 
 class FeeTemplateListCreateView(_ListCreateBase):
     model = FeeTemplate
     serializer = FeeTemplateSerializer
-    required_perm = "master.feetemplate.manage"
+    perm_base = "master.feetemplate"
 
     def get(self, request):
         qs = FeeTemplate.objects.select_related(
@@ -419,14 +419,14 @@ class FeeTemplateListCreateView(_ListCreateBase):
 class FeeTemplateDetailView(_DetailBase):
     model = FeeTemplate
     serializer = FeeTemplateSerializer
-    required_perm = "master.feetemplate.manage"
+    perm_base = "master.feetemplate"
 
 
 # --- Lead Source --------------------------------------------------------
 
 class LeadSourceListCreateView(APIView):
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "master.source.manage"
+    perm_base = "master.source"
 
     def get(self, request):
         qs = LeadSource.objects.all()
@@ -443,6 +443,6 @@ class LeadSourceListCreateView(APIView):
 
 class LeadSourceDetailView(_MasterDetailMixin, APIView):
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "master.source.manage"
+    perm_base = "master.source"
     model = LeadSource
     serializer = LeadSourceSerializer

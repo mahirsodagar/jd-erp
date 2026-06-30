@@ -136,7 +136,7 @@ class ChangePasswordView(APIView):
 
 class UserListCreateView(APIView):
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "accounts.user.manage"
+    perm_base = "accounts.user"
 
     def get(self, request):
         # `select_related` on the reverse OneToOne avoids the N+1 the
@@ -174,7 +174,7 @@ class UserListCreateView(APIView):
 
 class UserDetailView(APIView):
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "accounts.user.manage"
+    perm_base = "accounts.user"
 
     def get(self, request, pk):
         return Response(UserSerializer(User.objects.get(pk=pk)).data)
@@ -203,7 +203,8 @@ class AdminResetPasswordView(APIView):
     """
 
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "accounts.user.manage"
+    # Resetting a password edits an existing user, not a CRUD "add".
+    required_perm = "accounts.user.edit"
 
     def post(self, request, pk):
         target = User.objects.get(pk=pk)

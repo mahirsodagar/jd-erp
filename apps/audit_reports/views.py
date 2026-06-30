@@ -500,8 +500,9 @@ class ConsolidatedMonthlyView(APIView):
 
 # === Dynamic Audit Form Builder =====================================
 
-def _can_manage_forms(user) -> bool:
-    return user.is_superuser or has_perm(user, "audit.form.manage")
+def _can_form(user, action) -> bool:
+    """action is one of: view, add, edit, delete."""
+    return user.is_superuser or has_perm(user, f"audit.form.{action}")
 
 
 def _can_view_all_submissions(user) -> bool:
@@ -514,14 +515,14 @@ class AuditFormListCreateView(APIView):
     def get(self, request):
         qs = AuditForm.objects.prefetch_related("fields")
         # Managers see every form; everyone else only published ones.
-        if not _can_manage_forms(request.user):
+        if not _can_form(request.user, "view"):
             qs = qs.filter(status=AuditForm.Status.PUBLISHED)
         if v := request.query_params.get("status"):
             qs = qs.filter(status=v)
         return Response(AuditFormSerializer(qs, many=True).data)
 
     def post(self, request):
-        if not _can_manage_forms(request.user):
+        if not _can_form(request.user, "add"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         s = AuditFormSerializer(data=request.data)
@@ -542,13 +543,13 @@ class AuditFormDetailView(APIView):
     def get(self, request, pk):
         form = self._obj(pk)
         if (form.status != AuditForm.Status.PUBLISHED
-                and not _can_manage_forms(request.user)):
+                and not _can_form(request.user, "view")):
             return Response({"detail": "Not found."},
                             status=http.HTTP_404_NOT_FOUND)
         return Response(AuditFormSerializer(form).data)
 
     def patch(self, request, pk):
-        if not _can_manage_forms(request.user):
+        if not _can_form(request.user, "edit"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         s = AuditFormSerializer(self._obj(pk), data=request.data, partial=True)
@@ -557,7 +558,7 @@ class AuditFormDetailView(APIView):
         return Response(s.data)
 
     def delete(self, request, pk):
-        if not _can_manage_forms(request.user):
+        if not _can_form(request.user, "delete"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         self._obj(pk).delete()

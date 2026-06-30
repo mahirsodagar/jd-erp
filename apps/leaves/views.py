@@ -45,7 +45,7 @@ class LeaveTypeListCreateView(APIView):
         if self.request.method == "GET":
             return [IsAuthenticated()]
         return [IsAuthenticated(), HasPerm()]
-    required_perm = "leaves.type.manage"
+    perm_base = "leaves.type"
 
     def get(self, request):
         qs = LeaveType.objects.all()
@@ -62,7 +62,7 @@ class LeaveTypeListCreateView(APIView):
 
 class LeaveTypeDetailView(APIView):
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "leaves.type.manage"
+    perm_base = "leaves.type"
 
     def patch(self, request, pk):
         obj = LeaveType.objects.get(pk=pk)
@@ -85,7 +85,7 @@ class SessionListCreateView(APIView):
         if self.request.method == "GET":
             return [IsAuthenticated()]
         return [IsAuthenticated(), HasPerm()]
-    required_perm = "leaves.session.manage"
+    perm_base = "leaves.session"
 
     def get(self, request):
         qs = Session.objects.all()
@@ -105,7 +105,7 @@ class SessionListCreateView(APIView):
 
 class SessionDetailView(APIView):
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "leaves.session.manage"
+    perm_base = "leaves.session"
 
     def patch(self, request, pk):
         obj = Session.objects.get(pk=pk)
@@ -619,7 +619,7 @@ class HolidayListCreateView(APIView):
         if self.request.method == "GET":
             return [IsAuthenticated()]
         return [IsAuthenticated(), HasPerm()]
-    required_perm = "leaves.holiday.manage"
+    perm_base = "leaves.holiday"
 
     def get(self, request):
         qs = Holiday.objects.select_related("campus")
@@ -640,7 +640,7 @@ class HolidayListCreateView(APIView):
 
 class HolidayDetailView(APIView):
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "leaves.holiday.manage"
+    perm_base = "leaves.holiday"
 
     def patch(self, request, pk):
         try:

@@ -18,8 +18,9 @@ from .serializers import (
 )
 
 
-def _can_manage(user) -> bool:
-    return user.is_superuser or has_perm(user, "courseware.manage")
+def _can(user, action) -> bool:
+    """action is one of: view, add, edit, delete."""
+    return user.is_superuser or has_perm(user, f"courseware.{action}")
 
 
 class CoursewareTopicListCreateView(APIView):
@@ -27,7 +28,7 @@ class CoursewareTopicListCreateView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def get(self, request):
-        if not _can_manage(request.user):
+        if not _can(request.user, "view"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         qs = (CoursewareTopic.objects
@@ -42,7 +43,7 @@ class CoursewareTopicListCreateView(APIView):
         ).data)
 
     def post(self, request):
-        if not _can_manage(request.user):
+        if not _can(request.user, "add"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         s = PublishTopicSerializer(data=request.data)
@@ -76,7 +77,7 @@ class CoursewareTopicDetailView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def get(self, request, pk):
-        if not _can_manage(request.user):
+        if not _can(request.user, "view"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         try:
@@ -91,7 +92,7 @@ class CoursewareTopicDetailView(APIView):
         ).data)
 
     def patch(self, request, pk):
-        if not _can_manage(request.user):
+        if not _can(request.user, "edit"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         try:
@@ -107,7 +108,7 @@ class CoursewareTopicDetailView(APIView):
         ).data)
 
     def delete(self, request, pk):
-        if not _can_manage(request.user):
+        if not _can(request.user, "delete"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         try:
@@ -123,7 +124,7 @@ class CoursewareAttachmentAddView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request, pk):
-        if not _can_manage(request.user):
+        if not _can(request.user, "add"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         try:
@@ -148,7 +149,7 @@ class CoursewareAttachmentDeleteView(APIView):
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, pk):
-        if not _can_manage(request.user):
+        if not _can(request.user, "delete"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         try:

@@ -49,7 +49,7 @@ User = get_user_model()
 class _MasterListCreate(APIView):
     model = None
     serializer = None
-    required_perm = "employees.master.manage"
+    perm_base = "employees.master"
 
     def get_permissions(self):
         if self.request.method == "GET":
@@ -82,7 +82,7 @@ class DesignationListCreateView(_MasterListCreate):
 class _MasterDetail(APIView):
     model = None
     serializer = None
-    required_perm = "employees.master.manage"
+    perm_base = "employees.master"
 
     def get_permissions(self):
         if self.request.method == "GET":
@@ -382,7 +382,7 @@ class EmployeePortalAccountView(APIView):
     def post(self, request, pk):
         u = request.user
         if not (u.is_superuser
-                or (has_perm(u, "accounts.user.manage")
+                or (has_perm(u, "accounts.user.add")
                     and has_perm(u, "employees.employee.edit"))):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)

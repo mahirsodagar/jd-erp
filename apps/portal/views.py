@@ -788,7 +788,7 @@ class ProvisionParentView(APIView):
         from apps.accounts.models import User
         if not (request.user.is_superuser
                 or request.user.roles.filter(
-                    permissions__key="admissions.parent.manage",
+                    permissions__key="admissions.parent.add",
                 ).exists()):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)

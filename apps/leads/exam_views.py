@@ -79,7 +79,7 @@ class ExamDetailView(APIView):
     def patch(self, request, pk):
         exam = self._obj(pk)
         if not (_is_exam_owner(request.user, exam)
-                or has_perm(request.user, "leads.exam.manage_any")):
+                or has_perm(request.user, "leads.exam.edit_any")):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         if exam.status != EntranceExam.Status.DRAFT:
@@ -95,7 +95,7 @@ class ExamDetailView(APIView):
     def delete(self, request, pk):
         exam = self._obj(pk)
         if not (_is_exam_owner(request.user, exam)
-                or has_perm(request.user, "leads.exam.manage_any")):
+                or has_perm(request.user, "leads.exam.delete_any")):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         if exam.attempts.exists():
@@ -179,7 +179,7 @@ class ExamQuestionListCreateView(APIView):
             return Response({"detail": "Only DRAFT exams can take new questions."},
                             status=http.HTTP_400_BAD_REQUEST)
         if not (_is_exam_owner(request.user, exam)
-                or has_perm(request.user, "leads.exam.manage_any")):
+                or has_perm(request.user, "leads.exam.edit_any")):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         data = {**request.data, "exam": exam.id}
@@ -206,7 +206,7 @@ class ExamQuestionDetailView(APIView):
             return Response({"detail": "Only DRAFT exams can be edited."},
                             status=http.HTTP_400_BAD_REQUEST)
         if not (_is_exam_owner(request.user, q.exam)
-                or has_perm(request.user, "leads.exam.manage_any")):
+                or has_perm(request.user, "leads.exam.edit_any")):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         s = EntranceExamQuestionSerializer(q, data=request.data, partial=True)
@@ -221,7 +221,7 @@ class ExamQuestionDetailView(APIView):
             return Response({"detail": "Only DRAFT exams can be edited."},
                             status=http.HTTP_400_BAD_REQUEST)
         if not (_is_exam_owner(request.user, q.exam)
-                or has_perm(request.user, "leads.exam.manage_any")):
+                or has_perm(request.user, "leads.exam.edit_any")):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         exam = q.exam
