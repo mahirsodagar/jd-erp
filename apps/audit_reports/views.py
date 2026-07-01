@@ -47,25 +47,22 @@ def _student_of(user):
 
 # === 1. Faculty Daily Report ========================================
 
-# Own/all scoped permission checks. "own" actions need the matching
-# *_own key (or the broader *_all); acting on another faculty needs *_all.
+# Two-permission model: `submit_own` lets a faculty see/edit/delete their
+# OWN report; `view_all` gives auditors read-only sight of everyone's.
+# Nobody edits another faculty's report (no submit-on-behalf).
 
 def _fd_can_view(user, *, is_own: bool) -> bool:
     if user.is_superuser or has_perm(user, "audit.faculty_daily.view_all"):
         return True
-    return is_own and has_perm(user, "audit.faculty_daily.view_own")
+    return is_own and has_perm(user, "audit.faculty_daily.submit_own")
 
 
-def _fd_can_edit(user, *, is_own: bool) -> bool:
-    if user.is_superuser or has_perm(user, "audit.faculty_daily.edit_all"):
-        return True
-    return is_own and has_perm(user, "audit.faculty_daily.edit_own")
-
-
-def _fd_can_delete(user, *, is_own: bool) -> bool:
-    if user.is_superuser or has_perm(user, "audit.faculty_daily.delete_all"):
-        return True
-    return is_own and has_perm(user, "audit.faculty_daily.delete_own")
+def _fd_can_manage(user, *, is_own: bool) -> bool:
+    """Create / edit / delete — own rows only."""
+    return bool(
+        user.is_superuser
+        or (is_own and has_perm(user, "audit.faculty_daily.submit_own"))
+    )
 
 
 def _fd_is_own(user, faculty_id) -> bool:
@@ -87,9 +84,9 @@ class FacultyDailyReportListCreateView(APIView):
         u = request.user
         qs = FacultyDailyReport.objects.select_related("faculty")
         if not (u.is_superuser or has_perm(u, "audit.faculty_daily.view_all")):
-            # Restricted to own rows — requires view_own.
+            # Restricted to own rows — requires submit_own.
             emp = _emp_of(u)
-            if emp is None or not has_perm(u, "audit.faculty_daily.view_own"):
+            if emp is None or not has_perm(u, "audit.faculty_daily.submit_own"):
                 return Response([])
             qs = qs.filter(faculty=emp)
         params = request.query_params
@@ -111,9 +108,9 @@ class FacultyDailyReportListCreateView(APIView):
         data = s.validated_data
         target = data["faculty"]
         is_own = _fd_is_own(u, target.id)
-        if not _fd_can_edit(u, is_own=is_own):
+        if not _fd_can_manage(u, is_own=is_own):
             return Response(
-                {"detail": "You don't have permission to save this report."},
+                {"detail": "You can only submit your own daily report."},
                 status=http.HTTP_403_FORBIDDEN)
         defaults = {f: data.get(f, "" if "description" in f else 0)
                     for f in _FD_DEFAULT_FIELDS}
@@ -145,8 +142,8 @@ class FacultyDailyReportDetailView(APIView):
 
     def patch(self, request, pk):
         obj = self._obj(pk)
-        if not _fd_can_edit(request.user,
-                            is_own=_fd_is_own(request.user, obj.faculty_id)):
+        if not _fd_can_manage(request.user,
+                              is_own=_fd_is_own(request.user, obj.faculty_id)):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         s = FacultyDailyReportSerializer(obj, data=request.data, partial=True)
@@ -156,7 +153,7 @@ class FacultyDailyReportDetailView(APIView):
 
     def delete(self, request, pk):
         obj = self._obj(pk)
-        if not _fd_can_delete(request.user,
+        if not _fd_can_manage(request.user,
                               is_own=_fd_is_own(request.user, obj.faculty_id)):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)

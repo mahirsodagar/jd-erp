@@ -158,14 +158,11 @@ CATALOGUE = [
     ("academics", "academics.test.delete_any", "Delete any test (not just own)"),
 
     # Module H — Auditor / Reports
-    # Faculty daily report — explicit own + all scopes. "own" keys let a
-    # user manage their own rows; "all" keys unlock other faculty's rows.
-    ("audit", "audit.faculty_daily.view_own", "View own faculty daily report"),
-    ("audit", "audit.faculty_daily.edit_own", "Add / edit own faculty daily report"),
-    ("audit", "audit.faculty_daily.delete_own", "Delete own faculty daily report"),
-    ("audit", "audit.faculty_daily.view_all", "View all faculty daily reports (not just own)"),
-    ("audit", "audit.faculty_daily.edit_all", "Add / edit any faculty daily report (not just own)"),
-    ("audit", "audit.faculty_daily.delete_all", "Delete any faculty daily report (not just own)"),
+    # Faculty daily report — a faculty manages ONLY their own report
+    # (submit implies see/edit/delete own); auditors get read-only
+    # visibility of everyone's. No one submits on behalf of another.
+    ("audit", "audit.faculty_daily.submit_own", "Submit / view / edit own daily report"),
+    ("audit", "audit.faculty_daily.view_all", "View all faculty daily reports"),
     # Admin daily report — explicit own + all scopes (staff accountability).
     ("audit", "audit.admin_daily.view_own", "View own admin daily report"),
     ("audit", "audit.admin_daily.edit_own", "Add / edit own admin daily report"),
@@ -246,9 +243,7 @@ FACULTY_PERMISSION_KEYS = [
     "leaves.report.view",
     "audit.course_end.submit",
     # Manage their own daily report (also unlocks the Audit sidebar group).
-    "audit.faculty_daily.view_own",
-    "audit.faculty_daily.edit_own",
-    "audit.faculty_daily.delete_own",
+    "audit.faculty_daily.submit_own",
     # Their own self-appraisal (submit + view).
     "audit.self_appraisal.view_own",
     "audit.self_appraisal.submit",
