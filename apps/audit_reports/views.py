@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 
 from apps.employees.models import Employee
 from apps.master.models import Batch
+from apps.roles.models import Role
 
 from django.db import transaction
 
@@ -20,7 +21,8 @@ from .models import (
 )
 from .permissions import has_perm
 from .serializers import (
-    AdminDailyReportSerializer, AuditFormSerializer, AuditSubmissionSerializer,
+    AdminDailyReportSerializer, AuditFormRoleSerializer, AuditFormSerializer,
+    AuditSubmissionSerializer,
     BatchMentorReportSerializer,
     ComplianceFlagSerializer, CourseEndReportSerializer,
     CourseEndReviewSerializer, FacultyDailyReportSerializer,
@@ -45,6 +47,39 @@ def _student_of(user):
 
 # === 1. Faculty Daily Report ========================================
 
+# Own/all scoped permission checks. "own" actions need the matching
+# *_own key (or the broader *_all); acting on another faculty needs *_all.
+
+def _fd_can_view(user, *, is_own: bool) -> bool:
+    if user.is_superuser or has_perm(user, "audit.faculty_daily.view_all"):
+        return True
+    return is_own and has_perm(user, "audit.faculty_daily.view_own")
+
+
+def _fd_can_edit(user, *, is_own: bool) -> bool:
+    if user.is_superuser or has_perm(user, "audit.faculty_daily.edit_all"):
+        return True
+    return is_own and has_perm(user, "audit.faculty_daily.edit_own")
+
+
+def _fd_can_delete(user, *, is_own: bool) -> bool:
+    if user.is_superuser or has_perm(user, "audit.faculty_daily.delete_all"):
+        return True
+    return is_own and has_perm(user, "audit.faculty_daily.delete_own")
+
+
+def _fd_is_own(user, faculty_id) -> bool:
+    emp = _emp_of(user)
+    return bool(emp and faculty_id == emp.id)
+
+
+_FD_DEFAULT_FIELDS = (
+    "academic_description", "academic_hours",
+    "non_academic_description", "non_academic_hours",
+    "others_description", "others_hours",
+)
+
+
 class FacultyDailyReportListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -52,8 +87,9 @@ class FacultyDailyReportListCreateView(APIView):
         u = request.user
         qs = FacultyDailyReport.objects.select_related("faculty")
         if not (u.is_superuser or has_perm(u, "audit.faculty_daily.view_all")):
+            # Restricted to own rows — requires view_own.
             emp = _emp_of(u)
-            if emp is None:
+            if emp is None or not has_perm(u, "audit.faculty_daily.view_own"):
                 return Response([])
             qs = qs.filter(faculty=emp)
         params = request.query_params
@@ -68,17 +104,26 @@ class FacultyDailyReportListCreateView(APIView):
         return Response(FacultyDailyReportSerializer(qs[:500], many=True).data)
 
     def post(self, request):
+        """Upsert one (faculty, date) row — the grid's per-day Save."""
         u = request.user
         s = FacultyDailyReportSerializer(data=request.data)
         s.is_valid(raise_exception=True)
-        target = s.validated_data["faculty"]
-        emp = _emp_of(u)
-        if not (u.is_superuser or has_perm(u, "audit.faculty_daily.submit_for_others")
-                or (emp and emp.id == target.id)):
-            return Response({"detail": "You can only submit for yourself."},
-                            status=http.HTTP_403_FORBIDDEN)
-        s.save(submitted_by=u)
-        return Response(s.data, status=http.HTTP_201_CREATED)
+        data = s.validated_data
+        target = data["faculty"]
+        is_own = _fd_is_own(u, target.id)
+        if not _fd_can_edit(u, is_own=is_own):
+            return Response(
+                {"detail": "You don't have permission to save this report."},
+                status=http.HTTP_403_FORBIDDEN)
+        defaults = {f: data.get(f, "" if "description" in f else 0)
+                    for f in _FD_DEFAULT_FIELDS}
+        defaults["submitted_by"] = u
+        obj, created = FacultyDailyReport.objects.update_or_create(
+            faculty=target, date=data["date"], defaults=defaults,
+        )
+        return Response(
+            FacultyDailyReportSerializer(obj).data,
+            status=http.HTTP_201_CREATED if created else http.HTTP_200_OK)
 
 
 class FacultyDailyReportDetailView(APIView):
@@ -90,20 +135,18 @@ class FacultyDailyReportDetailView(APIView):
         except FacultyDailyReport.DoesNotExist as e:
             raise Http404 from e
 
-    def _can_edit(self, user, obj):
-        emp = _emp_of(user)
-        return (
-            user.is_superuser
-            or has_perm(user, "audit.faculty_daily.view_all")
-            or (emp and obj.faculty_id == emp.id)
-        )
-
     def get(self, request, pk):
-        return Response(FacultyDailyReportSerializer(self._obj(pk)).data)
+        obj = self._obj(pk)
+        if not _fd_can_view(request.user,
+                            is_own=_fd_is_own(request.user, obj.faculty_id)):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        return Response(FacultyDailyReportSerializer(obj).data)
 
     def patch(self, request, pk):
         obj = self._obj(pk)
-        if not self._can_edit(request.user, obj):
+        if not _fd_can_edit(request.user,
+                            is_own=_fd_is_own(request.user, obj.faculty_id)):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         s = FacultyDailyReportSerializer(obj, data=request.data, partial=True)
@@ -111,8 +154,35 @@ class FacultyDailyReportDetailView(APIView):
         s.save()
         return Response(s.data)
 
+    def delete(self, request, pk):
+        obj = self._obj(pk)
+        if not _fd_can_delete(request.user,
+                              is_own=_fd_is_own(request.user, obj.faculty_id)):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        obj.delete()
+        return Response(status=http.HTTP_204_NO_CONTENT)
+
 
 # === 2. Admin Daily Report ==========================================
+
+def _ad_can_view(user, *, is_own: bool) -> bool:
+    if user.is_superuser or has_perm(user, "audit.admin_daily.view_all"):
+        return True
+    return is_own and has_perm(user, "audit.admin_daily.view_own")
+
+
+def _ad_can_edit(user, *, is_own: bool) -> bool:
+    if user.is_superuser or has_perm(user, "audit.admin_daily.edit_all"):
+        return True
+    return is_own and has_perm(user, "audit.admin_daily.edit_own")
+
+
+def _ad_can_delete(user, *, is_own: bool) -> bool:
+    if user.is_superuser or has_perm(user, "audit.admin_daily.delete_all"):
+        return True
+    return is_own and has_perm(user, "audit.admin_daily.delete_own")
+
 
 class AdminDailyReportListCreateView(APIView):
     permission_classes = [IsAuthenticated]
@@ -121,6 +191,8 @@ class AdminDailyReportListCreateView(APIView):
         u = request.user
         qs = AdminDailyReport.objects.select_related("user")
         if not (u.is_superuser or has_perm(u, "audit.admin_daily.view_all")):
+            if not has_perm(u, "audit.admin_daily.view_own"):
+                return Response([])
             qs = qs.filter(user=u)
         params = request.query_params
         if v := params.get("user"):
@@ -134,30 +206,49 @@ class AdminDailyReportListCreateView(APIView):
         return Response(AdminDailyReportSerializer(qs[:500], many=True).data)
 
     def post(self, request):
-        # Always submit for self.
-        data = dict(request.data)
-        data["user"] = request.user.id
-        s = AdminDailyReportSerializer(data=data)
+        """Upsert one (user, rep_date) row for the current user."""
+        u = request.user
+        if not _ad_can_edit(u, is_own=True):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = AdminDailyReportSerializer(data={**request.data, "user": u.id})
         s.is_valid(raise_exception=True)
-        s.save()
-        return Response(s.data, status=http.HTTP_201_CREATED)
+        d = s.validated_data
+        obj, created = AdminDailyReport.objects.update_or_create(
+            user=u, rep_date=d["rep_date"],
+            defaults={"slot1": d.get("slot1", ""), "slot2": d.get("slot2", "")},
+        )
+        return Response(
+            AdminDailyReportSerializer(obj).data,
+            status=http.HTTP_201_CREATED if created else http.HTTP_200_OK)
 
 
 class AdminDailyReportDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def patch(self, request, pk):
+    def _obj(self, pk):
         try:
-            obj = AdminDailyReport.objects.get(pk=pk)
+            return AdminDailyReport.objects.get(pk=pk)
         except AdminDailyReport.DoesNotExist as e:
             raise Http404 from e
-        if not (request.user.is_superuser or obj.user_id == request.user.id):
+
+    def patch(self, request, pk):
+        obj = self._obj(pk)
+        if not _ad_can_edit(request.user, is_own=obj.user_id == request.user.id):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         s = AdminDailyReportSerializer(obj, data=request.data, partial=True)
         s.is_valid(raise_exception=True)
         s.save()
         return Response(s.data)
+
+    def delete(self, request, pk):
+        obj = self._obj(pk)
+        if not _ad_can_delete(request.user, is_own=obj.user_id == request.user.id):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        obj.delete()
+        return Response(status=http.HTTP_204_NO_CONTENT)
 
 
 # === 3. Course End Report ===========================================
@@ -300,7 +391,9 @@ class FacultySelfAppraisalListCreateView(APIView):
         qs = FacultySelfAppraisal.objects.select_related("faculty")
         if not (u.is_superuser or has_perm(u, "audit.self_appraisal.view_all")):
             emp = _emp_of(u)
-            qs = qs.filter(faculty=emp) if emp else qs.none()
+            if emp is None or not has_perm(u, "audit.self_appraisal.view_own"):
+                return Response([])
+            qs = qs.filter(faculty=emp)
         params = request.query_params
         if v := params.get("faculty"):
             qs = qs.filter(faculty_id=v)
@@ -314,8 +407,10 @@ class FacultySelfAppraisalListCreateView(APIView):
         s.is_valid(raise_exception=True)
         emp = _emp_of(u)
         target = s.validated_data["faculty"]
-        if not (u.is_superuser or (emp and emp.id == target.id)):
-            return Response({"detail": "You can only submit for yourself."},
+        is_own = bool(emp and emp.id == target.id)
+        if not (u.is_superuser
+                or (is_own and has_perm(u, "audit.self_appraisal.submit"))):
+            return Response({"detail": "You can only submit your own appraisal."},
                             status=http.HTTP_403_FORBIDDEN)
         s.save(submitted_by=u)
         return Response(s.data, status=http.HTTP_201_CREATED)
@@ -509,14 +604,28 @@ def _can_view_all_submissions(user) -> bool:
     return user.is_superuser or has_perm(user, "audit.submission.view_all")
 
 
+def _can_access_form(user, form) -> bool:
+    """A regular user may see / fill a published form only if they hold one
+    of its assigned roles. Form managers always have access."""
+    if _can_form(user, "view"):
+        return True
+    if form.status != AuditForm.Status.PUBLISHED:
+        return False
+    return form.roles.filter(users=user).exists()
+
+
 class AuditFormListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        qs = AuditForm.objects.prefetch_related("fields")
-        # Managers see every form; everyone else only published ones.
+        qs = AuditForm.objects.prefetch_related("fields", "roles")
+        # Managers see every form; everyone else only published forms that
+        # target one of their roles.
         if not _can_form(request.user, "view"):
-            qs = qs.filter(status=AuditForm.Status.PUBLISHED)
+            qs = qs.filter(
+                status=AuditForm.Status.PUBLISHED,
+                roles__users=request.user,
+            ).distinct()
         if v := request.query_params.get("status"):
             qs = qs.filter(status=v)
         return Response(AuditFormSerializer(qs, many=True).data)
@@ -536,14 +645,14 @@ class AuditFormDetailView(APIView):
 
     def _obj(self, pk):
         try:
-            return AuditForm.objects.prefetch_related("fields").get(pk=pk)
+            return (AuditForm.objects
+                    .prefetch_related("fields", "roles").get(pk=pk))
         except AuditForm.DoesNotExist as e:
             raise Http404 from e
 
     def get(self, request, pk):
         form = self._obj(pk)
-        if (form.status != AuditForm.Status.PUBLISHED
-                and not _can_form(request.user, "view")):
+        if not _can_access_form(request.user, form):
             return Response({"detail": "Not found."},
                             status=http.HTTP_404_NOT_FOUND)
         return Response(AuditFormSerializer(form).data)
@@ -570,12 +679,17 @@ class AuditFormSubmitView(APIView):
 
     def post(self, request, pk):
         try:
-            form = AuditForm.objects.prefetch_related("fields").get(pk=pk)
+            form = (AuditForm.objects
+                    .prefetch_related("fields", "roles").get(pk=pk))
         except AuditForm.DoesNotExist as e:
             raise Http404 from e
         if form.status != AuditForm.Status.PUBLISHED:
             return Response({"detail": "This form is not open for submission."},
                             status=http.HTTP_400_BAD_REQUEST)
+        if not _can_access_form(request.user, form):
+            return Response(
+                {"detail": "Your role is not allowed to fill this form."},
+                status=http.HTTP_403_FORBIDDEN)
         s = SubmitAuditFormSerializer(data=request.data, context={"form": form})
         s.is_valid(raise_exception=True)
         cleaned = s.validated_data["cleaned"]  # {field_id: value}
@@ -600,9 +714,36 @@ class AuditSubmissionListView(APIView):
               .prefetch_related("answers__field"))
         if not _can_view_all_submissions(request.user):
             qs = qs.filter(submitted_by=request.user)
-        if v := request.query_params.get("form"):
+        params = request.query_params
+        if v := params.get("form"):
             qs = qs.filter(form_id=v)
+        if v := params.get("role"):
+            qs = qs.filter(form__roles__id=v).distinct()
+        if v := params.get("search"):
+            qs = qs.filter(form__title__icontains=v)
+        if v := params.get("from"):
+            if d := parse_date(v):
+                qs = qs.filter(created_at__date__gte=d)
+        if v := params.get("to"):
+            if d := parse_date(v):
+                qs = qs.filter(created_at__date__lte=d)
         return Response(AuditSubmissionSerializer(qs[:1000], many=True).data)
+
+
+class AuditFormRoleListView(APIView):
+    """Lightweight role list (id + name) for the form builder's role
+    picker. Available to anyone who can manage audit forms, so they don't
+    need the separate roles.role permission."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        u = request.user
+        if not (_can_form(u, "view") or _can_form(u, "add")
+                or _can_form(u, "edit")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        return Response(
+            AuditFormRoleSerializer(Role.objects.all(), many=True).data)
 
 
 class AuditSubmissionDetailView(APIView):

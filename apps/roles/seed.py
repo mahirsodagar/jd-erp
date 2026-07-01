@@ -158,15 +158,29 @@ CATALOGUE = [
     ("academics", "academics.test.delete_any", "Delete any test (not just own)"),
 
     # Module H — Auditor / Reports
-    ("audit", "audit.faculty_daily.view_all", "View all faculty daily reports"),
-    ("audit", "audit.faculty_daily.submit_for_others", "Submit faculty daily on behalf of others"),
-    ("audit", "audit.admin_daily.view_all", "View all admin daily reports"),
-    ("audit", "audit.course_end.submit", "Submit course-end reports"),
+    # Faculty daily report — explicit own + all scopes. "own" keys let a
+    # user manage their own rows; "all" keys unlock other faculty's rows.
+    ("audit", "audit.faculty_daily.view_own", "View own faculty daily report"),
+    ("audit", "audit.faculty_daily.edit_own", "Add / edit own faculty daily report"),
+    ("audit", "audit.faculty_daily.delete_own", "Delete own faculty daily report"),
+    ("audit", "audit.faculty_daily.view_all", "View all faculty daily reports (not just own)"),
+    ("audit", "audit.faculty_daily.edit_all", "Add / edit any faculty daily report (not just own)"),
+    ("audit", "audit.faculty_daily.delete_all", "Delete any faculty daily report (not just own)"),
+    # Admin daily report — explicit own + all scopes (staff accountability).
+    ("audit", "audit.admin_daily.view_own", "View own admin daily report"),
+    ("audit", "audit.admin_daily.edit_own", "Add / edit own admin daily report"),
+    ("audit", "audit.admin_daily.delete_own", "Delete own admin daily report"),
+    ("audit", "audit.admin_daily.view_all", "View all admin daily reports (not just own)"),
+    ("audit", "audit.admin_daily.edit_all", "Add / edit any admin daily report (not just own)"),
+    ("audit", "audit.admin_daily.delete_all", "Delete any admin daily report (not just own)"),
+    ("audit", "audit.course_end.submit", "Submit own course-end reports"),
     ("audit", "audit.course_end.view_all", "View all course-end reports"),
     ("audit", "audit.course_end.review", "HOD-review course-end reports"),
     ("audit", "audit.batch_mentor.view_all", "View all batch-mentor reports"),
     ("audit", "audit.batch_mentor.submit_for_others", "Submit batch-mentor on behalf"),
     ("audit", "audit.feedback.view_all", "View all student feedback"),
+    ("audit", "audit.self_appraisal.view_own", "View own self-appraisal"),
+    ("audit", "audit.self_appraisal.submit", "Submit own self-appraisal"),
     ("audit", "audit.self_appraisal.view_all", "View all self-appraisals"),
     ("audit", "audit.self_appraisal.review", "Auditor reviews self-appraisals"),
     ("audit", "audit.compliance.view", "View compliance flags"),
@@ -231,6 +245,13 @@ def seed_admin_role():
 FACULTY_PERMISSION_KEYS = [
     "leaves.report.view",
     "audit.course_end.submit",
+    # Manage their own daily report (also unlocks the Audit sidebar group).
+    "audit.faculty_daily.view_own",
+    "audit.faculty_daily.edit_own",
+    "audit.faculty_daily.delete_own",
+    # Their own self-appraisal (submit + view).
+    "audit.self_appraisal.view_own",
+    "audit.self_appraisal.submit",
 ]
 
 

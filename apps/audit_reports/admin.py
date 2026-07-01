@@ -9,10 +9,11 @@ from .models import (
 
 @admin.register(FacultyDailyReport)
 class FacultyDailyReportAdmin(admin.ModelAdmin):
-    list_display = ("faculty", "date", "hours_taught", "non_academic_hours")
+    list_display = ("faculty", "date", "academic_hours",
+                    "non_academic_hours", "others_hours")
     list_filter = ("date",)
     search_fields = ("faculty__emp_code", "faculty__first_name",
-                     "faculty__family_name", "description")
+                     "faculty__family_name", "academic_description")
     autocomplete_fields = ("faculty", "submitted_by")
     date_hierarchy = "date"
 

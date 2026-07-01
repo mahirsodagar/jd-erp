@@ -5,28 +5,34 @@ from django.db import models
 # --- 1. Faculty daily activity log ----------------------------------
 
 class FacultyDailyReport(models.Model):
-    """Instructor's free-text log + hours, one row per (faculty, date).
+    """Instructor's daily log, one row per (faculty, date).
 
-    Mirrors PHP `faculty_daily_report`. Computed fields like
-    classes_taken / leaves_taken / class_hours can be derived from
-    ScheduleSlot/Attendance/LeaveApplication at read-time, so we keep
-    only the manual fields here."""
+    Mirrors PHP `faculty_daily_report`: a monthly grid where each day
+    carries three description + hours pairs — academic documentation,
+    non-academic work, and others."""
 
     faculty = models.ForeignKey(
         "employees.Employee", on_delete=models.PROTECT,
         related_name="daily_reports",
     )
     date = models.DateField(db_index=True)
-    description = models.TextField(blank=True)
-    hours_taught = models.DecimalField(
+
+    academic_description = models.TextField(
+        blank=True, help_text="Academic documentation — classes, prep, etc.",
+    )
+    academic_hours = models.DecimalField(
         max_digits=4, decimal_places=1, default=0,
-        help_text="Self-reported teaching hours.",
+    )
+    non_academic_description = models.TextField(
+        blank=True, help_text="Committee work, mentoring, admin tasks etc.",
     )
     non_academic_hours = models.DecimalField(
         max_digits=4, decimal_places=1, default=0,
-        help_text="Committee work, mentoring, admin tasks etc.",
     )
-    remarks = models.TextField(blank=True)
+    others_description = models.TextField(blank=True)
+    others_hours = models.DecimalField(
+        max_digits=4, decimal_places=1, default=0,
+    )
 
     submitted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True,
@@ -368,6 +374,11 @@ class AuditForm(models.Model):
     description = models.TextField(blank=True)
     status = models.CharField(
         max_length=10, choices=Status.choices, default=Status.DRAFT,
+    )
+    roles = models.ManyToManyField(
+        "roles.Role", related_name="audit_forms", blank=True,
+        help_text="Only users holding one of these roles can see and fill "
+                  "the form.",
     )
 
     created_by = models.ForeignKey(

@@ -1,6 +1,8 @@
 from django.utils.dateparse import parse_date, parse_datetime, parse_time
 from rest_framework import serializers
 
+from apps.roles.models import Role
+
 from .models import (
     AdminDailyReport, AuditAnswer, AuditForm, AuditFormField, AuditSubmission,
     BatchMentorReport, ComplianceFlag, CourseEndReport,
@@ -15,9 +17,10 @@ class FacultyDailyReportSerializer(serializers.ModelSerializer):
     class Meta:
         model = FacultyDailyReport
         fields = [
-            "id", "faculty", "faculty_name", "faculty_code",
-            "date", "description", "hours_taught", "non_academic_hours",
-            "remarks",
+            "id", "faculty", "faculty_name", "faculty_code", "date",
+            "academic_description", "academic_hours",
+            "non_academic_description", "non_academic_hours",
+            "others_description", "others_hours",
             "submitted_by", "created_at", "updated_at",
         ]
         read_only_fields = [
@@ -197,10 +200,22 @@ class AuditFormFieldSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class AuditFormRoleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Role
+        fields = ["id", "name"]
+        read_only_fields = fields
+
+
 class AuditFormSerializer(serializers.ModelSerializer):
     fields = AuditFormFieldSerializer(many=True)
     field_count = serializers.IntegerField(
         source="fields.count", read_only=True,
+    )
+    roles = AuditFormRoleSerializer(many=True, read_only=True)
+    role_ids = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=Role.objects.all(),
+        source="roles", write_only=True, required=False,
     )
     created_by_name = serializers.CharField(
         source="created_by.full_name", read_only=True, default="",
@@ -210,13 +225,31 @@ class AuditFormSerializer(serializers.ModelSerializer):
         model = AuditForm
         fields = [
             "id", "title", "description", "status",
+            "roles", "role_ids",
             "fields", "field_count",
             "created_by", "created_by_name", "created_at", "updated_at",
         ]
         read_only_fields = [
-            "id", "field_count",
+            "id", "field_count", "roles",
             "created_by", "created_by_name", "created_at", "updated_at",
         ]
+
+    def validate(self, attrs):
+        # A published form must target at least one role, otherwise no
+        # regular user could ever see it. On PATCH, fall back to the
+        # form's existing roles when role_ids isn't supplied.
+        status = attrs.get("status", getattr(self.instance, "status", None))
+        if "roles" in attrs:
+            roles = attrs["roles"]
+        elif self.instance is not None:
+            roles = list(self.instance.roles.all())
+        else:
+            roles = []
+        if status == AuditForm.Status.PUBLISHED and not roles:
+            raise serializers.ValidationError(
+                {"role_ids": "Select at least one role before publishing."}
+            )
+        return attrs
 
     def _write_fields(self, form, fields_data):
         form.fields.all().delete()
@@ -226,15 +259,21 @@ class AuditFormSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         fields_data = validated_data.pop("fields", [])
+        roles = validated_data.pop("roles", None)
         form = AuditForm.objects.create(**validated_data)
+        if roles is not None:
+            form.roles.set(roles)
         self._write_fields(form, fields_data)
         return form
 
     def update(self, instance, validated_data):
         fields_data = validated_data.pop("fields", None)
+        roles = validated_data.pop("roles", None)
         for attr, val in validated_data.items():
             setattr(instance, attr, val)
         instance.save()
+        if roles is not None:
+            instance.roles.set(roles)
         if fields_data is not None:
             self._write_fields(instance, fields_data)
         return instance
