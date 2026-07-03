@@ -47,21 +47,22 @@ def _student_of(user):
 
 # === 1. Faculty Daily Report ========================================
 
-# Two-permission model: `submit_own` lets a faculty see/edit/delete their
-# OWN report; `view_all` gives auditors read-only sight of everyone's.
+# Two-permission model:
+#   dashboard.daily_report.submit → fill / see / edit / delete own report
+#   audit.faculty_daily.view_all  → auditors' read-only sight of everyone's
 # Nobody edits another faculty's report (no submit-on-behalf).
 
 def _fd_can_view(user, *, is_own: bool) -> bool:
     if user.is_superuser or has_perm(user, "audit.faculty_daily.view_all"):
         return True
-    return is_own and has_perm(user, "audit.faculty_daily.submit_own")
+    return is_own and has_perm(user, "dashboard.daily_report.submit")
 
 
 def _fd_can_manage(user, *, is_own: bool) -> bool:
     """Create / edit / delete — own rows only."""
     return bool(
         user.is_superuser
-        or (is_own and has_perm(user, "audit.faculty_daily.submit_own"))
+        or (is_own and has_perm(user, "dashboard.daily_report.submit"))
     )
 
 
@@ -84,9 +85,9 @@ class FacultyDailyReportListCreateView(APIView):
         u = request.user
         qs = FacultyDailyReport.objects.select_related("faculty")
         if not (u.is_superuser or has_perm(u, "audit.faculty_daily.view_all")):
-            # Restricted to own rows — requires submit_own.
+            # Restricted to own rows — requires the dashboard submit perm.
             emp = _emp_of(u)
-            if emp is None or not has_perm(u, "audit.faculty_daily.submit_own"):
+            if emp is None or not has_perm(u, "dashboard.daily_report.submit"):
                 return Response([])
             qs = qs.filter(faculty=emp)
         params = request.query_params

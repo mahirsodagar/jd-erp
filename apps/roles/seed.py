@@ -158,10 +158,9 @@ CATALOGUE = [
     ("academics", "academics.test.delete_any", "Delete any test (not just own)"),
 
     # Module H — Auditor / Reports
-    # Faculty daily report — a faculty manages ONLY their own report
-    # (submit implies see/edit/delete own); auditors get read-only
-    # visibility of everyone's. No one submits on behalf of another.
-    ("audit", "audit.faculty_daily.submit_own", "Submit / view / edit own daily report"),
+    # Faculty daily report — auditors get read-only visibility of every
+    # faculty's report here. Filling one's OWN report lives under the
+    # Dashboard module (dashboard.daily_report.submit) instead.
     ("audit", "audit.faculty_daily.view_all", "View all faculty daily reports"),
     # Admin daily report — explicit own + all scopes (staff accountability).
     ("audit", "audit.admin_daily.view_own", "View own admin daily report"),
@@ -186,6 +185,9 @@ CATALOGUE = [
     ("audit", "audit.report.consolidated", "View dashboards / consolidated reports"),
     *_crud("audit", "audit.form", "audit forms"),
     ("audit", "audit.submission.view_all", "View all audit form submissions"),
+
+    # Module — Personal Dashboard (self-service)
+    ("dashboard", "dashboard.daily_report.submit", "Fill / manage own daily report"),
 
     # Module HR — Relieving (exit workflow + experience letter)
     ("hr", "hr.relieving.submit_for_others", "Submit relieving on behalf of others"),
@@ -242,8 +244,8 @@ def seed_admin_role():
 FACULTY_PERMISSION_KEYS = [
     "leaves.report.view",
     "audit.course_end.submit",
-    # Manage their own daily report (also unlocks the Audit sidebar group).
-    "audit.faculty_daily.submit_own",
+    # Fill their own daily report (Dashboard → Daily Report).
+    "dashboard.daily_report.submit",
     # Their own self-appraisal (submit + view).
     "audit.self_appraisal.view_own",
     "audit.self_appraisal.submit",
