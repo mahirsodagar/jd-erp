@@ -32,8 +32,8 @@ from .serializers import (
 )
 from .services import (
     batch_progression, consolidated_monthly,
-    feedback_summary_for_instructor, live_faculty_tracking,
-    timetable_adherence,
+    faculty_daily_computed, feedback_summary_for_instructor,
+    live_faculty_tracking, timetable_adherence,
 )
 
 
@@ -162,24 +162,51 @@ class FacultyDailyReportDetailView(APIView):
         return Response(status=http.HTTP_204_NO_CONTENT)
 
 
+class FacultyDailyComputedView(APIView):
+    """Per-day scheduled class hours + leave hours for one faculty."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        fid = request.query_params.get("faculty")
+        if not fid:
+            return Response({"detail": "faculty is required."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        try:
+            emp = Employee.objects.get(pk=fid)
+        except (Employee.DoesNotExist, ValueError) as e:
+            raise Http404 from e
+        if not _fd_can_view(request.user,
+                            is_own=_fd_is_own(request.user, emp.id)):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        start = parse_date(request.query_params.get("from") or "")
+        end = parse_date(request.query_params.get("to") or "")
+        if not (start and end):
+            return Response({"detail": "from and to are required."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        return Response(
+            faculty_daily_computed(faculty=emp, start=start, end=end))
+
+
 # === 2. Admin Daily Report ==========================================
+
+# Mirrors the faculty model:
+#   dashboard.admin_daily.submit → fill / see / edit / delete own report
+#   audit.admin_daily.view_all   → auditors' read-only sight of everyone's
+# Nobody edits another user's report.
 
 def _ad_can_view(user, *, is_own: bool) -> bool:
     if user.is_superuser or has_perm(user, "audit.admin_daily.view_all"):
         return True
-    return is_own and has_perm(user, "audit.admin_daily.view_own")
+    return is_own and has_perm(user, "dashboard.admin_daily.submit")
 
 
-def _ad_can_edit(user, *, is_own: bool) -> bool:
-    if user.is_superuser or has_perm(user, "audit.admin_daily.edit_all"):
-        return True
-    return is_own and has_perm(user, "audit.admin_daily.edit_own")
-
-
-def _ad_can_delete(user, *, is_own: bool) -> bool:
-    if user.is_superuser or has_perm(user, "audit.admin_daily.delete_all"):
-        return True
-    return is_own and has_perm(user, "audit.admin_daily.delete_own")
+def _ad_can_manage(user, *, is_own: bool) -> bool:
+    """Create / edit / delete — own rows only."""
+    return bool(
+        user.is_superuser
+        or (is_own and has_perm(user, "dashboard.admin_daily.submit"))
+    )
 
 
 class AdminDailyReportListCreateView(APIView):
@@ -189,12 +216,15 @@ class AdminDailyReportListCreateView(APIView):
         u = request.user
         qs = AdminDailyReport.objects.select_related("user")
         if not (u.is_superuser or has_perm(u, "audit.admin_daily.view_all")):
-            if not has_perm(u, "audit.admin_daily.view_own"):
+            if not has_perm(u, "dashboard.admin_daily.submit"):
                 return Response([])
             qs = qs.filter(user=u)
         params = request.query_params
         if v := params.get("user"):
             qs = qs.filter(user_id=v)
+        if v := params.get("employee"):
+            # Resolve an employee to their linked user account.
+            qs = qs.filter(user__employee=v)
         if v := params.get("from"):
             if d := parse_date(v):
                 qs = qs.filter(rep_date__gte=d)
@@ -206,7 +236,7 @@ class AdminDailyReportListCreateView(APIView):
     def post(self, request):
         """Upsert one (user, rep_date) row for the current user."""
         u = request.user
-        if not _ad_can_edit(u, is_own=True):
+        if not _ad_can_manage(u, is_own=True):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         s = AdminDailyReportSerializer(data={**request.data, "user": u.id})
@@ -232,7 +262,7 @@ class AdminDailyReportDetailView(APIView):
 
     def patch(self, request, pk):
         obj = self._obj(pk)
-        if not _ad_can_edit(request.user, is_own=obj.user_id == request.user.id):
+        if not _ad_can_manage(request.user, is_own=obj.user_id == request.user.id):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         s = AdminDailyReportSerializer(obj, data=request.data, partial=True)
@@ -242,7 +272,7 @@ class AdminDailyReportDetailView(APIView):
 
     def delete(self, request, pk):
         obj = self._obj(pk)
-        if not _ad_can_delete(request.user, is_own=obj.user_id == request.user.id):
+        if not _ad_can_manage(request.user, is_own=obj.user_id == request.user.id):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         obj.delete()

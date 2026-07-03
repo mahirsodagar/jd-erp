@@ -162,13 +162,9 @@ CATALOGUE = [
     # faculty's report here. Filling one's OWN report lives under the
     # Dashboard module (dashboard.daily_report.submit) instead.
     ("audit", "audit.faculty_daily.view_all", "View all faculty daily reports"),
-    # Admin daily report — explicit own + all scopes (staff accountability).
-    ("audit", "audit.admin_daily.view_own", "View own admin daily report"),
-    ("audit", "audit.admin_daily.edit_own", "Add / edit own admin daily report"),
-    ("audit", "audit.admin_daily.delete_own", "Delete own admin daily report"),
-    ("audit", "audit.admin_daily.view_all", "View all admin daily reports (not just own)"),
-    ("audit", "audit.admin_daily.edit_all", "Add / edit any admin daily report (not just own)"),
-    ("audit", "audit.admin_daily.delete_all", "Delete any admin daily report (not just own)"),
+    # Admin daily report — auditors get read-only view of everyone's here;
+    # filling one's OWN lives under Dashboard (dashboard.admin_daily.submit).
+    ("audit", "audit.admin_daily.view_all", "View all admin daily reports"),
     ("audit", "audit.course_end.submit", "Submit own course-end reports"),
     ("audit", "audit.course_end.view_all", "View all course-end reports"),
     ("audit", "audit.course_end.review", "HOD-review course-end reports"),
@@ -188,6 +184,7 @@ CATALOGUE = [
 
     # Module — Personal Dashboard (self-service)
     ("dashboard", "dashboard.daily_report.submit", "Fill / manage own daily report"),
+    ("dashboard", "dashboard.admin_daily.submit", "Fill / manage own admin daily report"),
 
     # Module HR — Relieving (exit workflow + experience letter)
     ("hr", "hr.relieving.submit_for_others", "Submit relieving on behalf of others"),

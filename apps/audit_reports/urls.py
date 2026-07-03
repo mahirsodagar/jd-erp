@@ -16,6 +16,7 @@ from .views import (
     ConsolidatedMonthlyView,
     CourseEndReportListCreateView,
     CourseEndReportReviewView,
+    FacultyDailyComputedView,
     FacultyDailyReportDetailView,
     FacultyDailyReportListCreateView,
     FacultySelfAppraisalListCreateView,
@@ -46,6 +47,8 @@ urlpatterns = [
          name="faculty-daily-list-create"),
     path("faculty-daily/<int:pk>/", FacultyDailyReportDetailView.as_view(),
          name="faculty-daily-detail"),
+    path("faculty-daily-computed/", FacultyDailyComputedView.as_view(),
+         name="faculty-daily-computed"),
 
     path("admin-daily/", AdminDailyReportListCreateView.as_view(),
          name="admin-daily-list-create"),

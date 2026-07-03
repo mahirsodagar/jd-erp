@@ -11,6 +11,68 @@ from django.db.models import Avg, Count, F, Q, Sum
 from django.utils import timezone
 
 
+# --- Faculty daily computed hours (class + leave) -------------------
+
+# Nominal working hours in a day, used to express a leave day-fraction
+# (0.5 / 1.0) as hours. Adjust to the institute's working day if needed.
+WORKDAY_HOURS = Decimal("8")
+
+
+def faculty_daily_computed(*, faculty, start: date, end: date) -> dict:
+    """Per-day scheduled class hours + leave hours for one faculty.
+
+    Returns {"YYYY-MM-DD": {"class_hours": float, "leave_hours": float}}
+    for days that have either. Class hours = sum of (end-start) over the
+    faculty's non-cancelled ScheduleSlots. Leave hours = approved-leave
+    day-fraction × WORKDAY_HOURS (Sundays skipped; holidays not netted)."""
+    from datetime import datetime
+
+    from apps.academics.models import ScheduleSlot
+    from apps.leaves.models import LeaveApplication
+
+    out: dict = {}
+
+    def bucket(d):
+        return out.setdefault(
+            d.isoformat(), {"class_hours": 0.0, "leave_hours": 0.0})
+
+    slots = (
+        ScheduleSlot.objects.filter(
+            instructor=faculty, date__gte=start, date__lte=end,
+        )
+        .exclude(status=ScheduleSlot.Status.CANCELLED)
+        .select_related("time_slot")
+    )
+    for s in slots:
+        ts = s.time_slot
+        if ts is None:
+            continue
+        hours = (
+            datetime.combine(s.date, ts.end_time)
+            - datetime.combine(s.date, ts.start_time)
+        ).total_seconds() / 3600
+        bucket(s.date)["class_hours"] += hours
+
+    leaves = LeaveApplication.objects.filter(
+        employee=faculty, status=LeaveApplication.Status.APPROVED,
+        from_date__lte=end, to_date__gte=start,
+    )
+    for la in leaves:
+        single = la.from_date == la.to_date
+        day = max(la.from_date, start)
+        last = min(la.to_date, end)
+        while day <= last:
+            if day.weekday() != 6:  # skip Sundays
+                if single and la.from_session in (1, 3, 4):
+                    frac = Decimal("0.5")
+                else:
+                    frac = Decimal("1.0")
+                bucket(day)["leave_hours"] += float(frac * WORKDAY_HOURS)
+            day += timedelta(days=1)
+
+    return out
+
+
 # --- Live faculty tracking -----------------------------------------
 
 def live_faculty_tracking(*, on_date: date | None = None) -> list[dict]:
