@@ -206,11 +206,20 @@ CATALOGUE = [
 
 
 def seed_permissions():
+    keys = set()
     for module, key, label in CATALOGUE:
         Permission.objects.update_or_create(
             key=key,
             defaults={"module": module, "label": label},
         )
+        keys.add(key)
+    # Prune permissions dropped from the catalogue so re-seeding fully
+    # reconciles the DB (e.g. retired faculty_daily scopes). The catalogue
+    # is the single source of truth — admins never mint their own keys.
+    stale = Permission.objects.exclude(key__in=keys)
+    removed = stale.count()
+    stale.delete()
+    return removed
 
 
 def seed_admin_role():
