@@ -188,6 +188,76 @@ class FacultyDailyComputedView(APIView):
             faculty_daily_computed(faculty=emp, start=start, end=end))
 
 
+# === Audit filter lookups ===========================================
+# Lightweight campus / academic-year / employee pickers for the audit
+# cascades, gated on any audit view permission so auditors don't also
+# need master.* / employees.* view perms. Campuses/employees are scoped
+# to the auditor's assigned campuses (superusers see all).
+
+def _can_use_audit_filters(user) -> bool:
+    return bool(
+        user.is_superuser
+        or has_perm(user, "audit.faculty_daily.view_all")
+        or has_perm(user, "audit.admin_daily.view_all")
+    )
+
+
+def _assigned_campus_ids(user):
+    return list(user.campuses.values_list("id", flat=True))
+
+
+class AuditFilterOptionsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        u = request.user
+        if not _can_use_audit_filters(u):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        from apps.master.models import AcademicYear, Campus
+        campuses = Campus.objects.all().order_by("name")
+        mine = _assigned_campus_ids(u)
+        if not u.is_superuser and mine:
+            campuses = campuses.filter(id__in=mine)
+        return Response({
+            "campuses": [
+                {"id": c.id, "name": c.name, "code": c.code} for c in campuses
+            ],
+            "academic_years": [
+                {"id": y.id, "code": y.code, "full_name": y.full_name,
+                 "start_date": y.start_date, "end_date": y.end_date,
+                 "is_current": y.is_current}
+                for y in AcademicYear.objects.all()
+            ],
+        })
+
+
+class AuditFilterEmployeesView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        u = request.user
+        if not _can_use_audit_filters(u):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        campus = request.query_params.get("campus")
+        if not campus:
+            return Response([])
+        mine = _assigned_campus_ids(u)
+        try:
+            if not u.is_superuser and mine and int(campus) not in mine:
+                return Response([])
+        except (TypeError, ValueError):
+            return Response([])
+        qs = Employee.objects.filter(
+            campus_id=campus, is_deleted=False,
+        ).order_by("emp_code")
+        return Response([
+            {"id": e.id, "emp_code": e.emp_code, "full_name": e.full_name}
+            for e in qs
+        ])
+
+
 # === 2. Admin Daily Report ==========================================
 
 # Mirrors the faculty model:

@@ -16,6 +16,8 @@ from .views import (
     ConsolidatedMonthlyView,
     CourseEndReportListCreateView,
     CourseEndReportReviewView,
+    AuditFilterEmployeesView,
+    AuditFilterOptionsView,
     FacultyDailyComputedView,
     FacultyDailyReportDetailView,
     FacultyDailyReportListCreateView,
@@ -49,6 +51,12 @@ urlpatterns = [
          name="faculty-daily-detail"),
     path("faculty-daily-computed/", FacultyDailyComputedView.as_view(),
          name="faculty-daily-computed"),
+
+    # Audit cascade filter lookups (audit-gated; no master.* perms needed)
+    path("filters/options/", AuditFilterOptionsView.as_view(),
+         name="audit-filter-options"),
+    path("filters/employees/", AuditFilterEmployeesView.as_view(),
+         name="audit-filter-employees"),
 
     path("admin-daily/", AdminDailyReportListCreateView.as_view(),
          name="admin-daily-list-create"),
