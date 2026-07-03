@@ -3,7 +3,7 @@ from django.contrib import admin
 from .models import (
     AdminDailyReport, AuditAnswer, AuditForm, AuditFormField, AuditSubmission,
     BatchMentorReport, ComplianceFlag, CourseEndReport,
-    FacultyDailyReport, FacultySelfAppraisal, StudentFeedback,
+    FacultyDailyReport, FacultySelfAppraisal, StudentFeedback, ZeroHourReport,
 )
 
 
@@ -44,6 +44,17 @@ class BatchMentorReportAdmin(admin.ModelAdmin):
     list_filter = ("year", "month")
     search_fields = ("batch__name", "mentor__emp_code")
     autocomplete_fields = ("batch", "mentor", "submitted_by")
+
+
+@admin.register(ZeroHourReport)
+class ZeroHourReportAdmin(admin.ModelAdmin):
+    list_display = ("batch", "report_date", "mentor",
+                    "batch_strength", "zero_hour_attendance")
+    list_filter = ("report_date",)
+    search_fields = ("batch__name", "mentor__emp_code")
+    autocomplete_fields = ("batch", "mentor", "submitted_by")
+    date_hierarchy = "report_date"
+    readonly_fields = ("submitted_by", "created_at", "updated_at")
 
 
 @admin.register(StudentFeedback)

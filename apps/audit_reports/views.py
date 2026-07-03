@@ -14,10 +14,12 @@ from apps.roles.models import Role
 
 from django.db import transaction
 
+from apps.common.pagination import PaginatedAPIViewMixin, StandardPagination
+
 from .models import (
     AdminDailyReport, AuditAnswer, AuditForm, AuditSubmission,
     BatchMentorReport, ComplianceFlag, CourseEndReport,
-    FacultyDailyReport, FacultySelfAppraisal, StudentFeedback,
+    FacultyDailyReport, FacultySelfAppraisal, StudentFeedback, ZeroHourReport,
 )
 from .permissions import has_perm
 from .serializers import (
@@ -28,7 +30,7 @@ from .serializers import (
     CourseEndReviewSerializer, FacultyDailyReportSerializer,
     FacultySelfAppraisalSerializer, ResolveFlagSerializer,
     SelfAppraisalReviewSerializer, StudentFeedbackSerializer,
-    SubmitAuditFormSerializer,
+    SubmitAuditFormSerializer, ZeroHourReportSerializer,
 )
 from .services import (
     batch_progression, consolidated_monthly,
@@ -439,6 +441,112 @@ class BatchMentorReportListCreateView(APIView):
                             status=http.HTTP_403_FORBIDDEN)
         s.save(submitted_by=u)
         return Response(s.data, status=http.HTTP_201_CREATED)
+
+
+# === 4b. Zero-Hour Report ===========================================
+#
+# Two-permission model, mirroring the other batch reports:
+#   academics.zero_hour.submit → fill / see / edit / delete OWN reports
+#                                (shows under Academics)
+#   audit.zero_hour.view_all   → auditors' read-only sight of everyone's
+#                                (shows under Audit, date-wise + paginated)
+
+class ZeroHourPagination(StandardPagination):
+    """Audit report defaults to the 10 most recent, page_size overridable."""
+    page_size = 10
+
+
+def _zh_can_view_all(user) -> bool:
+    return bool(user.is_superuser or has_perm(user, "audit.zero_hour.view_all"))
+
+
+def _zh_can_submit(user) -> bool:
+    return bool(user.is_superuser
+                or has_perm(user, "academics.zero_hour.submit"))
+
+
+class ZeroHourReportListCreateView(PaginatedAPIViewMixin, APIView):
+    permission_classes = [IsAuthenticated]
+    pagination_class = ZeroHourPagination
+
+    def get(self, request):
+        u = request.user
+        qs = ZeroHourReport.objects.select_related("batch", "mentor",
+                                                    "submitted_by")
+        if not _zh_can_view_all(u):
+            # Fillers see only their own submissions.
+            if not _zh_can_submit(u):
+                return Response({"results": [], "count": 0,
+                                 "next": None, "previous": None})
+            qs = qs.filter(submitted_by=u)
+        params = request.query_params
+        if v := params.get("batch"):
+            qs = qs.filter(batch_id=v)
+        if v := params.get("mentor"):
+            qs = qs.filter(mentor_id=v)
+        if v := params.get("from"):
+            if d := parse_date(v):
+                qs = qs.filter(report_date__gte=d)
+        if v := params.get("to"):
+            if d := parse_date(v):
+                qs = qs.filter(report_date__lte=d)
+        return self.paginate(qs, ZeroHourReportSerializer)
+
+    def post(self, request):
+        u = request.user
+        if not _zh_can_submit(u):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = ZeroHourReportSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        s.save(submitted_by=u)
+        return Response(s.data, status=http.HTTP_201_CREATED)
+
+
+class ZeroHourReportDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _obj(self, pk):
+        try:
+            return ZeroHourReport.objects.select_related(
+                "batch", "mentor", "submitted_by").get(pk=pk)
+        except ZeroHourReport.DoesNotExist as e:
+            raise Http404 from e
+
+    def _is_own(self, user, obj) -> bool:
+        return obj.submitted_by_id == user.id
+
+    def get(self, request, pk):
+        obj = self._obj(pk)
+        u = request.user
+        if not (_zh_can_view_all(u)
+                or (_zh_can_submit(u) and self._is_own(u, obj))):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        return Response(ZeroHourReportSerializer(obj).data)
+
+    def patch(self, request, pk):
+        obj = self._obj(pk)
+        u = request.user
+        # Submitters edit their own; superusers edit any.
+        if not (u.is_superuser
+                or (_zh_can_submit(u) and self._is_own(u, obj))):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = ZeroHourReportSerializer(obj, data=request.data, partial=True)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(s.data)
+
+    def delete(self, request, pk):
+        obj = self._obj(pk)
+        u = request.user
+        if not (u.is_superuser
+                or (_zh_can_submit(u) and self._is_own(u, obj))):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        obj.delete()
+        return Response(status=http.HTTP_204_NO_CONTENT)
 
 
 # === 5. Student Feedback ============================================

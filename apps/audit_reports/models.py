@@ -477,3 +477,99 @@ class AuditAnswer(models.Model):
 
     def __str__(self):
         return f"answer {self.id} of submission {self.submission_id}"
+
+
+# --- 9. Zero-Hour report --------------------------------------------
+#
+# Filled by a class mentor / responsible faculty after a batch's
+# "0-Hour" session (a readiness check-in). Lives under Academics for
+# the person filling it; the Audit team reviews the collected reports
+# date-wise. Independent of the other reports — its own fixed schema.
+
+class ZeroHourReport(models.Model):
+    """One 0-Hour session read-out for a batch on a given date."""
+
+    report_date = models.DateField(
+        db_index=True,
+        help_text="Date the 0-Hour session was conducted.",
+    )
+    batch = models.ForeignKey(
+        "master.Batch", on_delete=models.PROTECT,
+        related_name="zero_hour_reports",
+    )
+    mentor = models.ForeignKey(
+        "employees.Employee", on_delete=models.PROTECT,
+        related_name="zero_hour_reports",
+        help_text="Class mentor.",
+    )
+
+    # 3-4: strength + how many attended the 0-Hour session.
+    batch_strength = models.PositiveIntegerField()
+    zero_hour_attendance = models.PositiveIntegerField(
+        help_text="Students present for the 0-Hour session.",
+    )
+
+    # 5-6: batch attendance averages across the month.
+    avg_attendance_first_half = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True,
+        help_text="Average batch attendance, 1st–15th of the month (%).",
+    )
+    avg_attendance_month_end = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True,
+        help_text="Average batch attendance at month end (%).",
+    )
+
+    # 7-8: agenda + outcome.
+    agenda = models.TextField(blank=True)
+    outcome = models.TextField(blank=True)
+
+    # 9-11: exams.
+    months_to_exams = models.PositiveSmallIntegerField(null=True, blank=True)
+    exam_preparations = models.TextField(blank=True)
+    exam_preparation_details = models.TextField(
+        blank=True,
+        help_text="Schedule / arrangements to achieve the above.",
+    )
+
+    # 12-15: portfolios, internships, pass-out.
+    months_to_portfolios = models.PositiveSmallIntegerField(null=True, blank=True)
+    months_to_internships = models.PositiveSmallIntegerField(null=True, blank=True)
+    internship_preparations = models.TextField(
+        blank=True,
+        help_text="Preparations for the batch to be 'Internship ready'.",
+    )
+    months_to_passout = models.PositiveSmallIntegerField(null=True, blank=True)
+
+    # 16-17: activities + remarks.
+    activities = models.TextField(
+        blank=True,
+        help_text="Activities planned / completed for the batch.",
+    )
+    remarks = models.TextField(blank=True)
+
+    # 18-19: HOD / Principal escalation.
+    hod_discussion = models.TextField(
+        blank=True,
+        help_text="Batch issues discussed with HOD / Principal + outcomes.",
+    )
+    action_taken = models.TextField(
+        blank=True,
+        help_text="Action taken on the issues addressed.",
+    )
+
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="zero_hour_submissions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-report_date", "-created_at")
+        indexes = [
+            models.Index(fields=["report_date"]),
+            models.Index(fields=["batch", "report_date"]),
+        ]
+
+    def __str__(self):
+        return f"0-Hour {self.batch_id} on {self.report_date}"

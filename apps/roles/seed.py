@@ -170,6 +170,9 @@ CATALOGUE = [
     ("audit", "audit.course_end.review", "HOD-review course-end reports"),
     ("audit", "audit.batch_mentor.view_all", "View all batch-mentor reports"),
     ("audit", "audit.batch_mentor.submit_for_others", "Submit batch-mentor on behalf"),
+    # Zero-Hour report — filled under Academics, reviewed under Audit.
+    ("academics", "academics.zero_hour.submit", "Fill / manage own 0-Hour reports"),
+    ("audit", "audit.zero_hour.view_all", "View all 0-Hour reports"),
     ("audit", "audit.feedback.view_all", "View all student feedback"),
     ("audit", "audit.self_appraisal.view_own", "View own self-appraisal"),
     ("audit", "audit.self_appraisal.submit", "Submit own self-appraisal"),

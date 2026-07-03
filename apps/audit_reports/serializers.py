@@ -6,7 +6,7 @@ from apps.roles.models import Role
 from .models import (
     AdminDailyReport, AuditAnswer, AuditForm, AuditFormField, AuditSubmission,
     BatchMentorReport, ComplianceFlag, CourseEndReport,
-    FacultyDailyReport, FacultySelfAppraisal, StudentFeedback,
+    FacultyDailyReport, FacultySelfAppraisal, StudentFeedback, ZeroHourReport,
 )
 
 
@@ -91,6 +91,51 @@ class BatchMentorReportSerializer(serializers.ModelSerializer):
             "id", "batch_name", "mentor_name",
             "submitted_by", "created_at", "updated_at",
         ]
+
+
+class ZeroHourReportSerializer(serializers.ModelSerializer):
+    batch_name = serializers.CharField(source="batch.name", read_only=True)
+    mentor_name = serializers.CharField(source="mentor.full_name", read_only=True)
+    submitted_by_name = serializers.CharField(
+        source="submitted_by.full_name", read_only=True, default="",
+    )
+
+    class Meta:
+        model = ZeroHourReport
+        fields = [
+            "id",
+            "report_date",
+            "batch", "batch_name",
+            "mentor", "mentor_name",
+            "batch_strength", "zero_hour_attendance",
+            "avg_attendance_first_half", "avg_attendance_month_end",
+            "agenda", "outcome",
+            "months_to_exams", "exam_preparations", "exam_preparation_details",
+            "months_to_portfolios", "months_to_internships",
+            "internship_preparations", "months_to_passout",
+            "activities", "remarks",
+            "hod_discussion", "action_taken",
+            "submitted_by", "submitted_by_name",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = [
+            "id", "batch_name", "mentor_name",
+            "submitted_by", "submitted_by_name", "created_at", "updated_at",
+        ]
+
+    def validate(self, attrs):
+        # Attendance can't exceed strength. On PATCH, fall back to the
+        # stored value for whichever field isn't being changed.
+        strength = attrs.get(
+            "batch_strength", getattr(self.instance, "batch_strength", None))
+        present = attrs.get(
+            "zero_hour_attendance",
+            getattr(self.instance, "zero_hour_attendance", None))
+        if strength is not None and present is not None and present > strength:
+            raise serializers.ValidationError(
+                {"zero_hour_attendance":
+                 "0-Hour attendance can't exceed batch strength."})
+        return attrs
 
 
 class StudentFeedbackSerializer(serializers.ModelSerializer):

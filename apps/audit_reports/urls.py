@@ -27,6 +27,8 @@ from .views import (
     SelfAppraisalReviewView,
     StudentFeedbackListCreateView,
     TimetableAdherenceView,
+    ZeroHourReportDetailView,
+    ZeroHourReportListCreateView,
 )
 
 urlpatterns = [
@@ -71,6 +73,12 @@ urlpatterns = [
 
     path("batch-mentor/", BatchMentorReportListCreateView.as_view(),
          name="batch-mentor-list-create"),
+
+    # Zero-Hour report (Academics fill + Audit review)
+    path("zero-hour/", ZeroHourReportListCreateView.as_view(),
+         name="zero-hour-list-create"),
+    path("zero-hour/<int:pk>/", ZeroHourReportDetailView.as_view(),
+         name="zero-hour-detail"),
 
     # Feedback + Self-appraisal
     path("feedback/", StudentFeedbackListCreateView.as_view(),

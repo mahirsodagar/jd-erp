@@ -54,6 +54,16 @@ def _email_result(log) -> dict:
     }
 
 
+def _first_name(full_name: str) -> str:
+    """First whitespace-delimited token of a name, for SMS greetings.
+
+    "Disha Jivani" -> "Disha", "Jethva Hemangi" -> "Jethva". Falls back to
+    the whole value when there's no space (single name) or it's blank.
+    """
+    parts = (full_name or "").split()
+    return parts[0] if parts else (full_name or "")
+
+
 # --- Institute lookup -------------------------------------------------------
 
 def _payment_details(institute_key: str) -> dict:
@@ -138,8 +148,9 @@ def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict
     long_url = f"{base}/#/apply/{token}"
     short_url = shorten(long_url)
 
+    first_name = _first_name(lead.name)
     sms_body = (
-        f"Dear{lead.name}, Thank you for selecting JD, Your inquiry has been submitted. Please click the link to complete your application - {short_url}"
+        f"Dear{first_name}, Thank you for selecting JD, Your inquiry has been submitted. Please click the link to complete your application - {short_url}"
     )
     email_subject = f"JD Student Application Link : {lead.name}"
     email_body = (
@@ -153,7 +164,7 @@ def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict
     sms_log = queue_notification(
         template_key="lead.application_link.sms",
         recipient=lead.phone,
-        context={"name": lead.name, "url": short_url},
+        context={"name": first_name, "url": short_url},
         related=lead,
     )
     email_log = None
@@ -328,7 +339,11 @@ def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
         template_key="lead.fee_link.sms",
         recipient=lead.phone,
         context={
-            "name": lead.name, "url": url,
+            # First name only for the SMS greeting. The current DLT body
+            # greets "Dear student" (no name), so this has no visible
+            # effect today — it keeps the fee-link SMS correct if the
+            # template is ever swapped for a name-bearing one.
+            "name": _first_name(lead.name), "url": url,
             "institute": institute_label, "short_name": short_name,
         },
         related=lead,
