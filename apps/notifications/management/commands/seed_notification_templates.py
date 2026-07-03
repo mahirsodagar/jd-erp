@@ -74,9 +74,7 @@ TEMPLATES = [
     # snake_case keys above. Source of truth = the callers in
     # apps/leads/send_links.py.)
     ("lead.application_link.sms", "SMS", "",
-     "Dear {name}, Thank you for selecting JD, Your inquiry has been "
-     "submitted. Please click the link to complete your application - "
-     "{url}"),
+     "Dear{name}, Thank you for selecting JD, Your inquiry has been submitted. Please click the link to complete your application - {url}"),
     ("lead.application_link.email", "EMAIL",
      "JD Student Application Link : {name}",
      "Greetings from JD!\nDear {name},\n\n"

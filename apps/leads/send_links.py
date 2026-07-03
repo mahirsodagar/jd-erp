@@ -24,6 +24,36 @@ from apps.notifications.services import queue_notification
 from .models import Lead, LeadCommunication
 
 
+# --- Dispatch-status helpers ------------------------------------------------
+
+def _sms_result(log) -> dict:
+    """Flatten a queued SMS dispatch log into the API fields the UI reads.
+
+    `queue_notification` returns a NotificationDispatchLog whose status is
+    already SENT / FAILED (SMS dispatches synchronously) — surface it so
+    the counsellor sees the real outcome, not a static "queued". On the
+    off chance a ScheduledNotification comes back (future fire_at), report
+    it as QUEUED with no error.
+    """
+    return {
+        "sms_log_id": getattr(log, "id", None),
+        "sms_status": getattr(log, "status", "QUEUED"),
+        "sms_error": getattr(log, "error", "") or "",
+    }
+
+
+def _email_result(log) -> dict:
+    """Flatten the email leg. `log` is None when the lead has no email."""
+    if log is None:
+        return {"email_log_id": None, "email_sent": False, "email_error": ""}
+    sent = getattr(log, "status", "") == "SENT"
+    return {
+        "email_log_id": getattr(log, "id", None),
+        "email_sent": sent,
+        "email_error": "" if sent else (getattr(log, "error", "") or ""),
+    }
+
+
 # --- Institute lookup -------------------------------------------------------
 
 def _payment_details(institute_key: str) -> dict:
@@ -109,9 +139,7 @@ def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict
     short_url = shorten(long_url)
 
     sms_body = (
-        f"Dear {lead.name}, Thank you for selecting JD, Your inquiry has "
-        f"been submitted. Please click the link to complete your "
-        f"application - {short_url}"
+        f"Dear{lead.name}, Thank you for selecting JD, Your inquiry has been submitted. Please click the link to complete your application - {short_url}"
     )
     email_subject = f"JD Student Application Link : {lead.name}"
     email_body = (
@@ -155,8 +183,8 @@ def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict
     )
 
     return {
-        "sms_log_id": getattr(sms_log, "id", None),
-        "email_log_id": getattr(email_log, "id", None),
+        **_sms_result(sms_log),
+        **_email_result(email_log),
         "communication_id": comm.id,
         "url": long_url,
         "short_url": short_url,
@@ -344,8 +372,8 @@ def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
     )
 
     return {
-        "sms_log_id": getattr(sms_log, "id", None),
-        "email_log_id": getattr(email_log, "id", None),
+        **_sms_result(sms_log),
+        **_email_result(email_log),
         "communication_id": comm.id,
         "url": url,
         "institute": institute_label,
