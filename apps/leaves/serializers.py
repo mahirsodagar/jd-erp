@@ -75,7 +75,11 @@ class LeaveAllocationSerializer(serializers.ModelSerializer):
 
 
 class BulkAllocationSerializer(serializers.Serializer):
-    session = serializers.PrimaryKeyRelatedField(queryset=Session.objects.all())
+    # Session is resolved automatically (current, else most recent) when
+    # omitted — the UI doesn't ask for it.
+    session = serializers.PrimaryKeyRelatedField(
+        queryset=Session.objects.all(), required=False, allow_null=True,
+    )
     leave_type = serializers.PrimaryKeyRelatedField(queryset=LeaveType.objects.all())
     count = serializers.DecimalField(max_digits=5, decimal_places=1)
     start_date = serializers.DateField()
@@ -86,6 +90,16 @@ class BulkAllocationSerializer(serializers.Serializer):
     skip_existing = serializers.BooleanField(default=True)
 
     def validate(self, attrs):
+        if not attrs.get("session"):
+            session = (
+                Session.objects.filter(is_current=True).first()
+                or Session.objects.order_by("-start_date").first()
+            )
+            if session is None:
+                raise serializers.ValidationError(
+                    {"session": "No leave session configured. Create one first."}
+                )
+            attrs["session"] = session
         if attrs["end_date"] < attrs["start_date"]:
             raise serializers.ValidationError(
                 {"end_date": "Must be on/after start_date."}
