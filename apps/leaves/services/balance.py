@@ -1,12 +1,14 @@
 """Per-employee leave balance computation. Returns plain dicts so the
 caller (serializers, reports) can shape them as needed."""
 
+from datetime import date as _date
 from decimal import Decimal
 
-from django.db.models import Sum
+from django.db.models import Max, Min, Sum
+from django.utils import timezone
 
 from apps.leaves.models import (
-    CompOffApplication, LeaveAllocation, LeaveApplication, LeaveType, Session,
+    CompOffApplication, LeaveAllocation, LeaveApplication, LeaveType,
 )
 
 
@@ -17,10 +19,19 @@ def _zero() -> Decimal:
     return Decimal("0.0")
 
 
-def compute_balance(employee, leave_type: LeaveType, session: Session | None) -> dict:
+def compute_balance(
+    employee, leave_type: LeaveType, on_date: _date | None = None,
+) -> dict:
     """Return {granted, pending, availed, balance} for a regular LEAVE type,
-    or {earned, used, balance} for COMP_OFF. The session is required for
-    standard types; ignored for COMP_OFF."""
+    or {earned, used, balance} for COMP_OFF.
+
+    A LEAVE balance is scoped to the allocation window(s) open on `on_date`
+    (defaults to today): granted comes from the open allocation(s), and
+    used/pending count only the applications whose from_date falls inside
+    that window. COMP_OFF is lifetime; ON_DUTY is unlimited."""
+
+    if on_date is None:
+        on_date = timezone.localdate()
 
     if leave_type.code == COMP_OFF_CODE:
         earned = (
@@ -62,34 +73,32 @@ def compute_balance(employee, leave_type: LeaveType, session: Session | None) ->
             "balance": None,
         }
 
-    granted = _zero()
     pending = _zero()
     availed = _zero()
 
-    if session:
-        granted = (
-            LeaveAllocation.objects
-            .filter(employee=employee, session=session, leave_type=leave_type)
+    # Allocation windows open on the reference date.
+    active = LeaveAllocation.objects.filter(
+        employee=employee, leave_type=leave_type,
+        start_date__lte=on_date, end_date__gte=on_date,
+    )
+    granted = active.aggregate(s=Sum("count"))["s"] or _zero()
+
+    # Scope applications to the bounding window of the open allocation(s).
+    bounds = active.aggregate(lo=Min("start_date"), hi=Max("end_date"))
+    win_start, win_end = bounds["lo"], bounds["hi"]
+    if win_start and win_end:
+        apps_qs = LeaveApplication.objects.filter(
+            employee=employee, leave_type=leave_type,
+            from_date__gte=win_start, from_date__lte=win_end,
+        )
+        pending = (
+            apps_qs.filter(status=LeaveApplication.Status.PENDING)
             .aggregate(s=Sum("count"))["s"] or _zero()
         )
-
-    apps_qs = LeaveApplication.objects.filter(
-        employee=employee, leave_type=leave_type,
-    )
-    if session:
-        apps_qs = apps_qs.filter(
-            from_date__gte=session.start_date,
-            from_date__lte=session.end_date,
+        availed = (
+            apps_qs.filter(status=LeaveApplication.Status.APPROVED)
+            .aggregate(s=Sum("count"))["s"] or _zero()
         )
-
-    pending = (
-        apps_qs.filter(status=LeaveApplication.Status.PENDING)
-        .aggregate(s=Sum("count"))["s"] or _zero()
-    )
-    availed = (
-        apps_qs.filter(status=LeaveApplication.Status.APPROVED)
-        .aggregate(s=Sum("count"))["s"] or _zero()
-    )
 
     return {
         "leave_type_id": leave_type.id,
@@ -102,8 +111,8 @@ def compute_balance(employee, leave_type: LeaveType, session: Session | None) ->
     }
 
 
-def all_balances(employee, session: Session | None) -> list[dict]:
+def all_balances(employee, on_date: _date | None = None) -> list[dict]:
     return [
-        compute_balance(employee, lt, session)
+        compute_balance(employee, lt, on_date)
         for lt in LeaveType.objects.filter(is_active=True).order_by("name")
     ]

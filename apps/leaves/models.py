@@ -1,7 +1,6 @@
 from decimal import Decimal
 
 from django.conf import settings
-from django.core.exceptions import ValidationError
 from django.db import models
 
 
@@ -25,41 +24,12 @@ class LeaveType(models.Model):
         return f"{self.code} ({self.name})"
 
 
-class Session(models.Model):
-    """Academic-year / leave-allocation period. Global to the institute."""
-
-    code = models.CharField(max_length=10, unique=True, help_text="e.g. 2024-25")
-    start_date = models.DateField()
-    end_date = models.DateField()
-    is_current = models.BooleanField(default=False)
-
-    class Meta:
-        ordering = ("-start_date",)
-
-    def __str__(self):
-        return self.code
-
-    def clean(self):
-        if self.end_date < self.start_date:
-            raise ValidationError({"end_date": "Must be on/after start_date."})
-        if self.is_current:
-            qs = Session.objects.filter(is_current=True)
-            if self.pk:
-                qs = qs.exclude(pk=self.pk)
-            if qs.exists():
-                raise ValidationError(
-                    {"is_current": "Another session is already marked current."}
-                )
-
-
 class LeaveAllocation(models.Model):
-    """Annual grant of LEAVE-category days for an employee in a session."""
+    """Grant of LEAVE-category days for an employee, valid over an open/close
+    window [start_date, end_date]. Balances are scoped purely to this window."""
 
     employee = models.ForeignKey(
         "employees.Employee", on_delete=models.CASCADE, related_name="leave_allocations",
-    )
-    session = models.ForeignKey(
-        Session, on_delete=models.PROTECT, related_name="allocations",
     )
     leave_type = models.ForeignKey(
         LeaveType, on_delete=models.PROTECT, related_name="allocations",
@@ -78,12 +48,12 @@ class LeaveAllocation(models.Model):
         ordering = ("-created_on",)
         constraints = [
             models.UniqueConstraint(
-                fields=["employee", "session", "leave_type", "start_date", "end_date"],
-                name="uniq_alloc_per_emp_session_type_window",
+                fields=["employee", "leave_type", "start_date", "end_date"],
+                name="uniq_alloc_per_emp_type_window",
             ),
         ]
         indexes = [
-            models.Index(fields=["employee", "session"]),
+            models.Index(fields=["employee", "leave_type"]),
             models.Index(fields=["leave_type", "start_date"]),
         ]
 

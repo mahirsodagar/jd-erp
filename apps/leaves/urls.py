@@ -19,16 +19,11 @@ from .views import (
     LeaveTypeDetailView,
     LeaveTypeListCreateView,
     LeaveWithdrawView,
-    SessionDetailView,
-    SessionListCreateView,
 )
 
 urlpatterns = [
     path("types/", LeaveTypeListCreateView.as_view(), name="leave-type-list-create"),
     path("types/<int:pk>/", LeaveTypeDetailView.as_view(), name="leave-type-detail"),
-
-    path("sessions/", SessionListCreateView.as_view(), name="session-list-create"),
-    path("sessions/<int:pk>/", SessionDetailView.as_view(), name="session-detail"),
 
     path("allocations/", AllocationListCreateView.as_view(), name="allocation-list-create"),
     path("allocations/bulk/", BulkAllocationView.as_view(), name="allocation-bulk"),

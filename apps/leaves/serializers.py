@@ -1,4 +1,3 @@
-from datetime import date as _date
 from decimal import Decimal
 
 from rest_framework import serializers
@@ -7,7 +6,7 @@ from apps.employees.models import Employee
 
 from .models import (
     CompOffApplication, EmailDispatchLog, Holiday,
-    LeaveAllocation, LeaveApplication, LeaveType, Session,
+    LeaveAllocation, LeaveApplication, LeaveType,
 )
 
 
@@ -20,13 +19,6 @@ class LeaveTypeSerializer(serializers.ModelSerializer):
                   "half_day_allowed", "is_active",
                   "created_at", "updated_at"]
         read_only_fields = ["id", "created_at", "updated_at"]
-
-
-class SessionSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Session
-        fields = ["id", "code", "start_date", "end_date", "is_current"]
-        read_only_fields = ["id"]
 
 
 class HolidaySerializer(serializers.ModelSerializer):
@@ -43,20 +35,18 @@ class HolidaySerializer(serializers.ModelSerializer):
 class LeaveAllocationSerializer(serializers.ModelSerializer):
     employee_name = serializers.CharField(source="employee.full_name", read_only=True)
     leave_type_code = serializers.CharField(source="leave_type.code", read_only=True)
-    session_code = serializers.CharField(source="session.code", read_only=True)
     created_by_name = serializers.CharField(source="created_by.username", read_only=True)
 
     class Meta:
         model = LeaveAllocation
         fields = [
             "id", "employee", "employee_name",
-            "session", "session_code",
             "leave_type", "leave_type_code",
             "count", "start_date", "end_date",
             "created_by", "created_by_name", "created_on",
         ]
         read_only_fields = [
-            "id", "employee_name", "session_code", "leave_type_code",
+            "id", "employee_name", "leave_type_code",
             "created_by", "created_by_name", "created_on",
         ]
 
@@ -75,11 +65,6 @@ class LeaveAllocationSerializer(serializers.ModelSerializer):
 
 
 class BulkAllocationSerializer(serializers.Serializer):
-    # Session is resolved automatically (current, else most recent) when
-    # omitted — the UI doesn't ask for it.
-    session = serializers.PrimaryKeyRelatedField(
-        queryset=Session.objects.all(), required=False, allow_null=True,
-    )
     leave_type = serializers.PrimaryKeyRelatedField(queryset=LeaveType.objects.all())
     count = serializers.DecimalField(max_digits=5, decimal_places=1)
     start_date = serializers.DateField()
@@ -90,16 +75,6 @@ class BulkAllocationSerializer(serializers.Serializer):
     skip_existing = serializers.BooleanField(default=True)
 
     def validate(self, attrs):
-        if not attrs.get("session"):
-            session = (
-                Session.objects.filter(is_current=True).first()
-                or Session.objects.order_by("-start_date").first()
-            )
-            if session is None:
-                raise serializers.ValidationError(
-                    {"session": "No leave session configured. Create one first."}
-                )
-            attrs["session"] = session
         if attrs["end_date"] < attrs["start_date"]:
             raise serializers.ValidationError(
                 {"end_date": "Must be on/after start_date."}

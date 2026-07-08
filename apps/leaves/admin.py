@@ -2,7 +2,7 @@ from django.contrib import admin
 
 from .models import (
     CompOffApplication, EmailDispatchLog, Holiday,
-    LeaveAllocation, LeaveApplication, LeaveType, Session,
+    LeaveAllocation, LeaveApplication, LeaveType,
 )
 
 
@@ -13,21 +13,14 @@ class LeaveTypeAdmin(admin.ModelAdmin):
     search_fields = ("code", "name")
 
 
-@admin.register(Session)
-class SessionAdmin(admin.ModelAdmin):
-    list_display = ("code", "start_date", "end_date", "is_current")
-    list_filter = ("is_current",)
-    search_fields = ("code",)
-
-
 @admin.register(LeaveAllocation)
 class LeaveAllocationAdmin(admin.ModelAdmin):
-    list_display = ("employee", "session", "leave_type",
+    list_display = ("employee", "leave_type",
                     "count", "start_date", "end_date", "created_on")
-    list_filter = ("session", "leave_type")
+    list_filter = ("leave_type",)
     search_fields = ("employee__emp_code", "employee__first_name",
                      "employee__family_name")
-    autocomplete_fields = ("employee", "session", "leave_type", "created_by")
+    autocomplete_fields = ("employee", "leave_type", "created_by")
 
 
 @admin.register(LeaveApplication)

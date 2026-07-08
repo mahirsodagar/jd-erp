@@ -14,9 +14,11 @@ from rest_framework.views import APIView
 from apps.accounts.permissions import HasPerm
 from apps.employees.models import Employee
 
+from django.utils.dateparse import parse_date
+
 from .models import (
     CompOffApplication, EmailDispatchLog, Holiday,
-    LeaveAllocation, LeaveApplication, LeaveType, Session,
+    LeaveAllocation, LeaveApplication, LeaveType,
 )
 from .permissions import LeaveAccessPolicy, get_employee_for, has_perm
 from .serializers import (
@@ -31,7 +33,6 @@ from .serializers import (
     LeaveApplicationSerializer,
     LeaveApplyInputSerializer,
     LeaveTypeSerializer,
-    SessionSerializer,
 )
 from .services import notifications
 from .services.balance import all_balances, compute_balance
@@ -78,46 +79,6 @@ class LeaveTypeDetailView(APIView):
         return Response(status=http.HTTP_204_NO_CONTENT)
 
 
-# --- Session -----------------------------------------------------------
-
-class SessionListCreateView(APIView):
-    def get_permissions(self):
-        if self.request.method == "GET":
-            return [IsAuthenticated()]
-        return [IsAuthenticated(), HasPerm()]
-    perm_base = "leaves.session"
-
-    def get(self, request):
-        qs = Session.objects.all()
-        if request.query_params.get("is_current") == "1":
-            qs = qs.filter(is_current=True)
-        return Response(SessionSerializer(qs, many=True).data)
-
-    def post(self, request):
-        s = SessionSerializer(data=request.data)
-        s.is_valid(raise_exception=True)
-        # Run model.clean() to enforce single-current invariant
-        instance = Session(**s.validated_data)
-        instance.clean()
-        instance.save()
-        return Response(SessionSerializer(instance).data, status=http.HTTP_201_CREATED)
-
-
-class SessionDetailView(APIView):
-    permission_classes = [IsAuthenticated, HasPerm]
-    perm_base = "leaves.session"
-
-    def patch(self, request, pk):
-        obj = Session.objects.get(pk=pk)
-        s = SessionSerializer(obj, data=request.data, partial=True)
-        s.is_valid(raise_exception=True)
-        for k, v in s.validated_data.items():
-            setattr(obj, k, v)
-        obj.clean()
-        obj.save()
-        return Response(SessionSerializer(obj).data)
-
-
 # --- Allocations -------------------------------------------------------
 
 def _scope_allocations(qs, user):
@@ -131,14 +92,12 @@ class AllocationListCreateView(APIView):
 
     def get(self, request):
         qs = LeaveAllocation.objects.select_related(
-            "employee", "session", "leave_type", "created_by"
+            "employee", "leave_type", "created_by"
         )
         qs = _scope_allocations(qs, request.user)
         params = request.query_params
         if v := params.get("employee"):
             qs = qs.filter(employee_id=v)
-        if v := params.get("session"):
-            qs = qs.filter(session_id=v)
         if v := params.get("leave_type"):
             qs = qs.filter(leave_type_id=v)
         if v := params.get("campus"):
@@ -199,7 +158,7 @@ class BulkAllocationView(APIView):
                     skipped.append({"employee": emp_id, "reason": "not found"})
                     continue
                 exists = LeaveAllocation.objects.filter(
-                    employee=emp, session=d["session"], leave_type=d["leave_type"],
+                    employee=emp, leave_type=d["leave_type"],
                     start_date=d["start_date"], end_date=d["end_date"],
                 ).exists()
                 if exists:
@@ -211,7 +170,7 @@ class BulkAllocationView(APIView):
                         status=http.HTTP_400_BAD_REQUEST,
                     )
                 alloc = LeaveAllocation.objects.create(
-                    employee=emp, session=d["session"], leave_type=d["leave_type"],
+                    employee=emp, leave_type=d["leave_type"],
                     count=d["count"], start_date=d["start_date"], end_date=d["end_date"],
                     created_by=request.user,
                 )
@@ -516,16 +475,11 @@ class LeaveBalancesView(APIView):
                 return Response({"detail": "No employee profile linked to this user."},
                                 status=http.HTTP_400_BAD_REQUEST)
 
-        sess_id = request.query_params.get("session_id")
-        if sess_id:
-            try:
-                session = Session.objects.get(pk=sess_id)
-            except Session.DoesNotExist as e:
-                raise Http404 from e
-        else:
-            session = Session.objects.filter(is_current=True).first()
-
-        return Response(all_balances(emp, session))
+        # Balances are scoped to the allocation window open on this date
+        # (defaults to today).
+        on = request.query_params.get("on")
+        on_date = parse_date(on) if on else None
+        return Response(all_balances(emp, on_date))
 
 
 # --- Comp-off ----------------------------------------------------------

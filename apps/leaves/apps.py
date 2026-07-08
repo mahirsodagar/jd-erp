@@ -10,10 +10,9 @@ class LeavesConfig(AppConfig):
         from auditlog.registry import auditlog
         from .models import (
             CompOffApplication, Holiday, LeaveAllocation,
-            LeaveApplication, LeaveType, Session,
+            LeaveApplication, LeaveType,
         )
         auditlog.register(LeaveType)
-        auditlog.register(Session)
         auditlog.register(LeaveAllocation)
         auditlog.register(LeaveApplication)
         auditlog.register(CompOffApplication)
