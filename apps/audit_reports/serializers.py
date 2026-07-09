@@ -27,6 +27,11 @@ class FacultyDailyReportSerializer(serializers.ModelSerializer):
             "id", "faculty_name", "faculty_code",
             "submitted_by", "created_at", "updated_at",
         ]
+        # The list/create view upserts on (faculty, date) via
+        # update_or_create, so drop DRF's auto UniqueTogetherValidator —
+        # otherwise re-posting an existing day (an edit) 400s with
+        # "faculty, date must make a unique set" before the upsert runs.
+        validators = []
 
 
 class AdminDailyReportSerializer(serializers.ModelSerializer):
@@ -37,6 +42,11 @@ class AdminDailyReportSerializer(serializers.ModelSerializer):
         fields = ["id", "rep_date", "user", "user_name",
                   "slot1", "slot2", "created_at", "updated_at"]
         read_only_fields = ["id", "user_name", "created_at", "updated_at"]
+        # The list/create view upserts on (user, rep_date) via
+        # update_or_create, so drop DRF's auto UniqueTogetherValidator —
+        # otherwise re-posting an existing day (an edit) 400s with
+        # "rep_date, user must make a unique set" before the upsert runs.
+        validators = []
 
 
 class CourseEndReportSerializer(serializers.ModelSerializer):

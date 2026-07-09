@@ -260,6 +260,41 @@ class AuditFilterEmployeesView(APIView):
         ])
 
 
+class AuditFilterAdminDailyAuthorsView(APIView):
+    """Accounts that have filed an admin daily report.
+
+    Admin daily reports are keyed by *user*, not employee, so their author
+    may be an admin/superuser with no Employee record — such a person never
+    appears in the campus staff picker. This lets an auditor look a report
+    up by its author account directly. Gated on admin-daily view-all.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        u = request.user
+        if not (u.is_superuser or has_perm(u, "audit.admin_daily.view_all")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        from django.contrib.auth import get_user_model
+        author_ids = (AdminDailyReport.objects
+                      .values_list("user_id", flat=True).distinct())
+        users = (get_user_model().objects
+                 .filter(id__in=list(author_ids))
+                 .select_related("employee")
+                 .order_by("full_name", "username"))
+        out = []
+        for usr in users:
+            emp = getattr(usr, "employee", None)
+            out.append({
+                "user": usr.id,
+                "username": usr.username,
+                "full_name": usr.full_name,
+                "emp_code": emp.emp_code if emp else None,
+                "employee_id": emp.id if emp else None,
+            })
+        return Response(out)
+
+
 # === 2. Admin Daily Report ==========================================
 
 # Mirrors the faculty model:

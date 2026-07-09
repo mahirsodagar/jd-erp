@@ -16,6 +16,7 @@ from .views import (
     ConsolidatedMonthlyView,
     CourseEndReportListCreateView,
     CourseEndReportReviewView,
+    AuditFilterAdminDailyAuthorsView,
     AuditFilterEmployeesView,
     AuditFilterOptionsView,
     FacultyDailyComputedView,
@@ -59,6 +60,9 @@ urlpatterns = [
          name="audit-filter-options"),
     path("filters/employees/", AuditFilterEmployeesView.as_view(),
          name="audit-filter-employees"),
+    path("filters/admin-daily-authors/",
+         AuditFilterAdminDailyAuthorsView.as_view(),
+         name="audit-filter-admin-daily-authors"),
 
     path("admin-daily/", AdminDailyReportListCreateView.as_view(),
          name="admin-daily-list-create"),
