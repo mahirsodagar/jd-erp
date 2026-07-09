@@ -523,24 +523,7 @@ class ZeroHourReport(models.Model):
     agenda = models.TextField(blank=True)
     outcome = models.TextField(blank=True)
 
-    # 9-11: exams.
-    months_to_exams = models.PositiveSmallIntegerField(null=True, blank=True)
-    exam_preparations = models.TextField(blank=True)
-    exam_preparation_details = models.TextField(
-        blank=True,
-        help_text="Schedule / arrangements to achieve the above.",
-    )
-
-    # 12-15: portfolios, internships, pass-out.
-    months_to_portfolios = models.PositiveSmallIntegerField(null=True, blank=True)
-    months_to_internships = models.PositiveSmallIntegerField(null=True, blank=True)
-    internship_preparations = models.TextField(
-        blank=True,
-        help_text="Preparations for the batch to be 'Internship ready'.",
-    )
-    months_to_passout = models.PositiveSmallIntegerField(null=True, blank=True)
-
-    # 16-17: activities + remarks.
+    # 9-10: activities + remarks.
     activities = models.TextField(
         blank=True,
         help_text="Activities planned / completed for the batch.",
