@@ -207,10 +207,10 @@ class ComplianceFlagSerializer(serializers.ModelSerializer):
     class Meta:
         model = ComplianceFlag
         fields = [
-            "id",
+            "id", "kind",
             "target_faculty", "target_batch", "target_student",
             "target_description",
-            "category", "severity", "description",
+            "category", "severity", "stars", "description",
             "resolved_at", "resolved_by", "resolved_by_name",
             "resolution_remarks",
             "raised_by", "raised_by_name", "created_at", "updated_at",
@@ -221,6 +221,30 @@ class ComplianceFlagSerializer(serializers.ModelSerializer):
             "raised_by", "raised_by_name",
             "created_at", "updated_at",
         ]
+
+    def validate(self, attrs):
+        kind = attrs.get("kind", ComplianceFlag.Kind.FLAG)
+        category = attrs.get("category")
+        stars = attrs.get("stars")
+        if kind == ComplianceFlag.Kind.STAR:
+            if category not in ComplianceFlag.STAR_CATEGORIES:
+                raise serializers.ValidationError(
+                    {"category": "Not a valid star category."},
+                )
+            if stars is None or not (1 <= stars <= 5):
+                raise serializers.ValidationError(
+                    {"stars": "A star rating from 1 to 5 is required."},
+                )
+            # Severity is a flag concept — never persist it on a star.
+            attrs["severity"] = ComplianceFlag.Severity.MEDIUM
+        else:
+            if category not in ComplianceFlag.FLAG_CATEGORIES:
+                raise serializers.ValidationError(
+                    {"category": "Not a valid flag category."},
+                )
+            # Stars never apply to a flag.
+            attrs["stars"] = None
+        return attrs
 
 
 class ResolveFlagSerializer(serializers.Serializer):

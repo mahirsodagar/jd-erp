@@ -79,6 +79,10 @@ class Lead(models.Model):
         on_delete=models.SET_NULL,
         related_name="application_fees_recorded",
     )
+    # Stamped each time the fee-payment link (UPI / QR / bank email) is
+    # sent. Mirrors `application_token_sent_at`; lets the UI show
+    # "Resend fee link" once the first one has gone out.
+    fee_link_sent_at = models.DateTimeField(null=True, blank=True)
 
     occurrence_number = models.PositiveSmallIntegerField(
         default=1, db_index=True,

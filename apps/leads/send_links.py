@@ -386,6 +386,9 @@ def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
         logged_by=actor,
     )
 
+    lead.fee_link_sent_at = timezone.now()
+    lead.save(update_fields=["fee_link_sent_at"])
+
     return {
         **_sms_result(sms_log),
         **_email_result(email_log),

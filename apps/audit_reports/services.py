@@ -333,12 +333,18 @@ def consolidated_monthly(*, year: int, month: int) -> dict:
                 created_at__date__gte=start, created_at__date__lte=end,
             ).count(),
             "compliance_open": ComplianceFlag.objects.filter(
+                kind=ComplianceFlag.Kind.FLAG,
                 resolved_at__isnull=True,
                 created_at__date__gte=start, created_at__date__lte=end,
             ).count(),
             "compliance_resolved": ComplianceFlag.objects.filter(
+                kind=ComplianceFlag.Kind.FLAG,
                 resolved_at__isnull=False,
                 resolved_at__date__gte=start, resolved_at__date__lte=end,
+            ).count(),
+            "stars_awarded": ComplianceFlag.objects.filter(
+                kind=ComplianceFlag.Kind.STAR,
+                created_at__date__gte=start, created_at__date__lte=end,
             ).count(),
         },
 

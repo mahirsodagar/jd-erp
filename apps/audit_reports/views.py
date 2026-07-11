@@ -696,6 +696,8 @@ class ComplianceFlagListCreateView(APIView):
             "raised_by", "resolved_by",
         )
         params = request.query_params
+        if v := params.get("kind"):
+            qs = qs.filter(kind=v)
         if params.get("open") == "1":
             qs = qs.filter(resolved_at__isnull=True)
         elif params.get("resolved") == "1":
@@ -731,6 +733,10 @@ class ComplianceFlagResolveView(APIView):
             obj = ComplianceFlag.objects.get(pk=pk)
         except ComplianceFlag.DoesNotExist as e:
             raise Http404 from e
+        if obj.kind == ComplianceFlag.Kind.STAR:
+            return Response({"detail": "Stars are a permanent record and "
+                                       "cannot be resolved."},
+                            status=http.HTTP_400_BAD_REQUEST)
         if obj.resolved_at:
             return Response({"detail": "Already resolved."},
                             status=http.HTTP_400_BAD_REQUEST)

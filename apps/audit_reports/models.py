@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 
@@ -290,8 +291,20 @@ class FacultySelfAppraisal(models.Model):
 # --- 7. Compliance flag (generic anomaly tracker) -------------------
 
 class ComplianceFlag(models.Model):
-    """Auditor logs an issue against a faculty / batch / student.
-    Tracks resolution for monthly compliance summaries."""
+    """Auditor logs a note against a faculty / batch / student.
+
+    Two polarities share this table (see ``kind``):
+      * FLAG 🚩 — a negative anomaly (missed deadline, low attendance,
+        pending submission …). Resolvable; feeds monthly compliance
+        summaries.
+      * STAR ⭐ — a positive recognition (outstanding performance,
+        timely completion, excellent feedback, innovation …). Carries a
+        1–5 ``stars`` rating and is a permanent record (never resolved).
+    """
+
+    class Kind(models.TextChoices):
+        FLAG = "FLAG", "Flag"
+        STAR = "STAR", "Star"
 
     class Severity(models.TextChoices):
         LOW = "LOW", "Low"
@@ -299,12 +312,35 @@ class ComplianceFlag(models.Model):
         HIGH = "HIGH", "High"
 
     class Category(models.TextChoices):
+        # Flag (negative) categories.
         TIMETABLE = "TIMETABLE", "Timetable / class compliance"
         ATTENDANCE = "ATTENDANCE", "Attendance / freeze compliance"
         REPORTING = "REPORTING", "Daily report not submitted"
         FEEDBACK = "FEEDBACK", "Negative feedback trend"
         ACADEMIC = "ACADEMIC", "Academic outcome concern"
         OTHER = "OTHER", "Other"
+        # Star (positive) categories.
+        PERFORMANCE = "PERFORMANCE", "Outstanding performance"
+        TIMELINESS = "TIMELINESS", "Timely completion of tasks"
+        STUDENT_FEEDBACK = "STUDENT_FEEDBACK", "Excellent student feedback"
+        INNOVATION = "INNOVATION", "Innovation"
+        ACHIEVEMENT_OTHER = "ACHIEVEMENT_OTHER", "Other achievement"
+
+    # Which polarities each category belongs to — used by the serializer
+    # to reject a star category on a flag and vice-versa.
+    FLAG_CATEGORIES = frozenset({
+        Category.TIMETABLE, Category.ATTENDANCE, Category.REPORTING,
+        Category.FEEDBACK, Category.ACADEMIC, Category.OTHER,
+    })
+    STAR_CATEGORIES = frozenset({
+        Category.PERFORMANCE, Category.TIMELINESS, Category.STUDENT_FEEDBACK,
+        Category.INNOVATION, Category.ACHIEVEMENT_OTHER,
+    })
+
+    kind = models.CharField(
+        max_length=5, choices=Kind.choices, default=Kind.FLAG,
+        db_index=True,
+    )
 
     target_faculty = models.ForeignKey(
         "employees.Employee", null=True, blank=True,
@@ -326,6 +362,13 @@ class ComplianceFlag(models.Model):
     category = models.CharField(max_length=20, choices=Category.choices)
     severity = models.CharField(
         max_length=10, choices=Severity.choices, default=Severity.MEDIUM,
+        help_text="Applies to flags. Ignored for stars.",
+    )
+    # 1–5 rating; set only for stars (null for flags).
+    stars = models.PositiveSmallIntegerField(
+        null=True, blank=True,
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+        help_text="Star rating 1–5. Set only when kind=STAR.",
     )
     description = models.TextField()
 
@@ -348,10 +391,12 @@ class ComplianceFlag(models.Model):
         indexes = [
             models.Index(fields=["resolved_at"]),
             models.Index(fields=["category", "severity"]),
+            models.Index(fields=["kind", "resolved_at"]),
         ]
 
     def __str__(self):
-        return f"[{self.severity}/{self.category}] {self.description[:40]}"
+        badge = f"{self.stars}★" if self.kind == self.Kind.STAR else self.severity
+        return f"[{badge}/{self.category}] {self.description[:40]}"
 
 
 # --- 8. Dynamic audit form builder ----------------------------------
