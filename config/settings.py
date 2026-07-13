@@ -403,22 +403,25 @@ XIRCLS_DEFAULT_COUNTRY_CODE = env("XIRCLS_DEFAULT_COUNTRY_CODE", default="91")
 XIRCLS_TIMEOUT = env.int("XIRCLS_TIMEOUT", default=10)
 
 # our template_key → XIRCLS trigger (campaign) name as created on the
-# XIRCLS platform. Leave blank until the trigger exists there — an unset
-# trigger yields a clear "not mapped" error in the dispatch log rather
-# than a provider rejection. These are the WHATSAPP-channel keys already
-# queued across the app (signals.py, attendance_service.py, seeder).
+# XIRCLS platform. Trigger names aren't secrets — they're campaign
+# identifiers, one per message type — so they live here (not in .env).
+# Leave a value "" until that campaign is approved/active on XIRCLS; a
+# blank trigger yields a clear "not mapped" error in the dispatch log
+# rather than a provider rejection. Fill each in as its template is
+# approved. These are the WHATSAPP-channel keys queued across the app
+# (signals.py, attendance_service.py, send_links.py, seeder).
 XIRCLS_WA_TRIGGERS = {
-    "lead_welcome_wa":          env("XIRCLS_TRIGGER_LEAD_WELCOME", default=""),
-    "hot_followup_reminder":    env("XIRCLS_TRIGGER_HOT_FOLLOWUP", default=""),
-    "campus_visit_reminder":    env("XIRCLS_TRIGGER_CAMPUS_VISIT", default=""),
-    "post_visit_thanks_wa":     env("XIRCLS_TRIGGER_POST_VISIT", default=""),
-    "not_answered_followup":    env("XIRCLS_TRIGGER_NOT_ANSWERED", default=""),
-    "enrolled_confirmation_wa": env("XIRCLS_TRIGGER_ENROLLED", default=""),
-    "student_absent_wa":        env("XIRCLS_TRIGGER_STUDENT_ABSENT", default=""),
-    # Application-form link (sent alongside the SMS/email legs in
-    # apps/leads/send_links.send_application_link). Maps to the XIRCLS
-    # campaign "application_form".
-    "lead.application_link.wa": env("XIRCLS_TRIGGER_APPLICATION_FORM", default=""),
+    "lead_welcome_wa":          "",   # welcome message
+    "hot_followup_reminder":    "",   # hot-lead follow-up
+    "campus_visit_reminder":    "",   # campus visit reminder
+    "post_visit_thanks_wa":     "",   # post-visit thanks
+    "not_answered_followup":    "",   # missed-call follow-up
+    "enrolled_confirmation_wa": "",   # enrollment confirmation
+    "student_absent_wa":        "",   # attendance absentee
+    # Application-form link — sent alongside the SMS/email legs in
+    # apps/leads/send_links.send_application_link. TEMP: on the active
+    # "Test" trigger until "application_form_2026" is approved on XIRCLS.
+    "lead.application_link.wa": "Test",
 }
 
 # our template_key → {xircls_param_name: our_context_key}. The LEFT side
@@ -434,11 +437,11 @@ XIRCLS_WA_PARAM_MAP = {
     "not_answered_followup":    {"name": "name"},
     "enrolled_confirmation_wa": {"name": "name", "program": "program"},
     "student_absent_wa":        {"name": "name", "date": "date", "subject": "subject"},
-    # Application-form link. The "application_form" template uses the
-    # two positional XIRCLS variables parameter_1 (student name) and
-    # parameter_2 (application link). LEFT = XIRCLS variable name,
-    # RIGHT = our context key.
-    "lead.application_link.wa": {"parameter_1": "name", "parameter_2": "url"},
+    # Application-form link. TEMP: mapped to the active "Test" trigger,
+    # whose only variable is `test` (the student name). Swap back to the
+    # real params (e.g. {parameter_1: name, parameter_2: url}) once the
+    # "application_form_2026" template is approved on XIRCLS.
+    "lead.application_link.wa": {"test": "name"},
 }
 
 
