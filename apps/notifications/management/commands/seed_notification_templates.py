@@ -81,6 +81,12 @@ TEMPLATES = [
      "Thank you for selecting JD, Your inquiry has been submitted.\n\n"
      "Please click the link to complete your application - {url}\n\n"
      "With Regards,\nJD"),
+    # WhatsApp leg of the application-link send. XIRCLS stores the approved
+    # body on their side (trigger "application_form_2026"); this body_template
+    # is only used for the dispatch-log audit row. Variables: {name}, {url}.
+    ("lead.application_link.wa", "WHATSAPP", "",
+     "Dear {name}, Thank you for selecting JD. Your inquiry has been "
+     "submitted. Please click the link to complete your application - {url}"),
     # Verbatim DLT-approved wording — must match what was registered
     # with BulkSMS (template_id 1307168958796572350) or the SMS won't
     # leave the gateway. Variables: {short_name}, {url}.

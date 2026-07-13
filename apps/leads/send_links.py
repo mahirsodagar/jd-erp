@@ -42,6 +42,20 @@ def _sms_result(log) -> dict:
     }
 
 
+def _wa_result(log) -> dict:
+    """Flatten the WhatsApp leg into the API fields the UI reads.
+
+    WhatsApp dispatches synchronously through XIRCLS, so the log status is
+    already SENT / FAILED. While `WHATSAPP_ENABLED` is off the row stays
+    QUEUED (nothing sent) — surfaced here as status=QUEUED, no error.
+    """
+    return {
+        "wa_log_id": getattr(log, "id", None),
+        "wa_status": getattr(log, "status", "QUEUED"),
+        "wa_error": getattr(log, "error", "") or "",
+    }
+
+
 def _email_result(log) -> dict:
     """Flatten the email leg. `log` is None when the lead has no email."""
     if log is None:
@@ -167,6 +181,15 @@ def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict
         context={"name": first_name, "url": short_url},
         related=lead,
     )
+    # WhatsApp leg — same recipient/link as the SMS. Routed through XIRCLS
+    # (trigger "application_form_2026"); stays QUEUED until WHATSAPP_ENABLED
+    # is on, so this never breaks the SMS/email send if WhatsApp is off.
+    wa_log = queue_notification(
+        template_key="lead.application_link.wa",
+        recipient=lead.phone,
+        context={"name": first_name, "url": short_url},
+        related=lead,
+    )
     email_log = None
     if lead.email:
         email_log = queue_notification(
@@ -195,6 +218,7 @@ def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict
 
     return {
         **_sms_result(sms_log),
+        **_wa_result(wa_log),
         **_email_result(email_log),
         "communication_id": comm.id,
         "url": long_url,
