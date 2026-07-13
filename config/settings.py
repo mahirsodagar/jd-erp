@@ -417,7 +417,7 @@ XIRCLS_WA_TRIGGERS = {
     "student_absent_wa":        env("XIRCLS_TRIGGER_STUDENT_ABSENT", default=""),
     # Application-form link (sent alongside the SMS/email legs in
     # apps/leads/send_links.send_application_link). Maps to the XIRCLS
-    # campaign "application_form_2026".
+    # campaign "application_form".
     "lead.application_link.wa": env("XIRCLS_TRIGGER_APPLICATION_FORM", default=""),
 }
 
@@ -434,11 +434,11 @@ XIRCLS_WA_PARAM_MAP = {
     "not_answered_followup":    {"name": "name"},
     "enrolled_confirmation_wa": {"name": "name", "program": "program"},
     "student_absent_wa":        {"name": "name", "date": "date", "subject": "subject"},
-    # Application-form link. The two dynamic values on the "application_form_2026"
-    # template are the student's name and the application link. LEFT names must
-    # match the variable names configured on that XIRCLS template — adjust if
-    # XIRCLS uses different names (e.g. {"student_name": "name", "link": "url"}).
-    "lead.application_link.wa": {"name": "name", "url": "url"},
+    # Application-form link. The "application_form" template uses the
+    # two positional XIRCLS variables parameter_1 (student name) and
+    # parameter_2 (application link). LEFT = XIRCLS variable name,
+    # RIGHT = our context key.
+    "lead.application_link.wa": {"parameter_1": "name", "parameter_2": "url"},
 }
 
 

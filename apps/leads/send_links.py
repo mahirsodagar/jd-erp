@@ -182,7 +182,7 @@ def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict
         related=lead,
     )
     # WhatsApp leg — same recipient/link as the SMS. Routed through XIRCLS
-    # (trigger "application_form_2026"); stays QUEUED until WHATSAPP_ENABLED
+    # (trigger "application_form"); stays QUEUED until WHATSAPP_ENABLED
     # is on, so this never breaks the SMS/email send if WhatsApp is off.
     wa_log = queue_notification(
         template_key="lead.application_link.wa",

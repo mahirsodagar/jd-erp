@@ -82,7 +82,7 @@ TEMPLATES = [
      "Please click the link to complete your application - {url}\n\n"
      "With Regards,\nJD"),
     # WhatsApp leg of the application-link send. XIRCLS stores the approved
-    # body on their side (trigger "application_form_2026"); this body_template
+    # body on their side (trigger "application_form"); this body_template
     # is only used for the dispatch-log audit row. Variables: {name}, {url}.
     ("lead.application_link.wa", "WHATSAPP", "",
      "Dear {name}, Thank you for selecting JD. Your inquiry has been "
