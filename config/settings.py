@@ -415,6 +415,7 @@ XIRCLS_WA_TRIGGERS = {
     "not_answered_followup":    env("XIRCLS_TRIGGER_NOT_ANSWERED", default=""),
     "enrolled_confirmation_wa": env("XIRCLS_TRIGGER_ENROLLED", default=""),
     "student_absent_wa":        env("XIRCLS_TRIGGER_STUDENT_ABSENT", default=""),
+    "application_form_2026":    env("XIRCLS_TRIGGER_APPLICATION_FORM", default=""),
 }
 
 # our template_key → {xircls_param_name: our_context_key}. The LEFT side

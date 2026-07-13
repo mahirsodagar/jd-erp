@@ -76,7 +76,7 @@ def send_whatsapp(
     (or a clear configuration error). Gated behind `WHATSAPP_ENABLED` so
     the channel stays dormant (queue-only) until explicitly turned on.
     """
-    if not getattr(settings, "WHATSAPP_ENABLED", False):
+    if not getattr(settings, "WHATSAPP_ENABLED", True):
         return False, (
             "WhatsApp disabled — set WHATSAPP_ENABLED=True once the XIRCLS "
             "triggers/keys are configured."
