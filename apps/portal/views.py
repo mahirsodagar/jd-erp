@@ -22,6 +22,8 @@ from apps.academics.models import (
 from apps.academics.serializers import PortalLessonSerializer
 from apps.academics import test_service as test_svc
 from apps.admissions.models import Student, StudentDocument
+from apps.appointments import services as appointment_svc
+from apps.appointments.models import StudentAppointment
 from apps.common.throttles import PasswordChangeThrottle
 from apps.courseware.models import CoursewareMapping, CoursewareTopic
 from apps.master.models import Batch, Subject
@@ -619,6 +621,89 @@ class DocumentRequestListCreateView(APIView):
                 obj, context={"request": request}).data,
             status=http.HTTP_201_CREATED,
         )
+
+
+# --- Appointments --------------------------------------------------
+
+class AppointmentListCreateView(APIView):
+    """Student: request an appointment with a management/office team and
+    list own requests. Staff confirm/decline from the staff side."""
+
+    permission_classes = [IsStudentOnly]
+
+    def get(self, request):
+        from .serializers import PortalAppointmentSerializer
+        student = request.portal_ctx.student
+        qs = StudentAppointment.objects.filter(student=student)
+        return Response(PortalAppointmentSerializer(qs, many=True).data)
+
+    def post(self, request):
+        from .serializers import PortalAppointmentSerializer
+        from apps.appointments.serializers import RequestAppointmentSerializer
+        student = request.portal_ctx.student
+        s = RequestAppointmentSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        d = s.validated_data
+        try:
+            appt = appointment_svc.request_appointment(
+                student=student,
+                team=d.get("team", "") or "",
+                faculty=d.get("faculty"),
+                reason=d["reason"],
+                preferred_date=d["preferred_date"],
+                preferred_time=d["preferred_time"],
+            )
+        except ValueError as e:
+            return Response({"detail": str(e)},
+                            status=http.HTTP_400_BAD_REQUEST)
+        return Response(PortalAppointmentSerializer(appt).data,
+                        status=http.HTTP_201_CREATED)
+
+
+class AppointmentFacultyView(APIView):
+    """Active faculty/staff a student can request an appointment with.
+
+    Names + department only — no contact details — so the portal
+    dropdown can list real people without exposing the employee record.
+    """
+
+    permission_classes = [IsStudentOnly]
+
+    def get(self, request):
+        from apps.employees.models import Employee
+        qs = (Employee.objects
+              .filter(status=Employee.Status.ACTIVE)
+              .select_related("department")
+              .order_by("first_name", "family_name"))
+        return Response([
+            {
+                "id": e.id,
+                "name": e.full_name,
+                "emp_code": e.emp_code,
+                "department": e.department.name if e.department_id else "",
+            }
+            for e in qs
+        ])
+
+
+class AppointmentCancelView(APIView):
+    """Student: cancel their own open (requested/confirmed) appointment."""
+
+    permission_classes = [IsStudentOnly]
+
+    def post(self, request, pk):
+        from .serializers import PortalAppointmentSerializer
+        student = request.portal_ctx.student
+        try:
+            appt = StudentAppointment.objects.get(pk=pk, student=student)
+        except StudentAppointment.DoesNotExist as e:
+            raise Http404 from e
+        try:
+            appointment_svc.cancel_appointment(appointment=appt)
+        except ValueError as e:
+            return Response({"detail": str(e)},
+                            status=http.HTTP_400_BAD_REQUEST)
+        return Response(PortalAppointmentSerializer(appt).data)
 
 
 # --- Lessons (read-only, approved plans for the student's batch) ---

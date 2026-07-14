@@ -9,6 +9,7 @@ from apps.common.file_validation import (
     DOCUMENT_MIMES, IMAGE_MIMES, IMAGE_OR_PDF_MIMES,
     SecureFileField,
 )
+from apps.appointments.models import StudentAppointment
 from apps.courseware.models import CoursewareTopic
 from apps.student_leaves.models import StudentLeaveApplication
 
@@ -228,6 +229,30 @@ class PortalLeaveSerializer(serializers.ModelSerializer):
             "id", "days", "status", "approver_remarks", "decided_at",
             "created_at",
         ]
+
+
+# --- Appointments --------------------------------------------------
+
+class PortalAppointmentSerializer(serializers.ModelSerializer):
+    team_label = serializers.CharField(source="get_team_display",
+                                       read_only=True)
+    faculty_name = serializers.CharField(source="faculty.full_name",
+                                         read_only=True, default="")
+    target_label = serializers.CharField(read_only=True)
+    status_label = serializers.CharField(source="get_status_display",
+                                         read_only=True)
+
+    class Meta:
+        model = StudentAppointment
+        fields = [
+            "id", "team", "team_label", "faculty", "faculty_name",
+            "target_label", "reason",
+            "preferred_date", "preferred_time",
+            "status", "status_label",
+            "scheduled_date", "scheduled_time", "venue",
+            "staff_remarks", "created_at",
+        ]
+        read_only_fields = fields
 
 
 # --- Educational qualifications (StudentDocument reuse) ------------

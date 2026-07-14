@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    AppointmentCancelView, AppointmentFacultyView, AppointmentListCreateView,
     AssignmentListView, AssignmentSubjectsView, AssignmentSubmitView,
     AttendanceCalendarView, AttendanceReportView,
     ChangePasswordView, CoursewareListView, CoursewareSubjectsView,
@@ -59,6 +60,14 @@ urlpatterns = [
     # Document requests
     path("document-requests/", DocumentRequestListCreateView.as_view(),
          name="portal-document-requests"),
+
+    # Appointments (book a meeting with a management/office team or faculty)
+    path("appointments/", AppointmentListCreateView.as_view(),
+         name="portal-appointments"),
+    path("appointments/faculty/", AppointmentFacultyView.as_view(),
+         name="portal-appointment-faculty"),
+    path("appointments/<int:pk>/cancel/", AppointmentCancelView.as_view(),
+         name="portal-appointment-cancel"),
 
     # Lessons (approved lesson plans for the student's batch)
     path("lessons/", LessonListView.as_view(), name="portal-lessons"),

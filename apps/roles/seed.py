@@ -201,6 +201,8 @@ CATALOGUE = [
     ("student_leaves", "student_leaves.decide", "Approve / reject student leaves"),
     ("student_documents", "student_documents.view_all", "View all student document requests"),
     ("student_documents", "student_documents.decide", "Approve / reject document requests"),
+    ("appointments", "appointments.view_all", "View all student appointment requests"),
+    ("appointments", "appointments.decide", "Confirm / decline / complete student appointments"),
     *_crud("admissions", "admissions.parent", "parent accounts"),
 ]
 
