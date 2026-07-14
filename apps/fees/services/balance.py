@@ -44,6 +44,7 @@ def enrollment_balance(enrollment) -> dict:
     paid_total = _decimal(
         FeeReceipt.objects.filter(
             enrollment=enrollment, status=FeeReceipt.Status.ACTIVE,
+            other_fee__isnull=True,   # Other-fee payments are tracked separately.
         ).aggregate(s=Sum("amount"))["s"]
     )
     payable = total_fee - concession_total

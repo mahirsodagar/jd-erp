@@ -15,6 +15,8 @@ from .views import (
     InstallmentBulkCreateView,
     InstallmentDetailView,
     InstallmentListCreateView,
+    OtherFeeDetailView,
+    OtherFeeListCreateView,
 )
 
 urlpatterns = [
@@ -27,6 +29,10 @@ urlpatterns = [
     path("installments/", InstallmentListCreateView.as_view(), name="installment-list-create"),
     path("installments/bulk/", InstallmentBulkCreateView.as_view(), name="installment-bulk-create"),
     path("installments/<int:pk>/", InstallmentDetailView.as_view(), name="installment-detail"),
+
+    # Other fees (ad-hoc, separate from the scheduled total)
+    path("other-fees/", OtherFeeListCreateView.as_view(), name="other-fee-list-create"),
+    path("other-fees/<int:pk>/", OtherFeeDetailView.as_view(), name="other-fee-detail"),
 
     # Receipts
     path("receipts/", FeeReceiptListCreateView.as_view(), name="receipt-list-create"),

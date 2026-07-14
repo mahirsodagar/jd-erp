@@ -2,7 +2,45 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
-from .models import Concession, FeeReceipt, Installment
+from .models import Concession, FeeReceipt, Installment, OtherFee
+
+
+class OtherFeeSerializer(serializers.ModelSerializer):
+    """Ad-hoc fee with computed paid/balance from its own receipts.
+
+    Used for both list and create (POST /other-fees/). `enrollment`,
+    `name`, `amount` are writable; the rest are read-only.
+    """
+
+    student_name = serializers.CharField(
+        source="enrollment.student.student_name", read_only=True,
+    )
+    paid = serializers.SerializerMethodField()
+    balance = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OtherFee
+        fields = [
+            "id", "enrollment", "student_name", "name", "amount",
+            "paid", "balance", "created_by", "created_on",
+        ]
+        read_only_fields = [
+            "id", "student_name", "paid", "balance",
+            "created_by", "created_on",
+        ]
+
+    def _paid(self, obj) -> Decimal:
+        from django.db.models import Sum
+        return Decimal(
+            obj.receipts.filter(status=FeeReceipt.Status.ACTIVE)
+            .aggregate(s=Sum("amount"))["s"] or 0
+        )
+
+    def get_paid(self, obj):
+        return str(self._paid(obj))
+
+    def get_balance(self, obj):
+        return str(Decimal(obj.amount) - self._paid(obj))
 
 
 class InstallmentSerializer(serializers.ModelSerializer):
@@ -46,7 +84,7 @@ class FeeReceiptCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = FeeReceipt
         fields = [
-            "enrollment", "installment",
+            "enrollment", "installment", "other_fee",
             "basic_fee", "sgst", "cgst", "igst", "amount",
             "payment_mode", "instrument_ref", "bank",
             "received_date", "notes",
@@ -83,6 +121,19 @@ class FeeReceiptCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"installment": "Installment does not belong to this enrollment."}
             )
+
+        # An "Other fee" payment: validate it belongs to the enrollment and
+        # isn't also pinned to an installment (they're separate buckets).
+        other_fee = attrs.get("other_fee")
+        if other_fee and enrollment and other_fee.enrollment_id != enrollment.id:
+            raise serializers.ValidationError(
+                {"other_fee": "Other fee does not belong to this enrollment."}
+            )
+        if other_fee and installment:
+            raise serializers.ValidationError(
+                {"other_fee": "A receipt cannot pay both an installment and an "
+                              "other fee."}
+            )
         return attrs
 
 
@@ -94,6 +145,9 @@ class FeeReceiptDetailSerializer(serializers.ModelSerializer):
         source="enrollment.student.application_form_id", read_only=True,
     )
     campus_name = serializers.CharField(source="enrollment.campus.name", read_only=True)
+    other_fee_name = serializers.CharField(
+        source="other_fee.name", read_only=True, default="",
+    )
     received_by_name = serializers.CharField(
         source="received_by.username", read_only=True, default="",
     )
@@ -106,7 +160,7 @@ class FeeReceiptDetailSerializer(serializers.ModelSerializer):
         fields = [
             "id", "receipt_no",
             "enrollment", "student_name", "student_application_id", "campus_name",
-            "installment",
+            "installment", "other_fee", "other_fee_name",
             "basic_fee", "sgst", "cgst", "igst", "amount",
             "payment_mode", "instrument_ref", "bank",
             "received_date", "notes",

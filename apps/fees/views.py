@@ -12,7 +12,7 @@ from rest_framework.views import APIView
 
 from apps.admissions.models import Enrollment
 
-from .models import Concession, FeeReceipt, Installment
+from .models import Concession, FeeReceipt, Installment, OtherFee
 from .permissions import (
     FeeAccessPolicy, can_view_all, has_perm, visible_enrollments_filter,
 )
@@ -25,6 +25,7 @@ from .serializers import (
     FeeReceiptDetailSerializer,
     FeeReceiptUpdateSerializer,
     InstallmentSerializer,
+    OtherFeeSerializer,
 )
 from .services.balance import enrollment_balance
 from .services.pdf import render_receipt_pdf
@@ -152,6 +153,60 @@ class InstallmentDetailView(APIView):
                 status=http.HTTP_400_BAD_REQUEST,
             )
         inst.delete()
+        return Response(status=http.HTTP_204_NO_CONTENT)
+
+
+# --- Other fees --------------------------------------------------------
+
+class OtherFeeListCreateView(APIView):
+    """Ad-hoc fees on an enrollment, separate from the scheduled total.
+    Reuses the installment-management permissions (it's fee-plan setup)."""
+
+    permission_classes = [IsAuthenticated, FeeAccessPolicy]
+
+    def get(self, request):
+        qs = OtherFee.objects.select_related("enrollment", "enrollment__student")
+        qs = visible_enrollments_filter(qs, request.user)
+        if v := request.query_params.get("enrollment"):
+            qs = qs.filter(enrollment_id=v)
+        return Response(OtherFeeSerializer(qs[:500], many=True).data)
+
+    def post(self, request):
+        if not has_perm(request.user, "fees.installment.add"):
+            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
+        s = OtherFeeSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        enrollment = s.validated_data["enrollment"]
+        if not (request.user.is_superuser
+                or can_view_all(request.user)
+                or request.user.campuses.filter(pk=enrollment.campus_id).exists()):
+            return Response({"detail": "Enrollment outside your campus scope."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s.save(created_by=request.user)
+        return Response(s.data, status=http.HTTP_201_CREATED)
+
+
+class OtherFeeDetailView(APIView):
+    permission_classes = [IsAuthenticated, FeeAccessPolicy]
+
+    def _obj(self, request, pk):
+        try:
+            of = OtherFee.objects.select_related("enrollment").get(pk=pk)
+        except OtherFee.DoesNotExist as e:
+            raise Http404 from e
+        self.check_object_permissions(request, of)
+        return of
+
+    def delete(self, request, pk):
+        if not has_perm(request.user, "fees.installment.delete"):
+            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
+        of = self._obj(request, pk)
+        if of.receipts.filter(status=FeeReceipt.Status.ACTIVE).exists():
+            return Response(
+                {"detail": "This fee has active receipts; cancel them first."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+        of.delete()
         return Response(status=http.HTTP_204_NO_CONTENT)
 
 
@@ -285,7 +340,7 @@ class FeeReceiptPdfView(APIView):
             r = FeeReceipt.objects.select_related(
                 "enrollment", "enrollment__student", "enrollment__campus",
                 "enrollment__batch", "enrollment__program",
-                "enrollment__student__institute", "installment",
+                "enrollment__student__institute", "installment", "other_fee",
                 "received_by",
             ).get(pk=pk)
         except FeeReceipt.DoesNotExist as e:

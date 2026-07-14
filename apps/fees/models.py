@@ -36,6 +36,38 @@ class Installment(models.Model):
         return f"#{self.sequence} ({self.amount}) due {self.due_date}"
 
 
+class OtherFee(models.Model):
+    """An ad-hoc fee charged to a student on top of the scheduled course
+    fee (e.g. exam re-attempt, material kit, event fee).
+
+    Kept deliberately SEPARATE from the scheduled total: it is never
+    folded into FeeTemplate.total_fee or enrollment_balance()'s
+    total/payable. It is paid on its own via a FeeReceipt whose
+    `other_fee` FK points here, and those receipts are excluded from the
+    main paid_total so the course-fee balance stays untouched.
+    """
+
+    enrollment = models.ForeignKey(
+        "admissions.Enrollment", on_delete=models.CASCADE,
+        related_name="other_fees",
+    )
+    name = models.CharField(max_length=200, help_text="Description of the fee.")
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="other_fees_created",
+    )
+    created_on = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("enrollment", "id")
+        indexes = [models.Index(fields=["enrollment"])]
+
+    def __str__(self):
+        return f"{self.name} ({self.amount})"
+
+
 class FeeReceipt(models.Model):
     """A payment recorded against an enrollment (PHP `feecollection`)."""
 
@@ -62,6 +94,12 @@ class FeeReceipt(models.Model):
         Installment, null=True, blank=True,
         on_delete=models.SET_NULL, related_name="receipts",
         help_text="Optional — receipts can be linked to a specific installment.",
+    )
+    other_fee = models.ForeignKey(
+        "OtherFee", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="receipts",
+        help_text="Set when this receipt pays an ad-hoc Other fee. Such "
+                  "receipts are excluded from the course-fee balance.",
     )
 
     basic_fee = models.DecimalField(

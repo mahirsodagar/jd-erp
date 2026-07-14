@@ -216,6 +216,30 @@ def student_attendance_summary(*, student, from_date=None, to_date=None) -> dict
         per_status[status_value] = qs.filter(status=status_value).count()
     present_like = per_status["PRESENT"] + per_status["LATE"] + per_status["ON_DUTY"]
     marked = sum(per_status.values())
+
+    # Per-session detail — one row per marked attendance entry, newest
+    # first, so the student-details page can show a full ledger rather
+    # than just the aggregate counts.
+    sessions = [
+        {
+            "attendance_id": a.id,
+            "schedule_slot_id": a.schedule_slot_id,
+            "date": str(a.schedule_slot.date),
+            "subject": a.schedule_slot.subject.name,
+            "batch": a.schedule_slot.batch.short_name
+                      or a.schedule_slot.batch.name,
+            "time_slot": a.schedule_slot.time_slot.label,
+            "status": a.status,
+            "note": a.note,
+        }
+        for a in qs.select_related(
+            "schedule_slot__subject",
+            "schedule_slot__batch",
+            "schedule_slot__time_slot",
+        ).order_by("-schedule_slot__date",
+                   "-schedule_slot__time_slot__start_time")
+    ]
+
     return {
         "student_id": student.id,
         "name": student.student_name,
@@ -225,4 +249,5 @@ def student_attendance_summary(*, student, from_date=None, to_date=None) -> dict
         **per_status,
         "present_pct": round((present_like / total_slots) * 100, 2)
                         if total_slots else 0.0,
+        "sessions": sessions,
     }

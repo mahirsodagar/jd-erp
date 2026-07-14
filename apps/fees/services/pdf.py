@@ -102,6 +102,8 @@ def render_receipt_pdf(receipt) -> bytes:
     if receipt.installment:
         desc_lines.append((f"Installment #{receipt.installment.sequence} - "
                            + (receipt.installment.description or ""), receipt.basic_fee))
+    elif receipt.other_fee:
+        desc_lines.append((f"Other fee - {receipt.other_fee.name}", receipt.basic_fee))
     else:
         desc_lines.append(("Fee payment", receipt.basic_fee))
 
