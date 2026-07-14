@@ -373,6 +373,19 @@ def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
         related=lead,
     )
 
+    # WhatsApp leg — same recipient/link as the SMS. Routed through XIRCLS
+    # (trigger from XIRCLS_WA_TRIGGERS["lead.fee_link.wa"]). Dormant until
+    # that trigger is filled in settings, so it never breaks SMS/email.
+    wa_log = queue_notification(
+        template_key="lead.fee_link.wa",
+        recipient=lead.phone,
+        context={
+            "name": _first_name(lead.name), "url": url,
+            "institute": institute_label, "short_name": short_name,
+        },
+        related=lead,
+    )
+
     # Email — same pattern as send_application_link: short body, link
     # in plain text, routed through the dispatcher.
     email_subject = f"{institute_label} — Application fee payment link"
@@ -415,6 +428,7 @@ def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
 
     return {
         **_sms_result(sms_log),
+        **_wa_result(wa_log),
         **_email_result(email_log),
         "communication_id": comm.id,
         "url": url,

@@ -15,6 +15,29 @@ DEBUG = env.bool("DEBUG", default=False)
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
 
 
+# --- Logging ------------------------------------------------------------
+# Send app logs to the console (gunicorn/journald captures them on the
+# VPS; the terminal shows them locally). apps.notifications logs the exact
+# outbound WhatsApp/SMS/email calls at INFO — see apps/notifications/*.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "simple": {"format": "%(asctime)s %(levelname)s %(name)s: %(message)s"},
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "simple"},
+    },
+    "loggers": {
+        "apps.notifications": {
+            "handlers": ["console"],
+            "level": env("NOTIFICATIONS_LOG_LEVEL", default="INFO"),
+            "propagate": False,
+        },
+    },
+}
+
+
 # --- Apps ---------------------------------------------------------------
 
 INSTALLED_APPS = [
@@ -401,6 +424,9 @@ XIRCLS_API_KEY = env("XIRCLS_API_KEY", default="")
 XIRCLS_WHATSAPP_PROJECT_KEY = env("XIRCLS_WHATSAPP_PROJECT_KEY", default="")
 XIRCLS_DEFAULT_COUNTRY_CODE = env("XIRCLS_DEFAULT_COUNTRY_CODE", default="91")
 XIRCLS_TIMEOUT = env.int("XIRCLS_TIMEOUT", default=10)
+# When True, whatsapp.py logs the raw Api-key / Project-Key values (else
+# they're masked). Turn on only for short debugging sessions.
+XIRCLS_LOG_FULL_KEYS = env.bool("XIRCLS_LOG_FULL_KEYS", default=False)
 
 # our template_key → XIRCLS trigger (campaign) name as created on the
 # XIRCLS platform. Trigger names aren't secrets — they're campaign
@@ -422,6 +448,10 @@ XIRCLS_WA_TRIGGERS = {
     # apps/leads/send_links.send_application_link. TEMP: on the active
     # "Test" trigger until "application_form_2026" is approved on XIRCLS.
     "lead.application_link.wa": "Test",
+    # Fee-payment link — sent alongside the SMS/email legs in
+    # apps/leads/send_links.send_fee_link. Blank until its fee-link
+    # template is approved on XIRCLS (then put the trigger name here).
+    "lead.fee_link.wa": "",
 }
 
 # our template_key → {xircls_param_name: our_context_key}. The LEFT side
@@ -442,6 +472,9 @@ XIRCLS_WA_PARAM_MAP = {
     # real params (e.g. {parameter_1: name, parameter_2: url}) once the
     # "application_form_2026" template is approved on XIRCLS.
     "lead.application_link.wa": {"test": "name"},
+    # Fee-payment link. Placeholder param names — confirm against the
+    # approved XIRCLS fee-link template before its trigger goes live.
+    "lead.fee_link.wa": {"parameter_1": "name", "parameter_2": "url"},
 }
 
 

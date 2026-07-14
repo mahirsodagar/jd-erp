@@ -28,6 +28,7 @@ the NotificationDispatchLog records provider replies verbatim.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import urllib.error
 import urllib.request
@@ -35,7 +36,24 @@ import urllib.request
 from django.conf import settings
 
 
+logger = logging.getLogger(__name__)
+
 _DEFAULT_URL = "https://api.xircls.com/talk/api/v1/send_trigger_message/"
+
+
+def _mask(secret: str) -> str:
+    """Mask a secret for logging: show a short prefix/suffix + length.
+
+    Enough to verify the right key is wired (and catch typos like a
+    dropped leading char) without writing the full token to log files.
+    Set XIRCLS_LOG_FULL_KEYS=True to log the raw value when debugging.
+    """
+    s = secret or ""
+    if getattr(settings, "XIRCLS_LOG_FULL_KEYS", False):
+        return s
+    if len(s) <= 10:
+        return f"***(len={len(s)})"
+    return f"{s[:6]}…{s[-4:]} (len={len(s)})"
 
 
 def _split_phone(phone: str, default_cc: str) -> tuple[str, str]:
@@ -123,31 +141,48 @@ def _post(
         "parameters": parameters,
     }
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        getattr(settings, "XIRCLS_API_URL", _DEFAULT_URL),
-        data=data,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "Api-key": api_key,
-            "Whatsapp-Project-Key": project_key,
-        },
+    url = getattr(settings, "XIRCLS_API_URL", _DEFAULT_URL)
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Api-key": api_key,
+        "Whatsapp-Project-Key": project_key,
+    }
+    # Log the exact outbound call (secret header values masked).
+    log_headers = {
+        **headers,
+        "Api-key": _mask(api_key),
+        "Whatsapp-Project-Key": _mask(project_key),
+    }
+    logger.info(
+        "XIRCLS WhatsApp request → POST %s | headers=%s | payload=%s",
+        url, json.dumps(log_headers), json.dumps(payload),
     )
+
+    req = urllib.request.Request(url, data=data, method="POST", headers=headers)
     try:
         with urllib.request.urlopen(
             req, timeout=timeout or getattr(settings, "XIRCLS_TIMEOUT", 10),
         ) as resp:
+            status = resp.status
             body = resp.read().decode("utf-8", errors="replace").strip()
     except urllib.error.HTTPError as e:
         try:
             err_body = e.read().decode("utf-8", errors="replace")
         except Exception:
             err_body = ""
+        logger.warning(
+            "XIRCLS WhatsApp response ← HTTP %s | body=%s", e.code,
+            err_body or e.reason,
+        )
         return False, f"HTTP {e.code}: {err_body or e.reason}"
     except Exception as e:  # network, timeout, DNS, etc.
+        logger.warning(
+            "XIRCLS WhatsApp request failed ← %s: %s", type(e).__name__, e,
+        )
         return False, f"{type(e).__name__}: {e}"
 
+    logger.info("XIRCLS WhatsApp response ← HTTP %s | body=%s", status, body)
     return _interpret_response(body)
 
 

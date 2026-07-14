@@ -95,6 +95,13 @@ TEMPLATES = [
      "{short_name} for your Design/Art/Media course. Click the "
      "following link {url} to pay your fees and complete the "
      "admission process. Best Regards JD Admissions Team"),
+    # WhatsApp leg of the fee-link send. XIRCLS stores the approved body
+    # on their side; this body_template is only the dispatch-log audit
+    # row. Variables: {name}, {url}. Dormant until its XIRCLS trigger is
+    # set in settings.XIRCLS_WA_TRIGGERS["lead.fee_link.wa"].
+    ("lead.fee_link.wa", "WHATSAPP", "",
+     "Dear {name}, Thank you for choosing JD. Click the link {url} to pay "
+     "your fees and complete the admission process. — JD Admissions Team"),
     ("lead.fee_link.email", "EMAIL",
      "{institute} — Application fee payment link",
      "Dear {name},\n\n"
