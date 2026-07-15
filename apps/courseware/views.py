@@ -64,6 +64,7 @@ class CoursewareTopicListCreateView(APIView):
         topic = services.publish_topic(
             subject=subject, batch=batch,
             name=d["name"], description=d.get("description", ""),
+            image=d.get("image"),
             attachments=attachments, created_by=request.user,
         )
         return Response(

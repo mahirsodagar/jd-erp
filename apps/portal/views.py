@@ -258,6 +258,14 @@ class TimetableView(APIView):
 
 # --- Assignments ---------------------------------------------------
 
+def _assignments_for_batch(batch) -> Q:
+    """Assignments visible to a student in `batch`: ones targeted at that
+    exact batch, plus program-wide ones (no batch) for the batch's
+    program."""
+    return (Q(batch=batch)
+            | Q(batch__isnull=True, program_id=batch.program_id))
+
+
 class AssignmentSubjectsView(APIView):
     permission_classes = [IsStudentOnly]
 
@@ -266,7 +274,7 @@ class AssignmentSubjectsView(APIView):
         if e is None:
             return Response([])
         rows = (Assignment.objects
-                .filter(batch=e.batch, is_published=True)
+                .filter(_assignments_for_batch(e.batch), is_published=True)
                 .values("subject_id", "subject__code", "subject__name")
                 .annotate(total_assignments=Count("id"))
                 .order_by("subject__code"))
@@ -288,7 +296,7 @@ class AssignmentListView(APIView):
         if e is None:
             return Response([])
         qs = (Assignment.objects
-              .filter(batch=e.batch, is_published=True)
+              .filter(_assignments_for_batch(e.batch), is_published=True)
               .select_related("subject"))
         if v := request.query_params.get("subject_id"):
             qs = qs.filter(subject_id=v)

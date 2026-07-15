@@ -563,12 +563,23 @@ class AssignmentListCreateView(APIView):
 
     def get(self, request):
         u = request.user
-        qs = Assignment.objects.select_related("subject", "batch")
+        qs = Assignment.objects.select_related("subject", "program", "batch")
         params = request.query_params
         if v := params.get("subject"):
             qs = qs.filter(subject_id=v)
+        if v := params.get("program"):
+            qs = qs.filter(program_id=v)
         if v := params.get("batch"):
-            qs = qs.filter(batch_id=v)
+            # Show assignments for this batch plus program-wide ones that
+            # reach it (batch=null, same program).
+            from django.db.models import Q
+            from apps.master.models import Batch
+            prog_id = (Batch.objects.filter(pk=v)
+                       .values_list("program_id", flat=True).first())
+            qs = qs.filter(
+                Q(batch_id=v)
+                | Q(batch__isnull=True, program_id=prog_id)
+            )
         if v := params.get("due_after"):
             if d := parse_date(v):
                 qs = qs.filter(due_date__date__gte=d)
@@ -580,13 +591,15 @@ class AssignmentListCreateView(APIView):
         # their campus(es).
         if not (u.is_superuser or has_perm(u, "academics.schedule.view_all")):
             qs = qs.filter(batch__campus__in=u.campuses.all())
-        return Response(AssignmentSerializer(qs[:500], many=True).data)
+        return Response(AssignmentSerializer(
+            qs[:500], many=True, context={"request": request}).data)
 
     def post(self, request):
         if not has_perm(request.user, "academics.assignment.create"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
-        s = AssignmentSerializer(data=request.data)
+        s = AssignmentSerializer(data=request.data,
+                                 context={"request": request})
         s.is_valid(raise_exception=True)
         s.save(created_by=request.user)
         return Response(s.data, status=http.HTTP_201_CREATED)
@@ -602,7 +615,8 @@ class AssignmentDetailView(APIView):
             raise Http404 from e
 
     def get(self, request, pk):
-        return Response(AssignmentSerializer(self._obj(pk)).data)
+        return Response(AssignmentSerializer(
+            self._obj(pk), context={"request": request}).data)
 
     def patch(self, request, pk):
         a = self._obj(pk)
@@ -610,7 +624,8 @@ class AssignmentDetailView(APIView):
                 or has_perm(request.user, "academics.assignment.edit_any")):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
-        s = AssignmentSerializer(a, data=request.data, partial=True)
+        s = AssignmentSerializer(a, data=request.data, partial=True,
+                                 context={"request": request})
         s.is_valid(raise_exception=True)
         s.save()
         return Response(s.data)
@@ -688,15 +703,26 @@ class MyAssignmentsView(APIView):
                 {"detail": "No student record linked to this user."},
                 status=http.HTTP_400_BAD_REQUEST,
             )
+        from django.db.models import Q
+
         from apps.admissions.models import Enrollment
+        from apps.master.models import Batch
         batch_ids = list(
             Enrollment.objects.filter(
                 student=student, status=Enrollment.Status.ACTIVE,
             ).values_list("batch_id", flat=True)
         )
+        program_ids = list(
+            Batch.objects.filter(id__in=batch_ids)
+            .values_list("program_id", flat=True).distinct()
+        )
+        # Batch-specific assignments for the student's batches, plus
+        # program-wide ones (no batch) for those batches' programs.
         qs = Assignment.objects.filter(
-            batch_id__in=batch_ids, is_published=True,
-        ).select_related("subject", "batch").order_by("due_date")
+            Q(batch_id__in=batch_ids)
+            | Q(batch__isnull=True, program_id__in=program_ids),
+            is_published=True,
+        ).select_related("subject", "program", "batch").order_by("due_date")
 
         existing = {
             s.assignment_id: s

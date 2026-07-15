@@ -9,11 +9,12 @@ from .models import CoursewareAttachment, CoursewareMapping, CoursewareTopic
 
 @transaction.atomic
 def publish_topic(*, subject, batch, name: str, description: str,
-                  attachments: list[dict], created_by) -> CoursewareTopic:
+                  attachments: list[dict], created_by,
+                  image=None) -> CoursewareTopic:
     """`attachments` = [{"name": str, "file": UploadedFile}, ...]"""
     topic = CoursewareTopic.objects.create(
         subject=subject, batch=batch, name=name,
-        description=description, created_by=created_by,
+        description=description, image=image, created_by=created_by,
     )
     for att in attachments:
         CoursewareAttachment.objects.create(

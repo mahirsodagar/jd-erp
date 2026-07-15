@@ -23,19 +23,27 @@ class CoursewareTopicSerializer(serializers.ModelSerializer):
     subject_name = serializers.CharField(source="subject.name", read_only=True)
     batch_name = serializers.CharField(source="batch.name", read_only=True)
     attachments = CoursewareAttachmentSerializer(many=True, read_only=True)
+    image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = CoursewareTopic
         fields = [
             "id", "subject", "subject_code", "subject_name",
             "batch", "batch_name",
-            "name", "description", "is_published",
+            "name", "description", "image", "image_url", "is_published",
             "attachments", "created_at", "updated_at",
         ]
         read_only_fields = [
             "id", "subject_code", "subject_name", "batch_name",
-            "attachments", "created_at", "updated_at",
+            "image_url", "attachments", "created_at", "updated_at",
         ]
+
+    def get_image_url(self, obj):
+        if not obj.image:
+            return None
+        request = self.context.get("request")
+        return (request.build_absolute_uri(obj.image.url)
+                if request else obj.image.url)
 
 
 class PublishTopicSerializer(serializers.Serializer):
@@ -44,6 +52,7 @@ class PublishTopicSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=200)
     description = serializers.CharField(required=False, allow_blank=True,
                                         max_length=4000)
+    image = serializers.ImageField(required=False, allow_null=True)
     attachments = serializers.ListField(
         child=serializers.FileField(),
         required=False, allow_empty=True,

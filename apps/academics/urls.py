@@ -1,5 +1,14 @@
 from django.urls import path
 
+from .attendance_report_views import (
+    ActivityReportView as AR_ActivityReportView,
+    BatchSemestersView as AR_BatchSemestersView,
+    BatchWiseReportView as AR_BatchWiseReportView,
+    InstructorLogView as AR_InstructorLogView,
+    ModuleGridView as AR_ModuleGridView,
+    RemarksReportView as AR_RemarksReportView,
+    StudentWiseReportView as AR_StudentWiseReportView,
+)
 from .views import (
     AlumniDetailView,
     AlumniListView,
@@ -62,6 +71,22 @@ urlpatterns = [
     path("attendance/student/<int:pk>/report/", StudentAttendanceReportView.as_view(),
          name="attendance-student-report"),
     path("attendance/me/", MyAttendanceView.as_view(), name="attendance-me"),
+
+    # G.2 — Attendance Report module (five-tab report page)
+    path("attendance/report/activity/",
+         AR_ActivityReportView.as_view(), name="attendance-report-activity"),
+    path("attendance/report/remarks/",
+         AR_RemarksReportView.as_view(), name="attendance-report-remarks"),
+    path("attendance/report/module-grid/",
+         AR_ModuleGridView.as_view(), name="attendance-report-module-grid"),
+    path("attendance/report/batch/<int:pk>/",
+         AR_BatchWiseReportView.as_view(), name="attendance-report-batch"),
+    path("attendance/report/batch/<int:pk>/semesters/",
+         AR_BatchSemestersView.as_view(), name="attendance-report-batch-semesters"),
+    path("attendance/report/student/<int:pk>/",
+         AR_StudentWiseReportView.as_view(), name="attendance-report-student"),
+    path("attendance/report/instructor/<int:pk>/",
+         AR_InstructorLogView.as_view(), name="attendance-report-instructor"),
 
     # G.3 — Assignments + Marks + Transcript
     path("assignments/", AssignmentListCreateView.as_view(), name="assignment-list-create"),

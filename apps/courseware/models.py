@@ -16,6 +16,10 @@ class CoursewareTopic(models.Model):
     )
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
+    # Cover image shown on the courseware grid card.
+    image = models.ImageField(
+        upload_to="courseware/images/", blank=True, null=True,
+    )
     is_published = models.BooleanField(default=True)
 
     created_by = models.ForeignKey(

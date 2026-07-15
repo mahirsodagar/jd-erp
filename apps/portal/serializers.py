@@ -59,6 +59,7 @@ class PortalAssignmentSerializer(serializers.ModelSerializer):
     subject_code = serializers.CharField(source="subject.code", read_only=True)
     subject_name = serializers.CharField(source="subject.name", read_only=True)
     attachment_url = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
     submission = serializers.SerializerMethodField()
 
     class Meta:
@@ -66,7 +67,7 @@ class PortalAssignmentSerializer(serializers.ModelSerializer):
         fields = [
             "id", "title", "description", "max_marks", "due_date",
             "subject", "subject_code", "subject_name",
-            "attachment", "attachment_url",
+            "attachment", "attachment_url", "image_url",
             "submission",
         ]
         read_only_fields = fields
@@ -76,6 +77,12 @@ class PortalAssignmentSerializer(serializers.ModelSerializer):
             return None
         request = self.context.get("request")
         return request.build_absolute_uri(obj.attachment.url) if request else obj.attachment.url
+
+    def get_image_url(self, obj):
+        if not obj.image:
+            return None
+        request = self.context.get("request")
+        return request.build_absolute_uri(obj.image.url) if request else obj.image.url
 
     def get_submission(self, obj):
         sub = self.context.get("submissions_by_assignment", {}).get(obj.id)
@@ -121,15 +128,23 @@ class PortalCoursewareTopicSerializer(serializers.ModelSerializer):
     subject_code = serializers.CharField(source="subject.code", read_only=True)
     subject_name = serializers.CharField(source="subject.name", read_only=True)
     attachments = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = CoursewareTopic
         fields = [
-            "id", "name", "description",
+            "id", "name", "description", "image_url",
             "subject", "subject_code", "subject_name",
             "attachments", "created_at",
         ]
         read_only_fields = fields
+
+    def get_image_url(self, obj):
+        if not obj.image:
+            return None
+        request = self.context.get("request")
+        return (request.build_absolute_uri(obj.image.url)
+                if request else obj.image.url)
 
     def get_attachments(self, obj):
         request = self.context.get("request")

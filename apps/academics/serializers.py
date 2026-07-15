@@ -173,25 +173,56 @@ class RosterEntrySerializer(serializers.Serializer):
 class AssignmentSerializer(serializers.ModelSerializer):
     subject_name = serializers.CharField(source="subject.name", read_only=True)
     subject_code = serializers.CharField(source="subject.code", read_only=True)
-    batch_name = serializers.CharField(source="batch.name", read_only=True)
+    program_name = serializers.CharField(source="program.name", read_only=True,
+                                         default="")
+    batch_name = serializers.CharField(source="batch.name", read_only=True,
+                                       default="")
     submission_count = serializers.SerializerMethodField()
     graded_count = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Assignment
         fields = [
             "id", "subject", "subject_name", "subject_code",
-            "batch", "batch_name",
+            "program", "program_name", "batch", "batch_name",
             "title", "description", "max_marks",
-            "due_date", "attachment", "is_published",
+            "due_date", "attachment", "image", "image_url", "is_published",
             "submission_count", "graded_count",
             "created_by", "created_at", "updated_at",
         ]
         read_only_fields = [
-            "id", "subject_name", "subject_code", "batch_name",
+            "id", "subject_name", "subject_code", "program_name", "batch_name",
+            "image_url",
             "submission_count", "graded_count",
             "created_by", "created_at", "updated_at",
         ]
+
+    def validate(self, attrs):
+        # `program` is required; `batch` is optional. On a partial update
+        # fall back to the instance's current values.
+        program = attrs.get("program") or getattr(self.instance, "program", None)
+        batch = attrs.get("batch")
+        if batch is None and self.instance is not None and "batch" not in attrs:
+            batch = self.instance.batch
+        if program is None:
+            raise serializers.ValidationError(
+                {"program": "This field is required."}
+            )
+        # When a batch is chosen it must belong to the selected program —
+        # otherwise the targeting is contradictory.
+        if batch is not None and batch.program_id != program.id:
+            raise serializers.ValidationError(
+                {"batch": "Batch does not belong to the selected program."}
+            )
+        return attrs
+
+    def get_image_url(self, obj):
+        if not obj.image:
+            return None
+        request = self.context.get("request")
+        return (request.build_absolute_uri(obj.image.url)
+                if request else obj.image.url)
 
     def get_submission_count(self, obj):
         return obj.submissions.count()

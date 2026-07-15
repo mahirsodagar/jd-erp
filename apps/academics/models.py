@@ -138,8 +138,16 @@ class Assignment(models.Model):
     subject = models.ForeignKey(
         "master.Subject", on_delete=models.PROTECT, related_name="assignments",
     )
+    # Targeting: `program` is always set. When `batch` is also set the
+    # assignment is limited to that one batch; when `batch` is null it
+    # applies to every batch in the program.
+    program = models.ForeignKey(
+        "master.Program", on_delete=models.PROTECT, related_name="assignments",
+        null=True, blank=True,
+    )
     batch = models.ForeignKey(
         "master.Batch", on_delete=models.PROTECT, related_name="assignments",
+        null=True, blank=True,
     )
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
@@ -147,6 +155,10 @@ class Assignment(models.Model):
     due_date = models.DateTimeField()
     attachment = models.FileField(
         upload_to="assignments/", blank=True, null=True,
+    )
+    # Cover image shown on the assignment grid card.
+    image = models.ImageField(
+        upload_to="assignments/images/", blank=True, null=True,
     )
 
     is_published = models.BooleanField(
@@ -169,7 +181,11 @@ class Assignment(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.title} ({self.batch.short_name or self.batch_id})"
+        if self.batch_id:
+            scope = self.batch.short_name or self.batch_id
+        else:
+            scope = f"all of {self.program.code}" if self.program_id else "—"
+        return f"{self.title} ({scope})"
 
 
 class AssignmentSubmission(models.Model):
