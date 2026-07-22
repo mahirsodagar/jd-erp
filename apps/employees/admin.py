@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Department, Designation, Employee
+from .models import Department, Designation, Employee, EmployeeDocument
 
 
 @admin.register(Department)
@@ -25,7 +25,8 @@ class EmployeeAdmin(admin.ModelAdmin):
         "status", "is_deleted", "date_of_joining",
     )
     list_filter = ("status", "is_deleted", "campus", "department",
-                   "employment_type", "gender", "nationality")
+                   "employment_type", "employment_category",
+                   "gender", "nationality")
     search_fields = ("emp_code", "first_name", "family_name",
                      "email_primary", "mobile_primary")
     autocomplete_fields = (
@@ -40,3 +41,11 @@ class EmployeeAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         return Employee.all_objects.all()
+
+
+@admin.register(EmployeeDocument)
+class EmployeeDocumentAdmin(admin.ModelAdmin):
+    list_display = ("name", "employee", "uploaded_by", "created_at")
+    search_fields = ("name", "employee__emp_code", "employee__first_name")
+    autocomplete_fields = ("employee", "uploaded_by")
+    readonly_fields = ("created_at",)

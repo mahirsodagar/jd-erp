@@ -56,18 +56,15 @@ CATALOGUE = [
 
     # Module D — Leaves
     *_crud("leaves", "leaves.type", "leave types"),
-    *_crud("leaves", "leaves.session", "academic sessions"),
     ("leaves", "leaves.allocation.add", "Allocate leaves (HR)"),
     ("leaves", "leaves.allocation.delete", "Delete unconsumed allocations"),
     ("leaves", "leaves.application.view_all", "View all leave applications"),
     ("leaves", "leaves.application.approve_any", "Approve any leave (HR override)"),
-    ("leaves", "leaves.application.override_balance", "Apply force=true past balance"),
-    ("leaves", "leaves.application.backdate_apply", "Apply leaves with from_date in the past"),
     ("leaves", "leaves.compoff.view_all", "View all comp-off applications"),
     ("leaves", "leaves.compoff.approve_any", "Approve any comp-off (HR override)"),
-    *_crud("leaves", "leaves.holiday", "holidays"),
     ("leaves", "leaves.report.view", "View leave reports for own campuses"),
     ("leaves", "leaves.report.view_all", "View leave reports across all campuses"),
+    ("leaves", "leaves.report.delete", "Delete leave applications from the report (HR)"),
 
     # Module E.1 — Admissions + new masters
     *_crud("master", "master.academicyear", "academic years"),
@@ -124,6 +121,10 @@ CATALOGUE = [
     ("academics", "academics.attendance.freeze", "Freeze / unfreeze attendance"),
     ("academics", "academics.attendance.edit_frozen", "Edit attendance after freeze"),
     ("academics", "academics.attendance.view_report", "View attendance reports across campuses"),
+    ("academics", "academics.batch_report.view", "View batch report (batch list + student roster)"),
+    ("academics", "academics.batch_report.edit_feedback", "Edit batch feedback link + enable toggle"),
+    ("academics", "academics.closing_report.view", "View batch closing report"),
+    ("academics", "academics.closing_report.edit", "Edit closing-report awards / portfolio / remarks"),
 
     # Module G.3 — Assignments + Marks
     ("academics", "academics.assignment.create", "Create / edit assignments"),
@@ -199,6 +200,9 @@ CATALOGUE = [
     *_crud("courseware", "courseware", "courseware topics"),
     ("student_leaves", "student_leaves.view_all", "View all student leave applications"),
     ("student_leaves", "student_leaves.decide", "Approve / reject student leaves"),
+    ("student_leaves", "student_leaves.report.view", "View student leave report for own campuses"),
+    ("student_leaves", "student_leaves.report.view_all", "View student leave report across all campuses"),
+    ("student_leaves", "student_leaves.delete", "Delete student leave applications from the report (HR)"),
     ("student_documents", "student_documents.view_all", "View all student document requests"),
     ("student_documents", "student_documents.decide", "Approve / reject document requests"),
     ("appointments", "appointments.view_all", "View all student appointment requests"),

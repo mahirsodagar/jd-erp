@@ -714,3 +714,41 @@ class Lesson(models.Model):
         if self.display_date and self.display_date > timezone.localdate():
             return False
         return True
+
+
+# === Closing Report — batch-closure awards / portfolio / remarks =====
+
+class ClosingAward(models.Model):
+    """Per-student Awards / Portfolio / Remarks captured on a batch's
+    Closing Report (the batch-closure completion sheet).
+
+    Ports the legacy `awards_portfolio` table. One row per
+    (student, batch); each of the three text fields is edited inline and
+    upserted independently on blur.
+    """
+
+    student = models.ForeignKey(
+        "admissions.Student", on_delete=models.CASCADE,
+        related_name="closing_awards",
+    )
+    batch = models.ForeignKey(
+        "master.Batch", on_delete=models.CASCADE,
+        related_name="closing_awards",
+    )
+    awards = models.TextField(blank=True, help_text="JD Annual Design Awards.")
+    portfolio = models.TextField(blank=True)
+    remarks = models.TextField(blank=True)
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="closing_awards_created",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = (("student", "batch"),)
+        indexes = [models.Index(fields=["batch"])]
+
+    def __str__(self):
+        return f"ClosingAward(student={self.student_id}, batch={self.batch_id})"

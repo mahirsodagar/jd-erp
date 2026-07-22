@@ -1,11 +1,10 @@
 import csv
-from datetime import date as _date
-from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Q
 from django.http import Http404, HttpResponse
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from rest_framework import status as http
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -14,28 +13,22 @@ from rest_framework.views import APIView
 from apps.accounts.permissions import HasPerm
 from apps.employees.models import Employee
 
-from django.utils.dateparse import parse_date
-
 from .models import (
-    CompOffApplication, EmailDispatchLog, Holiday,
-    LeaveAllocation, LeaveApplication, LeaveType,
+    CompOffApplication, LeaveAllocation, LeaveApplication, LeaveType,
 )
 from .permissions import LeaveAccessPolicy, get_employee_for, has_perm
 from .serializers import (
     BulkAllocationSerializer,
-    CancelOrWithdrawSerializer,
     CompOffApplicationSerializer,
     CompOffApplyInputSerializer,
     DecisionSerializer,
-    EmailDispatchLogSerializer,
-    HolidaySerializer,
     LeaveAllocationSerializer,
     LeaveApplicationSerializer,
     LeaveApplyInputSerializer,
     LeaveTypeSerializer,
 )
 from .services import notifications
-from .services.balance import all_balances, compute_balance
+from .services.balance import all_balances, cl_dashboard, compute_balance
 from .services.day_count import count_days
 
 
@@ -79,7 +72,7 @@ class LeaveTypeDetailView(APIView):
         return Response(status=http.HTTP_204_NO_CONTENT)
 
 
-# --- Allocations -------------------------------------------------------
+# --- Allocations (HR bulk grant — legacy assign_leaves.php) -------------
 
 def _scope_allocations(qs, user):
     if user.is_superuser or has_perm(user, "leaves.application.view_all"):
@@ -187,59 +180,12 @@ def _scope_applications(qs, user, scope: str):
             return qs.none()
         return qs
     if scope == "team":
-        return qs.filter(Q(manager_email__iexact=user.email) | Q(approved_by__user_account=user))
-    # default: self
+        # Legacy: manager sees leaves whose manager_mail snapshot == their email.
+        return qs.filter(manager_email__iexact=user.email)
     me = get_employee_for(user)
     if me is None:
         return qs.none()
     return qs.filter(employee=me)
-
-
-def _check_overlap(employee, from_date: _date, to_date: _date,
-                   exclude_id: int | None = None) -> bool:
-    qs = LeaveApplication.objects.filter(
-        employee=employee,
-        status__in=[
-            LeaveApplication.Status.PENDING,
-            LeaveApplication.Status.APPROVED,
-        ],
-    ).filter(
-        from_date__lte=to_date,
-        to_date__gte=from_date,
-    )
-    if exclude_id:
-        qs = qs.exclude(pk=exclude_id)
-    return qs.exists()
-
-
-def _check_balance(employee, leave_type, from_date, count: Decimal) -> tuple[bool, str]:
-    if leave_type.category != LeaveType.Category.LEAVE:
-        return True, ""
-    # Comp-off: derived pool
-    if leave_type.code == "COMP_OFF":
-        bal = compute_balance(employee, leave_type, None)["balance"]
-        if bal < count:
-            return False, f"Comp-off balance is {bal}; requested {count}."
-        return True, ""
-    # Standard: active allocations covering from_date
-    from django.db.models import Sum
-    granted = (
-        LeaveAllocation.objects.filter(
-            employee=employee, leave_type=leave_type,
-            start_date__lte=from_date, end_date__gte=from_date,
-        ).aggregate(s=Sum("count"))["s"] or Decimal("0")
-    )
-    used = (
-        LeaveApplication.objects.filter(
-            employee=employee, leave_type=leave_type,
-            status__in=[LeaveApplication.Status.PENDING,
-                        LeaveApplication.Status.APPROVED],
-        ).aggregate(s=Sum("count"))["s"] or Decimal("0")
-    )
-    bal = granted - used
-    if bal < count:
-        return False, f"Balance is {bal}; requested {count}."
-    return True, ""
 
 
 class LeaveApplicationListCreateView(APIView):
@@ -266,60 +212,28 @@ class LeaveApplicationListCreateView(APIView):
         d = s.validated_data
 
         # Resolve target employee — self by default; HR can override.
-        target = d.get("employee") or get_employee_for(request.user)
+        me = get_employee_for(request.user)
+        target = d.get("employee") or me
         if target is None:
             return Response(
                 {"detail": "No employee profile linked to this user."},
                 status=http.HTTP_400_BAD_REQUEST,
             )
-        if d.get("employee") and d["employee"] != get_employee_for(request.user):
+        if d.get("employee") and d["employee"] != me:
             if not has_perm(request.user, "leaves.application.approve_any"):
                 return Response(
                     {"detail": "HR override needed to apply on behalf of others."},
                     status=http.HTTP_403_FORBIDDEN,
                 )
 
-        # Backdate guard
-        if d["from_date"] < timezone.now().date() and not d.get("backdate"):
-            return Response(
-                {"from_date": "Backdated leaves require HR with leaves.application.backdate_apply."},
-                status=http.HTTP_400_BAD_REQUEST,
-            )
-        if d.get("backdate") and not has_perm(request.user, "leaves.application.backdate_apply"):
-            return Response(
-                {"detail": "Permission denied to back-date."},
-                status=http.HTTP_403_FORBIDDEN,
-            )
-
-        # Overlap
-        if _check_overlap(target, d["from_date"], d["to_date"]):
-            return Response(
-                {"detail": "Overlaps with another active leave application."},
-                status=http.HTTP_409_CONFLICT,
-            )
-
-        # Day count
+        # Legacy day count — plain calendar days (no weekend/holiday netting).
         days = count_days(
             employee=target, leave_type=d["leave_type"],
             from_date=d["from_date"], to_date=d["to_date"],
             from_session=d["from_session"],
         )
-        if days <= 0 and d["leave_type"].category == LeaveType.Category.LEAVE:
-            return Response(
-                {"detail": "Computed leave days = 0. All dates are weekends/holidays."},
-                status=http.HTTP_400_BAD_REQUEST,
-            )
 
-        # Balance check (LEAVE category only)
-        if not d.get("force"):
-            ok, msg = _check_balance(target, d["leave_type"], d["from_date"], days)
-            if not ok:
-                return Response({"detail": msg}, status=http.HTTP_400_BAD_REQUEST)
-        elif not has_perm(request.user, "leaves.application.override_balance"):
-            return Response({"detail": "Permission denied to override balance."},
-                            status=http.HTTP_403_FORBIDDEN)
-
-        # Manager email default
+        # Manager email snapshot (default: reporting manager 1).
         manager_email = d.get("manager_email") or ""
         if not manager_email:
             rm = target.reporting_manager_1
@@ -354,7 +268,6 @@ class LeaveApplicationDetailView(APIView):
             ).get(pk=pk)
         except LeaveApplication.DoesNotExist as e:
             raise Http404 from e
-        # Visibility: applicant, manager, or HR-with-view-all.
         u = request.user
         me = get_employee_for(u)
         allowed = (
@@ -366,6 +279,19 @@ class LeaveApplicationDetailView(APIView):
         if not allowed:
             raise Http404
         return Response(LeaveApplicationSerializer(app).data)
+
+    def delete(self, request, pk):
+        # Legacy leave_report.php delete — privileged HR only.
+        if not (request.user.is_superuser
+                or has_perm(request.user, "leaves.report.delete")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        try:
+            app = LeaveApplication.objects.get(pk=pk)
+        except LeaveApplication.DoesNotExist as e:
+            raise Http404 from e
+        app.delete()
+        return Response(status=http.HTTP_204_NO_CONTENT)
 
 
 class LeaveDecisionView(APIView):
@@ -403,58 +329,6 @@ class LeaveDecisionView(APIView):
         return Response(LeaveApplicationSerializer(app).data)
 
 
-class LeaveWithdrawView(APIView):
-    permission_classes = [IsAuthenticated, LeaveAccessPolicy]
-
-    def patch(self, request, pk):
-        try:
-            app = LeaveApplication.objects.get(pk=pk)
-        except LeaveApplication.DoesNotExist as e:
-            raise Http404 from e
-        me = get_employee_for(request.user)
-        if not me or app.employee_id != me.id:
-            return Response({"detail": "Not your application."},
-                            status=http.HTTP_403_FORBIDDEN)
-        if app.status != LeaveApplication.Status.PENDING:
-            return Response({"detail": "Only pending applications can be withdrawn."},
-                            status=http.HTTP_400_BAD_REQUEST)
-        s = CancelOrWithdrawSerializer(data=request.data)
-        s.is_valid(raise_exception=True)
-        app.status = LeaveApplication.Status.WITHDRAWN
-        app.approver_remarks = s.validated_data["reason"]
-        app.decided_on = timezone.now()
-        app.save(update_fields=["status", "approver_remarks", "decided_on"])
-        return Response(LeaveApplicationSerializer(app).data)
-
-
-class LeaveCancelView(APIView):
-    permission_classes = [IsAuthenticated, LeaveAccessPolicy]
-
-    def patch(self, request, pk):
-        try:
-            app = LeaveApplication.objects.get(pk=pk)
-        except LeaveApplication.DoesNotExist as e:
-            raise Http404 from e
-        me = get_employee_for(request.user)
-        if not me or app.employee_id != me.id:
-            return Response({"detail": "Not your application."},
-                            status=http.HTTP_403_FORBIDDEN)
-        if app.status != LeaveApplication.Status.APPROVED:
-            return Response({"detail": "Only approved applications can be cancelled."},
-                            status=http.HTTP_400_BAD_REQUEST)
-        if app.from_date <= timezone.now().date():
-            return Response({"detail": "Cannot cancel after the leave start date."},
-                            status=http.HTTP_400_BAD_REQUEST)
-        s = CancelOrWithdrawSerializer(data=request.data)
-        s.is_valid(raise_exception=True)
-        app.status = LeaveApplication.Status.CANCELLED
-        app.approver_remarks = s.validated_data["reason"]
-        app.decided_on = timezone.now()
-        app.save(update_fields=["status", "approver_remarks", "decided_on"])
-        notifications.notify_leave_cancelled(app)
-        return Response(LeaveApplicationSerializer(app).data)
-
-
 class LeaveBalancesView(APIView):
     permission_classes = [IsAuthenticated, LeaveAccessPolicy]
 
@@ -474,15 +348,22 @@ class LeaveBalancesView(APIView):
             if emp is None:
                 return Response({"detail": "No employee profile linked to this user."},
                                 status=http.HTTP_400_BAD_REQUEST)
-
-        # Balances are scoped to the allocation window open on this date
-        # (defaults to today).
-        on = request.query_params.get("on")
-        on_date = parse_date(on) if on else None
-        return Response(all_balances(emp, on_date))
+        return Response(all_balances(emp))
 
 
-# --- Comp-off ----------------------------------------------------------
+class LeaveDashboardView(APIView):
+    """Legacy leave_apply.php dashboard counters (fixed leave-year + CL accrual)."""
+    permission_classes = [IsAuthenticated, LeaveAccessPolicy]
+
+    def get(self, request):
+        emp = get_employee_for(request.user)
+        if emp is None:
+            return Response({"detail": "No employee profile linked to this user."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        return Response(cl_dashboard(emp))
+
+
+# --- Comp-off (legacy compoff_apply.php) -------------------------------
 
 class CompOffListCreateView(APIView):
     permission_classes = [IsAuthenticated, LeaveAccessPolicy]
@@ -502,6 +383,7 @@ class CompOffListCreateView(APIView):
         return Response(CompOffApplicationSerializer(qs[:500], many=True).data)
 
     def post(self, request):
+        from decimal import Decimal
         s = CompOffApplyInputSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         d = s.validated_data
@@ -563,59 +445,10 @@ class CompOffBalanceView(APIView):
             comp_off_type = LeaveType.objects.get(code="COMP_OFF")
         except LeaveType.DoesNotExist:
             return Response({"earned": "0.0", "used": "0.0", "balance": "0.0"})
-        return Response(compute_balance(me, comp_off_type, None))
+        return Response(compute_balance(me, comp_off_type))
 
 
-# --- Holidays ----------------------------------------------------------
-
-class HolidayListCreateView(APIView):
-    def get_permissions(self):
-        if self.request.method == "GET":
-            return [IsAuthenticated()]
-        return [IsAuthenticated(), HasPerm()]
-    perm_base = "leaves.holiday"
-
-    def get(self, request):
-        qs = Holiday.objects.select_related("campus")
-        if v := request.query_params.get("year"):
-            qs = qs.filter(date__year=v)
-        if v := request.query_params.get("month"):
-            qs = qs.filter(date__month=v)
-        if v := request.query_params.get("campus"):
-            qs = qs.filter(Q(campus_id=v) | Q(campus__isnull=True))
-        return Response(HolidaySerializer(qs, many=True).data)
-
-    def post(self, request):
-        s = HolidaySerializer(data=request.data)
-        s.is_valid(raise_exception=True)
-        s.save()
-        return Response(s.data, status=http.HTTP_201_CREATED)
-
-
-class HolidayDetailView(APIView):
-    permission_classes = [IsAuthenticated, HasPerm]
-    perm_base = "leaves.holiday"
-
-    def patch(self, request, pk):
-        try:
-            obj = Holiday.objects.get(pk=pk)
-        except Holiday.DoesNotExist as e:
-            raise Http404 from e
-        s = HolidaySerializer(obj, data=request.data, partial=True)
-        s.is_valid(raise_exception=True)
-        s.save()
-        return Response(s.data)
-
-    def delete(self, request, pk):
-        try:
-            obj = Holiday.objects.get(pk=pk)
-        except Holiday.DoesNotExist as e:
-            raise Http404 from e
-        obj.delete()
-        return Response(status=http.HTTP_204_NO_CONTENT)
-
-
-# --- Reports -----------------------------------------------------------
+# --- Reports (legacy leave_report.php) ---------------------------------
 
 def _scope_report(qs, user):
     if user.is_superuser or has_perm(user, "leaves.report.view_all"):
@@ -637,7 +470,6 @@ class LeaveReportSummaryView(APIView):
                             status=http.HTTP_403_FORBIDDEN)
 
         params = request.query_params
-        from django.utils.dateparse import parse_date
         start = parse_date(params.get("start_date") or "")
         end = parse_date(params.get("end_date") or "")
         if not start or not end:
@@ -645,7 +477,8 @@ class LeaveReportSummaryView(APIView):
                             status=http.HTTP_400_BAD_REQUEST)
 
         qs = LeaveApplication.objects.select_related(
-            "employee", "employee__campus", "employee__department", "leave_type",
+            "employee", "employee__campus", "employee__department",
+            "leave_type", "approved_by",
         ).filter(from_date__gte=start, to_date__lte=end)
         qs = _scope_report(qs, u)
         if v := params.get("campus"):
@@ -657,8 +490,6 @@ class LeaveReportSummaryView(APIView):
         if v := params.get("status"):
             qs = qs.filter(status=v)
 
-        # JSON or CSV? `output=csv` instead of `format=csv` because
-        # DRF reserves `?format=` for content-negotiation.
         if (params.get("output") or "").lower() == "csv":
             return self._csv(qs)
 
@@ -668,11 +499,15 @@ class LeaveReportSummaryView(APIView):
             "employee": a.employee.full_name,
             "campus": a.employee.campus.name,
             "department": a.employee.department.name,
-            "leave_type": a.leave_type.code,
+            "leave_type": a.leave_type.name,
+            "applied_for": a.leave_type.get_category_display(),
             "from_date": a.from_date,
             "to_date": a.to_date,
             "count": str(a.count),
+            "reason": a.reason,
             "status": a.get_status_display(),
+            "approver": a.approved_by.full_name if a.approved_by else "",
+            "approver_remarks": a.approver_remarks,
             "applied_on": a.applied_on,
             "decided_on": a.decided_on,
         } for a in qs[:5000]]
@@ -683,28 +518,19 @@ class LeaveReportSummaryView(APIView):
         resp["Content-Disposition"] = 'attachment; filename="leave_report.csv"'
         w = csv.writer(resp)
         w.writerow(["emp_code", "employee", "campus", "department", "leave_type",
-                    "from_date", "to_date", "count", "status",
+                    "applied_for", "from_date", "to_date", "count", "reason",
+                    "status", "approver", "approver_remarks",
                     "applied_on", "decided_on"])
         for a in qs.iterator():
             w.writerow([
                 a.employee.emp_code, a.employee.full_name,
                 a.employee.campus.name, a.employee.department.name,
-                a.leave_type.code,
-                a.from_date, a.to_date, a.count, a.get_status_display(),
-                a.applied_on.isoformat(), a.decided_on.isoformat() if a.decided_on else "",
+                a.leave_type.name, a.leave_type.get_category_display(),
+                a.from_date, a.to_date, a.count, a.reason,
+                a.get_status_display(),
+                a.approved_by.full_name if a.approved_by else "",
+                a.approver_remarks,
+                a.applied_on.isoformat(),
+                a.decided_on.isoformat() if a.decided_on else "",
             ])
         return resp
-
-
-# --- Email log (HR / superuser only) ------------------------------------
-
-class EmailLogListView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        u = request.user
-        if not (u.is_superuser or has_perm(u, "leaves.application.view_all")):
-            return Response({"detail": "Permission denied."},
-                            status=http.HTTP_403_FORBIDDEN)
-        qs = EmailDispatchLog.objects.all()[:500]
-        return Response(EmailDispatchLogSerializer(qs, many=True).data)

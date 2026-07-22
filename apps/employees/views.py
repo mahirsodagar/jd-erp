@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import HasPerm
 
-from .models import Department, Designation, Employee
+from .models import Department, Designation, Employee, EmployeeDocument
 from .pagination import EmployeePagination
 from .permissions import (
     EmployeeAccessPolicy,
@@ -27,6 +27,7 @@ from .serializers import (
     DesignationSerializer,
     EmployeeCreateSerializer,
     EmployeeDetailSerializer,
+    EmployeeDocumentSerializer,
     EmployeeListSerializer,
     EmployeeSelfUpdateSerializer,
     EmployeeUpdateSerializer,
@@ -298,6 +299,80 @@ class EmployeeDetailView(APIView):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         emp.soft_delete(user=request.user)
+        return Response(status=http.HTTP_204_NO_CONTENT)
+
+
+# --- Employee documents ------------------------------------------------
+
+class EmployeeDocumentListCreateView(APIView):
+    """List an employee's supporting documents, or attach a new one.
+
+    Read is scoped by `EmployeeAccessPolicy` (same as viewing the
+    employee); attaching requires `employees.employee.edit`.
+    """
+
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    permission_classes = [IsAuthenticated, EmployeeAccessPolicy]
+
+    def _employee(self, request, pk):
+        try:
+            emp = Employee.objects.get(pk=pk)
+        except Employee.DoesNotExist as e:
+            raise Http404 from e
+        self.check_object_permissions(request, emp)
+        return emp
+
+    def get(self, request, pk):
+        emp = self._employee(request, pk)
+        docs = emp.documents.all()
+        return Response(
+            EmployeeDocumentSerializer(
+                docs, many=True, context={"request": request},
+            ).data
+        )
+
+    def post(self, request, pk):
+        emp = self._employee(request, pk)
+        if not (request.user.is_superuser
+                or has_perm(request.user, "employees.employee.edit")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+
+        s = EmployeeDocumentSerializer(
+            data=request.data, context={"request": request},
+        )
+        s.is_valid(raise_exception=True)
+        doc = s.save(employee=emp, uploaded_by=request.user)
+        return Response(
+            EmployeeDocumentSerializer(doc, context={"request": request}).data,
+            status=http.HTTP_201_CREATED,
+        )
+
+
+class EmployeeDocumentDetailView(APIView):
+    """Delete a single document. Requires `employees.employee.edit`."""
+
+    permission_classes = [IsAuthenticated, EmployeeAccessPolicy]
+
+    def delete(self, request, pk, doc_id):
+        try:
+            emp = Employee.objects.get(pk=pk)
+        except Employee.DoesNotExist as e:
+            raise Http404 from e
+        self.check_object_permissions(request, emp)
+
+        if not (request.user.is_superuser
+                or has_perm(request.user, "employees.employee.edit")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+
+        try:
+            doc = emp.documents.get(pk=doc_id)
+        except EmployeeDocument.DoesNotExist as e:
+            raise Http404 from e
+
+        doc.file.delete(save=False)
+        doc.delete()
         return Response(status=http.HTTP_204_NO_CONTENT)
 
 

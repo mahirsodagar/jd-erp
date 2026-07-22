@@ -3,8 +3,15 @@ from datetime import date
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
-from .models import Department, Designation, Employee
+from apps.common.file_validation import SecureFileField
+
+from .models import Department, Designation, Employee, EmployeeDocument
 from .services import PHOTO_MAX_BYTES, validate_photo
+
+# PDF / JPG / JPEG / PNG only — jpg and jpeg both sniff as image/jpeg.
+DOCUMENT_ALLOWED_MIMES = frozenset({
+    "image/jpeg", "image/png", "application/pdf",
+})
 
 User = get_user_model()
 
@@ -27,6 +34,42 @@ class DesignationSerializer(serializers.ModelSerializer):
             "created_at", "updated_at",
         ]
         read_only_fields = ["id", "role_name", "created_at", "updated_at"]
+
+
+class EmployeeDocumentSerializer(serializers.ModelSerializer):
+    # Magic-byte validated: only real PDF/JPEG/PNG bytes pass, regardless
+    # of the filename or client Content-Type.
+    file = SecureFileField(
+        allowed_mimes=DOCUMENT_ALLOWED_MIMES, max_size_mb=5, write_only=True,
+    )
+    file_url = serializers.SerializerMethodField()
+    uploaded_by_name = serializers.CharField(
+        source="uploaded_by.username", read_only=True, default="",
+    )
+
+    class Meta:
+        model = EmployeeDocument
+        fields = [
+            "id", "employee", "name",
+            "file", "file_url",
+            "uploaded_by", "uploaded_by_name", "created_at",
+        ]
+        read_only_fields = [
+            "id", "employee", "file_url",
+            "uploaded_by", "uploaded_by_name", "created_at",
+        ]
+
+    def get_file_url(self, obj):
+        if not obj.file:
+            return None
+        request = self.context.get("request")
+        return request.build_absolute_uri(obj.file.url) if request else obj.file.url
+
+    def validate_name(self, value):
+        value = (value or "").strip()
+        if not value:
+            raise serializers.ValidationError("Document name is required.")
+        return value
 
 
 class EmployeeListSerializer(serializers.ModelSerializer):
@@ -62,10 +105,14 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
     campus_name = serializers.CharField(source="campus.name", read_only=True)
     institute_name = serializers.CharField(source="institute.name", read_only=True)
 
+    employment_category_label = serializers.CharField(
+        source="get_employment_category_display", read_only=True, default="",
+    )
     photo_url = serializers.SerializerMethodField()
     qr_url = serializers.SerializerMethodField()
     portal_username = serializers.SerializerMethodField()
     portal_temp_password = serializers.SerializerMethodField()
+    documents = EmployeeDocumentSerializer(many=True, read_only=True)
 
     class Meta:
         model = Employee
@@ -73,7 +120,9 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
             "id", "emp_code",
             "first_name", "middle_name", "family_name", "full_name",
             "dob", "nationality", "blood_group", "gender", "qualification",
-            "employment_type", "date_of_appointment", "date_of_joining",
+            "employment_type",
+            "employment_category", "employment_category_label",
+            "date_of_appointment", "date_of_joining",
             "designation", "designation_name",
             "department", "department_name",
             "campus", "campus_name",
@@ -87,6 +136,7 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
             "photo_url", "qr_url",
             "status", "is_deleted",
             "user_account", "portal_username", "portal_temp_password",
+            "documents",
             "created_by", "created_on", "updated_by", "updated_on",
         ]
         read_only_fields = fields
@@ -186,7 +236,8 @@ class EmployeeCreateSerializer(_EmployeeWriteBase):
             "emp_code",
             "first_name", "middle_name", "family_name",
             "dob", "nationality", "blood_group", "gender", "qualification",
-            "employment_type", "date_of_appointment", "date_of_joining",
+            "employment_type", "employment_category",
+            "date_of_appointment", "date_of_joining",
             "designation", "department", "campus", "institute",
             "reporting_manager_1", "reporting_manager_2",
             "reporting_manager_3", "reporting_manager_4",
@@ -198,6 +249,7 @@ class EmployeeCreateSerializer(_EmployeeWriteBase):
         ]
         extra_kwargs = {
             "emp_code": {"required": False, "allow_blank": True},
+            "employment_category": {"required": True, "allow_blank": False},
             # Optional — matches PHP behaviour. The first employee
             # (director) has nobody to report to, and PHP never enforced
             # this either, so leaving it blank is allowed.
@@ -213,7 +265,8 @@ class EmployeeUpdateSerializer(_EmployeeWriteBase):
         fields = [
             "first_name", "middle_name", "family_name",
             "dob", "nationality", "blood_group", "gender", "qualification",
-            "employment_type", "date_of_appointment", "date_of_joining",
+            "employment_type", "employment_category",
+            "date_of_appointment", "date_of_joining",
             "designation", "department", "campus", "institute",
             "reporting_manager_1", "reporting_manager_2",
             "reporting_manager_3", "reporting_manager_4",

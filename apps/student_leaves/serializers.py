@@ -9,6 +9,9 @@ class StudentLeaveApplicationSerializer(serializers.ModelSerializer):
     application_form_id = serializers.CharField(
         source="student.application_form_id", read_only=True,
     )
+    campus_name = serializers.CharField(
+        source="student.campus.name", read_only=True, default="",
+    )
     decided_by_name = serializers.CharField(
         source="decided_by.username", read_only=True, default="",
     )
@@ -17,7 +20,7 @@ class StudentLeaveApplicationSerializer(serializers.ModelSerializer):
     class Meta:
         model = StudentLeaveApplication
         fields = [
-            "id", "student", "student_name", "application_form_id",
+            "id", "student", "student_name", "application_form_id", "campus_name",
             "leave_date", "leave_edate", "days",
             "student_remarks", "status",
             "batch_mentor_email", "module_mentor_email", "cc_emails",

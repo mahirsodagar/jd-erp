@@ -5,7 +5,7 @@ from rest_framework import serializers
 from apps.employees.models import Employee
 
 from .models import (
-    CompOffApplication, EmailDispatchLog, Holiday,
+    CompOffApplication, EmailDispatchLog,
     LeaveAllocation, LeaveApplication, LeaveType,
 )
 
@@ -19,15 +19,6 @@ class LeaveTypeSerializer(serializers.ModelSerializer):
                   "half_day_allowed", "is_active",
                   "created_at", "updated_at"]
         read_only_fields = ["id", "created_at", "updated_at"]
-
-
-class HolidaySerializer(serializers.ModelSerializer):
-    campus_name = serializers.CharField(source="campus.name", read_only=True, default="")
-
-    class Meta:
-        model = Holiday
-        fields = ["id", "date", "name", "campus", "campus_name", "is_optional"]
-        read_only_fields = ["id", "campus_name"]
 
 
 # --- Allocations -------------------------------------------------------
@@ -124,8 +115,6 @@ class LeaveApplyInputSerializer(serializers.Serializer):
     reason = serializers.CharField(min_length=3, max_length=2000)
     manager_email = serializers.EmailField(required=False, allow_blank=True)
     cc_emails = serializers.CharField(required=False, allow_blank=True, max_length=255)
-    force = serializers.BooleanField(required=False, default=False)
-    backdate = serializers.BooleanField(required=False, default=False)
     employee = serializers.PrimaryKeyRelatedField(
         queryset=Employee.objects.all(), required=False,
         help_text="HR-only: apply on behalf of another employee.",
@@ -151,10 +140,6 @@ class LeaveApplyInputSerializer(serializers.Serializer):
 class DecisionSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=[(2, "Approved"), (3, "Rejected")])
     remarks = serializers.CharField(required=False, allow_blank=True, max_length=2000)
-
-
-class CancelOrWithdrawSerializer(serializers.Serializer):
-    reason = serializers.CharField(min_length=5, max_length=400)
 
 
 # --- Comp-off ----------------------------------------------------------

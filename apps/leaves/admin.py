@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from .models import (
-    CompOffApplication, EmailDispatchLog, Holiday,
+    CompOffApplication, EmailDispatchLog,
     LeaveAllocation, LeaveApplication, LeaveType,
 )
 
@@ -43,14 +43,6 @@ class CompOffApplicationAdmin(admin.ModelAdmin):
     search_fields = ("employee__emp_code",)
     autocomplete_fields = ("employee", "approver")
     readonly_fields = ("count", "applied_on", "decided_on")
-
-
-@admin.register(Holiday)
-class HolidayAdmin(admin.ModelAdmin):
-    list_display = ("date", "name", "campus", "is_optional")
-    list_filter = ("campus", "is_optional")
-    search_fields = ("name",)
-    autocomplete_fields = ("campus",)
 
 
 @admin.register(EmailDispatchLog)

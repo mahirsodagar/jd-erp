@@ -63,6 +63,10 @@ class Employee(models.Model):
         FULL_TIME = 1, "Full-time"
         PART_TIME = 2, "Part-time"
 
+    class EmploymentCategory(models.TextChoices):
+        CONTRACT = "CONTRACT", "Contract"
+        PROFESSIONAL = "PROFESSIONAL", "Professional"
+
     class Status(models.IntegerChoices):
         ACTIVE = 0, "Active"
         INACTIVE = 1, "Inactive"
@@ -101,6 +105,9 @@ class Employee(models.Model):
 
     # Employment
     employment_type = models.PositiveSmallIntegerField(choices=EmploymentType.choices)
+    employment_category = models.CharField(
+        max_length=20, choices=EmploymentCategory.choices, blank=True,
+    )
     date_of_appointment = models.DateField()
     date_of_joining = models.DateField()
 
@@ -231,3 +238,32 @@ class Employee(models.Model):
         if user:
             self.updated_by = user
         self.save(update_fields=["is_deleted", "deleted_at", "updated_by", "updated_on"])
+
+
+class EmployeeDocument(models.Model):
+    """An arbitrary supporting file attached to an employee (offer letter,
+    ID proof, certificates, …). HR adds these one at a time from the
+    employee form / detail page. Only PDF and common image types are
+    accepted — see `services.validate_document`."""
+
+    employee = models.ForeignKey(
+        Employee, on_delete=models.CASCADE, related_name="documents",
+    )
+    # Human-readable label, e.g. "Aadhaar card", "Degree certificate".
+    name = models.CharField(max_length=160)
+    file = models.FileField(upload_to="employees/documents/")
+
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="employee_documents_uploaded",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["employee", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.employee_id}: {self.name}"

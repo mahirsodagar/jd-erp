@@ -1,5 +1,14 @@
 from django.urls import path
 
+from .batch_report_views import (
+    BatchFeedbackView,
+    BatchReportListView,
+    BatchRosterView,
+)
+from .closing_report_views import (
+    ClosingAwardSaveView,
+    ClosingReportView,
+)
 from .attendance_report_views import (
     ActivityReportView as AR_ActivityReportView,
     BatchSemestersView as AR_BatchSemestersView,
@@ -87,6 +96,20 @@ urlpatterns = [
          AR_StudentWiseReportView.as_view(), name="attendance-report-student"),
     path("attendance/report/instructor/<int:pk>/",
          AR_InstructorLogView.as_view(), name="attendance-report-instructor"),
+
+    # Academics — Batch Report (batch list + roster + feedback link)
+    path("batch-report/", BatchReportListView.as_view(),
+         name="batch-report-list"),
+    path("batch-report/<int:pk>/roster/", BatchRosterView.as_view(),
+         name="batch-report-roster"),
+    path("batch-report/<int:pk>/feedback/", BatchFeedbackView.as_view(),
+         name="batch-report-feedback"),
+
+    # Academics — Closing Report (batch-closure completion sheet)
+    path("closing-report/<int:pk>/", ClosingReportView.as_view(),
+         name="closing-report"),
+    path("closing-report/<int:pk>/award/", ClosingAwardSaveView.as_view(),
+         name="closing-report-award"),
 
     # G.3 — Assignments + Marks + Transcript
     path("assignments/", AssignmentListCreateView.as_view(), name="assignment-list-create"),

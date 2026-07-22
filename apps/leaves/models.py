@@ -63,8 +63,6 @@ class LeaveApplication(models.Model):
         PENDING = 1, "Pending"
         APPROVED = 2, "Approved"
         REJECTED = 3, "Rejected"
-        CANCELLED = 4, "Cancelled"
-        WITHDRAWN = 5, "Withdrawn"
 
     employee = models.ForeignKey(
         "employees.Employee", on_delete=models.PROTECT, related_name="leave_applications",
@@ -149,35 +147,6 @@ class CompOffApplication(models.Model):
             models.Index(fields=["employee", "status"]),
             models.Index(fields=["worked_date"]),
         ]
-
-
-class Holiday(models.Model):
-    date = models.DateField()
-    name = models.CharField(max_length=120)
-    campus = models.ForeignKey(
-        "master.Campus", null=True, blank=True,
-        on_delete=models.CASCADE, related_name="holidays",
-        help_text="Null = applies to all campuses.",
-    )
-    is_optional = models.BooleanField(
-        default=False,
-        help_text="Optional / restricted holiday — does not auto-deduct from leave count.",
-    )
-
-    class Meta:
-        ordering = ("date",)
-        constraints = [
-            models.UniqueConstraint(
-                fields=["date", "campus"],
-                name="uniq_holiday_date_campus",
-            ),
-        ]
-        indexes = [
-            models.Index(fields=["date"]),
-        ]
-
-    def __str__(self):
-        return f"{self.date} — {self.name}"
 
 
 class EmailDispatchLog(models.Model):

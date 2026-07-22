@@ -74,19 +74,6 @@ def notify_leave_decision(application) -> None:
     )
 
 
-def notify_leave_cancelled(application) -> None:
-    queue_email(
-        template="employee_leave_cancelled",
-        to=application.manager_email,
-        subject=f"Leave cancelled — {application.employee.full_name}",
-        body=(
-            f"{application.employee.full_name} cancelled their approved leave "
-            f"({application.from_date} → {application.to_date})."
-        ),
-        application=application,
-    )
-
-
 def notify_compoff_applied(compoff) -> None:
     emp = compoff.employee
     rm = emp.reporting_manager_1
