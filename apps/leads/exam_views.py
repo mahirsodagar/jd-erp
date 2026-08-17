@@ -294,6 +294,9 @@ class LeadExamAttemptsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
+        if not has_perm(request.user, "leads.exam.view_lead_attempts"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
         qs = EntranceExamAttempt.objects.select_related(
             "exam", "lead",
         ).filter(lead_id=pk).order_by("-created_at")

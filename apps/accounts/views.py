@@ -30,7 +30,7 @@ from apps.common.throttles import (
 from apps.notifications.email import send_email
 
 from .password_mirror import mirror_plaintext_password
-from .permissions import HasPerm
+from .permissions import HasPerm, has_perm
 from .serializers import (
     AdminResetPasswordSerializer,
     ChangePasswordSerializer,
@@ -173,14 +173,53 @@ class UserListCreateView(APIView):
 
 
 class UserDetailView(APIView):
+    """Read / edit / deactivate one user.
+
+    PATCH is gated per field rather than by one blanket key. Assigning
+    roles (or `is_staff`), assigning campuses and the ordinary profile
+    edit are separate permissions: a single `accounts.user.edit` would
+    let its holder grant themselves any role in the system, and campus
+    assignment is what nearly every `*_all_campuses` scope resolves
+    against.
+    """
+
     permission_classes = [IsAuthenticated, HasPerm]
     perm_base = "accounts.user"
+
+    #: field -> permission needed to change it.
+    _FIELD_PERMS = {
+        "role_ids": "accounts.user.assign_roles",
+        "is_staff": "accounts.user.assign_roles",
+        "campus_ids": "accounts.user.assign_campuses",
+    }
+    _PLAIN_FIELDS = frozenset({"full_name", "email", "is_active"})
+
+    #: PATCH does its own per-field checks, so it must not be rejected
+    #: up-front by the blanket `accounts.user.edit` requirement.
+    def get_permissions(self):
+        if self.request.method == "PATCH":
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), HasPerm()]
 
     def get(self, request, pk):
         return Response(UserSerializer(User.objects.get(pk=pk)).data)
 
     def patch(self, request, pk):
         user = User.objects.get(pk=pk)
+        sent = set(request.data.keys())
+
+        needed = {
+            perm for field, perm in self._FIELD_PERMS.items() if field in sent
+        }
+        if sent & self._PLAIN_FIELDS:
+            needed.add("accounts.user.edit")
+        missing = sorted(p for p in needed if not has_perm(request.user, p))
+        if missing:
+            return Response(
+                {"detail": f"Missing permission(s): {', '.join(missing)}."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         serializer = UserUpdateSerializer(user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
@@ -203,8 +242,9 @@ class AdminResetPasswordView(APIView):
     """
 
     permission_classes = [IsAuthenticated, HasPerm]
-    # Resetting a password edits an existing user, not a CRUD "add".
-    required_perm = "accounts.user.edit"
+    # Its own key: handing out a temporary password for any account —
+    # including a superuser's — is not an ordinary profile edit.
+    required_perm = "accounts.user.reset_password"
 
     def post(self, request, pk):
         target = User.objects.get(pk=pk)

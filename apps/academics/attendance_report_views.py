@@ -52,10 +52,14 @@ class ActivityReportView(APIView):
 
 
 class InstructorLogView(APIView):
+    """Per-faculty teaching activity. Split off `view_report` — it reads
+    as a performance view of a named colleague, not a class register."""
+
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
-        if not _can(request.user):
+        if not has_perm(request.user,
+                        "academics.attendance.view_instructor_log"):
             return _deny()
         p = request.query_params
         return Response(reports.activity_report(

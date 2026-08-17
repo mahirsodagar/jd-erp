@@ -21,15 +21,21 @@ def _has_perm(user, key: str) -> bool:
 
 
 class DocumentRequestListView(APIView):
-    """Staff: list document requests across the system."""
+    """Staff: list document requests, scoped to the caller's campuses
+    unless they hold `student_documents.view_all`."""
+
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        if not _has_perm(request.user, "student_documents.view_all"):
+        u = request.user
+        all_campuses = _has_perm(u, "student_documents.view_all")
+        if not (all_campuses or _has_perm(u, "student_documents.view")):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         qs = (DocumentRequest.objects
               .select_related("student", "decided_by"))
+        if not all_campuses:
+            qs = qs.filter(student__campus__in=u.campuses.all())
         if v := request.query_params.get("status"):
             qs = qs.filter(status=v)
         if v := request.query_params.get("doc_type"):
@@ -47,15 +53,33 @@ class DocumentRequestDecideView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request, pk):
-        if not _has_perm(request.user, "student_documents.decide"):
-            return Response({"detail": "Permission denied."},
-                            status=http.HTTP_403_FORBIDDEN)
         try:
-            obj = DocumentRequest.objects.select_related("student").get(pk=pk)
+            obj = DocumentRequest.objects.select_related(
+                "student").get(pk=pk)
         except DocumentRequest.DoesNotExist as e:
             raise Http404 from e
+
         s = DecideDocumentSerializer(data=request.data)
         s.is_valid(raise_exception=True)
+
+        u = request.user
+        needed = (
+            "student_documents.approve"
+            if s.validated_data["decision"] == DocumentRequest.Status.APPROVED
+            else "student_documents.reject"
+        )
+        if not _has_perm(u, needed):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        # Same campus scope as the list — otherwise a request you could
+        # never see could still be decided by id.
+        if not (_has_perm(u, "student_documents.view_all")
+                or u.campuses.filter(pk=obj.student.campus_id).exists()):
+            return Response(
+                {"detail": "This request is outside your campus scope."},
+                status=http.HTTP_403_FORBIDDEN,
+            )
+
         try:
             services.decide_document(
                 request_obj=obj,

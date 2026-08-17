@@ -48,13 +48,15 @@ User = get_user_model()
 # populate dropdowns); CUD requires `employees.master.manage`.
 
 class _MasterListCreate(APIView):
+    """Departments / Designations. Reads used to be open to any
+    authenticated user; they now need `employees.master.view` like every
+    other suffix on this base."""
+
     model = None
     serializer = None
     perm_base = "employees.master"
 
     def get_permissions(self):
-        if self.request.method == "GET":
-            return [IsAuthenticated()]
         return [IsAuthenticated(), HasPerm()]
 
     def get(self, request):
@@ -86,8 +88,6 @@ class _MasterDetail(APIView):
     perm_base = "employees.master"
 
     def get_permissions(self):
-        if self.request.method == "GET":
-            return [IsAuthenticated()]
         return [IsAuthenticated(), HasPerm()]
 
     def _obj(self, pk):
@@ -324,6 +324,9 @@ class EmployeeDocumentListCreateView(APIView):
 
     def get(self, request, pk):
         emp = self._employee(request, pk)
+        if not has_perm(request.user, "employees.document.view"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
         docs = emp.documents.all()
         return Response(
             EmployeeDocumentSerializer(
@@ -333,8 +336,7 @@ class EmployeeDocumentListCreateView(APIView):
 
     def post(self, request, pk):
         emp = self._employee(request, pk)
-        if not (request.user.is_superuser
-                or has_perm(request.user, "employees.employee.edit")):
+        if not has_perm(request.user, "employees.document.add"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
 
@@ -350,7 +352,7 @@ class EmployeeDocumentListCreateView(APIView):
 
 
 class EmployeeDocumentDetailView(APIView):
-    """Delete a single document. Requires `employees.employee.edit`."""
+    """Delete a single document. Requires `employees.document.delete`."""
 
     permission_classes = [IsAuthenticated, EmployeeAccessPolicy]
 
@@ -361,8 +363,7 @@ class EmployeeDocumentDetailView(APIView):
             raise Http404 from e
         self.check_object_permissions(request, emp)
 
-        if not (request.user.is_superuser
-                or has_perm(request.user, "employees.employee.edit")):
+        if not has_perm(request.user, "employees.document.delete"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
 
@@ -456,9 +457,7 @@ class EmployeePortalAccountView(APIView):
 
     def post(self, request, pk):
         u = request.user
-        if not (u.is_superuser
-                or (has_perm(u, "accounts.user.add")
-                    and has_perm(u, "employees.employee.edit"))):
+        if not has_perm(u, "employees.employee.provision_portal"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
 

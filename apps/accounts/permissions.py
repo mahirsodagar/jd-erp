@@ -14,6 +14,21 @@ METHOD_PERM_SUFFIX = {
 }
 
 
+def has_perm(user, key: str) -> bool:
+    """Module-level check, mirroring the helpers in the other apps.
+
+    Used where a view needs several different keys depending on which
+    fields the request touches, rather than one blanket `required_perm`
+    (see `apps.accounts.views.UserDetailView.patch`).
+    """
+    if not user or not user.is_authenticated:
+        return False
+    return bool(
+        user.is_superuser
+        or user.roles.filter(permissions__key=key).exists()
+    )
+
+
 class HasPerm(BasePermission):
     """Checks that the request user has the required permission. Superusers bypass.
 

@@ -38,6 +38,8 @@ class InstallmentListCreateView(APIView):
     permission_classes = [IsAuthenticated, FeeAccessPolicy]
 
     def get(self, request):
+        if not has_perm(request.user, "fees.installment.view"):
+            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         qs = Installment.objects.select_related("enrollment", "enrollment__student")
         qs = visible_enrollments_filter(qs, request.user)
         if v := request.query_params.get("enrollment"):
@@ -132,6 +134,8 @@ class InstallmentDetailView(APIView):
         return inst
 
     def get(self, request, pk):
+        if not has_perm(request.user, "fees.installment.view"):
+            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         return Response(InstallmentSerializer(self._obj(request, pk)).data)
 
     def patch(self, request, pk):
@@ -160,11 +164,14 @@ class InstallmentDetailView(APIView):
 
 class OtherFeeListCreateView(APIView):
     """Ad-hoc fees on an enrollment, separate from the scheduled total.
-    Reuses the installment-management permissions (it's fee-plan setup)."""
+    Carries its own `fees.otherfee.*` keys — adding a one-off charge is a
+    different job from editing the scheduled fee plan."""
 
     permission_classes = [IsAuthenticated, FeeAccessPolicy]
 
     def get(self, request):
+        if not has_perm(request.user, "fees.otherfee.view"):
+            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         qs = OtherFee.objects.select_related("enrollment", "enrollment__student")
         qs = visible_enrollments_filter(qs, request.user)
         if v := request.query_params.get("enrollment"):
@@ -172,7 +179,7 @@ class OtherFeeListCreateView(APIView):
         return Response(OtherFeeSerializer(qs[:500], many=True).data)
 
     def post(self, request):
-        if not has_perm(request.user, "fees.installment.add"):
+        if not has_perm(request.user, "fees.otherfee.add"):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         s = OtherFeeSerializer(data=request.data)
         s.is_valid(raise_exception=True)
@@ -198,7 +205,7 @@ class OtherFeeDetailView(APIView):
         return of
 
     def delete(self, request, pk):
-        if not has_perm(request.user, "fees.installment.delete"):
+        if not has_perm(request.user, "fees.otherfee.delete"):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         of = self._obj(request, pk)
         if of.receipts.filter(status=FeeReceipt.Status.ACTIVE).exists():
@@ -448,6 +455,8 @@ class EnrollmentBalanceView(APIView):
     permission_classes = [IsAuthenticated, FeeAccessPolicy]
 
     def get(self, request, pk):
+        if not has_perm(request.user, "fees.balance.view"):
+            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         try:
             e = Enrollment.objects.select_related(
                 "student", "campus", "program", "academic_year",

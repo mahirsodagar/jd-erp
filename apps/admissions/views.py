@@ -75,10 +75,59 @@ class StudentDetailView(APIView):
             self._obj(request, pk), context={"request": request}
         ).data)
 
+    # Fields that move a student between academic units. Editing a
+    # phone number and transferring a student to another institute used
+    # to be the same permission; these are carved out.
+    TRANSFER_FIELDS = frozenset({
+        "institute", "campus", "program", "course", "academic_year",
+    })
+
+    #: Fields compared as FK ids rather than as model instances.
+    _GATED_FK = TRANSFER_FIELDS
+
+    @classmethod
+    def _changed_fields(cls, student, data) -> set:
+        """Keys in `data` whose value differs from what's stored."""
+        changed = set()
+        for key in data:
+            if key in cls._GATED_FK:
+                current = getattr(student, f"{key}_id", None)
+                incoming = data.get(key)
+                incoming = None if incoming in ("", None) else int(incoming)
+            elif key == "registration_number":
+                current = student.registration_number or ""
+                incoming = (data.get(key) or "").strip()
+            else:
+                continue
+            if current != incoming:
+                changed.add(key)
+        return changed
+
     def patch(self, request, pk):
         student = self._obj(request, pk)
         if not has_perm(request.user, "admissions.student.edit"):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
+
+        # The edit form PATCHes the whole record, so gate on fields that
+        # actually change rather than on their mere presence — otherwise
+        # correcting a phone number would trip the transfer check.
+        changed = self._changed_fields(student, request.data)
+        if (changed & self.TRANSFER_FIELDS) and not has_perm(
+            request.user, "admissions.student.transfer",
+        ):
+            return Response(
+                {"detail": "You cannot transfer a student to another "
+                           "institute, campus, program or course."},
+                status=http.HTTP_403_FORBIDDEN,
+            )
+        if "registration_number" in changed and not has_perm(
+            request.user, "admissions.student.set_registration_no",
+        ):
+            return Response(
+                {"detail": "You cannot set the registration number."},
+                status=http.HTTP_403_FORBIDDEN,
+            )
+
         s = StudentHRUpdateSerializer(student, data=request.data, partial=True)
         s.is_valid(raise_exception=True)
         s.save(updated_by=request.user)
@@ -152,6 +201,8 @@ class StudentDocumentsView(APIView):
 
     def get(self, request, pk):
         student = self._student(request, pk)
+        if not has_perm(request.user, "admissions.document.view"):
+            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         return Response(StudentDocumentSerializer(student.documents.all(), many=True).data)
 
     def post(self, request, pk):
@@ -205,12 +256,14 @@ class StudentRemarksView(APIView):
 
     def get(self, request, pk):
         student = self._student(request, pk)
+        if not has_perm(request.user, "admissions.student.view_remarks"):
+            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         qs = student.remarks.select_related("created_by").all()
         return Response(StudentRemarkSerializer(qs, many=True).data)
 
     def post(self, request, pk):
         student = self._student(request, pk)
-        if not has_perm(request.user, "admissions.student.edit"):
+        if not has_perm(request.user, "admissions.student.add_remark"):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         s = StudentRemarkSerializer(data=request.data)
         s.is_valid(raise_exception=True)
@@ -225,7 +278,7 @@ class EnrollmentListCreateView(APIView):
 
     def get(self, request):
         u = request.user
-        if not (u.is_superuser or has_perm(u, "admissions.student.view")):
+        if not has_perm(u, "admissions.enrollment.view"):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         qs = Enrollment.objects.select_related(
             "student", "program", "semester",
@@ -269,7 +322,7 @@ class EnrollmentDetailView(APIView):
     def get(self, request, pk):
         obj = self._obj(pk)
         u = request.user
-        if not (u.is_superuser or has_perm(u, "admissions.student.view")):
+        if not has_perm(u, "admissions.enrollment.view"):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         if not can_view_all_campuses(u) and not u.campuses.filter(pk=obj.campus_id).exists():
             raise Http404
@@ -310,7 +363,7 @@ class EnrollmentUndertakingView(APIView):
             raise Http404 from e
 
         u = request.user
-        if not (u.is_superuser or has_perm(u, "admissions.student.view")):
+        if not has_perm(u, "admissions.enrollment.send_undertaking"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         if not can_view_all_campuses(u) and not u.campuses.filter(
@@ -372,7 +425,7 @@ class StudentSendPortalCredentialsView(APIView):
         except Student.DoesNotExist as e:
             raise Http404 from e
         self.check_object_permissions(request, student)
-        if not has_perm(request.user, "admissions.student.edit"):
+        if not has_perm(request.user, "admissions.student.send_credentials"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
 
@@ -416,7 +469,7 @@ class StudentSendHandbookView(APIView):
         except Student.DoesNotExist as e:
             raise Http404 from e
         self.check_object_permissions(request, student)
-        if not has_perm(request.user, "admissions.student.edit"):
+        if not has_perm(request.user, "admissions.student.send_handbook"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
 
@@ -452,9 +505,7 @@ class BatchPromoteView(APIView):
 
     def post(self, request):
         u = request.user
-        if not (u.is_superuser
-                or has_perm(u, "admissions.enrollment.edit")
-                or has_perm(u, "admissions.student.promote")):
+        if not has_perm(u, "admissions.student.promote"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
 
@@ -531,10 +582,12 @@ class BatchGraduateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        # Graduating mints alumni records — neither an enrolment edit
+        # nor a certificate issue, so it has its own key. The
+        # per-enrolment endpoint (`EnrollmentGraduateView`) uses the
+        # same one.
         u = request.user
-        if not (u.is_superuser
-                or has_perm(u, "admissions.enrollment.edit")
-                or has_perm(u, "academics.certificate.issue")):
+        if not has_perm(u, "academics.certificate.graduate"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
 

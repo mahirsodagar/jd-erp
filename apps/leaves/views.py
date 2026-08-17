@@ -75,7 +75,9 @@ class LeaveTypeDetailView(APIView):
 # --- Allocations (HR bulk grant — legacy assign_leaves.php) -------------
 
 def _scope_allocations(qs, user):
-    if user.is_superuser or has_perm(user, "leaves.application.view_all"):
+    """Campus scope for allocations. Used to key off
+    `leaves.application.view_all` — a different resource's permission."""
+    if has_perm(user, "leaves.allocation.view_all_campuses"):
         return qs
     return qs.filter(employee__campus__in=user.campuses.all())
 
@@ -84,6 +86,11 @@ class AllocationListCreateView(APIView):
     permission_classes = [IsAuthenticated, LeaveAccessPolicy]
 
     def get(self, request):
+        # Allocations list every colleague's entitlements; this used to
+        # be readable by any authenticated user.
+        if not has_perm(request.user, "leaves.allocation.view"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
         qs = LeaveAllocation.objects.select_related(
             "employee", "leave_type", "created_by"
         )
@@ -211,20 +218,14 @@ class LeaveApplicationListCreateView(APIView):
         s.is_valid(raise_exception=True)
         d = s.validated_data
 
-        # Resolve target employee — self by default; HR can override.
-        me = get_employee_for(request.user)
-        target = d.get("employee") or me
+        # Always self — applying on someone else's behalf is not a
+        # supported action.
+        target = get_employee_for(request.user)
         if target is None:
             return Response(
                 {"detail": "No employee profile linked to this user."},
                 status=http.HTTP_400_BAD_REQUEST,
             )
-        if d.get("employee") and d["employee"] != me:
-            if not has_perm(request.user, "leaves.application.approve_any"):
-                return Response(
-                    {"detail": "HR override needed to apply on behalf of others."},
-                    status=http.HTTP_403_FORBIDDEN,
-                )
 
         # Legacy day count — plain calendar days (no weekend/holiday netting).
         days = count_days(
@@ -303,22 +304,24 @@ class LeaveDecisionView(APIView):
         except LeaveApplication.DoesNotExist as e:
             raise Http404 from e
         u = request.user
-        is_manager = app.manager_email.lower() == (u.email or "").lower()
-        can_decide = (
-            u.is_superuser
-            or has_perm(u, "leaves.application.approve_any")
-            or is_manager
-        )
-        if not can_decide:
-            return Response({"detail": "Not the manager for this leave."},
-                            status=http.HTTP_403_FORBIDDEN)
-
         if app.status != LeaveApplication.Status.PENDING:
             return Response({"detail": "Application is not pending."},
                             status=http.HTTP_400_BAD_REQUEST)
 
         s = DecisionSerializer(data=request.data)
         s.is_valid(raise_exception=True)
+
+        # The applicant's own manager decides without any key; anyone
+        # else needs the matching override for that outcome.
+        is_manager = app.manager_email.lower() == (u.email or "").lower()
+        override = (
+            "leaves.application.approve_any"
+            if s.validated_data["status"] == LeaveApplication.Status.APPROVED
+            else "leaves.application.reject_any"
+        )
+        if not (is_manager or has_perm(u, override)):
+            return Response({"detail": "Not the manager for this leave."},
+                            status=http.HTTP_403_FORBIDDEN)
         app.status = s.validated_data["status"]
         app.approver_remarks = s.validated_data.get("remarks", "")
         app.approved_by = get_employee_for(u)
@@ -387,7 +390,7 @@ class CompOffListCreateView(APIView):
         s = CompOffApplyInputSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         d = s.validated_data
-        target = d.get("employee") or get_employee_for(request.user)
+        target = get_employee_for(request.user)
         if target is None:
             return Response({"detail": "No employee profile linked."},
                             status=http.HTTP_400_BAD_REQUEST)
@@ -415,15 +418,24 @@ class CompOffDecisionView(APIView):
             raise Http404 from e
         u = request.user
         emp = co.employee
-        is_manager = emp.reporting_manager_1 and emp.reporting_manager_1.user_account_id == u.id
-        if not (u.is_superuser or has_perm(u, "leaves.compoff.approve_any") or is_manager):
-            return Response({"detail": "Not the manager for this comp-off."},
-                            status=http.HTTP_403_FORBIDDEN)
         if co.status != CompOffApplication.Status.PENDING:
             return Response({"detail": "Already decided."},
                             status=http.HTTP_400_BAD_REQUEST)
         s = DecisionSerializer(data=request.data)
         s.is_valid(raise_exception=True)
+
+        is_manager = bool(
+            emp.reporting_manager_1
+            and emp.reporting_manager_1.user_account_id == u.id
+        )
+        override = (
+            "leaves.compoff.approve_any"
+            if s.validated_data["status"] == CompOffApplication.Status.APPROVED
+            else "leaves.compoff.reject_any"
+        )
+        if not (is_manager or has_perm(u, override)):
+            return Response({"detail": "Not the manager for this comp-off."},
+                            status=http.HTTP_403_FORBIDDEN)
         co.status = s.validated_data["status"]
         co.approver = get_employee_for(u)
         co.approver_remarks = s.validated_data.get("remarks", "")

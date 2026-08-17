@@ -13,14 +13,19 @@ from .serializers import (
 from .services import notify_task_assigned, notify_task_completed
 
 
+def _has_perm(user, key: str) -> bool:
+    return user.is_authenticated and (
+        user.is_superuser
+        or user.roles.filter(permissions__key=key).exists()
+    )
+
+
 def _scope_for(user):
     """Default visibility — match JD_ERP's `created_by=$userid OR
     task_assign=$userid`. Superusers and users with `tasks.view_all`
     see everything (mirrors the All-Tasks report)."""
     base = Task.objects.select_related("assignee", "created_by")
-    if user.is_superuser:
-        return base
-    if user.roles.filter(permissions__key="tasks.view_all").exists():
+    if _has_perm(user, "tasks.view_all"):
         return base
     return base.filter(Q(created_by=user) | Q(assignee=user))
 
@@ -120,12 +125,20 @@ class TaskDetailView(APIView):
         return Response(TaskSerializer(task).data)
 
     def delete(self, request, pk):
+        """Only the creator deletes their own task.
+
+        The assignee used to be able to delete as well, which let an
+        inconvenient assignment be made to disappear along with the
+        record that it was ever made. `tasks.delete_any` is the admin
+        override.
+        """
         task = self._obj(pk, request.user)
-        if not (request.user.is_superuser
-                or task.created_by_id == request.user.id
-                or task.assignee_id == request.user.id):
-            return Response({"detail": "Permission denied."},
-                            status=http.HTTP_403_FORBIDDEN)
+        if not (task.created_by_id == request.user.id
+                or _has_perm(request.user, "tasks.delete_any")):
+            return Response(
+                {"detail": "Only the task's creator can delete it."},
+                status=http.HTTP_403_FORBIDDEN,
+            )
         task.delete()
         return Response(status=http.HTTP_204_NO_CONTENT)
 

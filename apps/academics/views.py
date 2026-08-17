@@ -29,7 +29,7 @@ from .models import (
     AlumniRecord, Assignment, AssignmentSubmission, Attendance,
     Certificate, Lesson, MarksEntry, ScheduleSlot,
 )
-from .permissions import ScheduleAccess, has_perm
+from .permissions import ScheduleAccess, TimetableAccess, has_perm
 from .serializers import (
     AlumniRecordSerializer, AlumniSelfUpdateSerializer,
     AssignmentSerializer, AssignmentSubmissionSerializer,
@@ -47,6 +47,15 @@ from .services import (
 )
 
 
+def _forced(request, user) -> bool:
+    """True when the caller asked to force past a classroom clash AND is
+    allowed to. Overriding a room double-booking is its own permission —
+    the slot records it via `classroom_conflict_overridden`."""
+    if not request.data.get("force", False):
+        return False
+    return has_perm(user, "academics.schedule.override_conflict")
+
+
 def _scope(qs, user):
     """Campus-scope mutations / non-admin reads."""
     if user.is_superuser or has_perm(user, "academics.schedule.view_all"):
@@ -57,7 +66,7 @@ def _scope(qs, user):
 # --- Schedule slot CRUD -----------------------------------------------
 
 class ScheduleSlotListCreateView(APIView):
-    permission_classes = [IsAuthenticated, ScheduleAccess]
+    permission_classes = [IsAuthenticated, TimetableAccess]
 
     def get(self, request):
         qs = ScheduleSlot.objects.select_related(
@@ -96,7 +105,7 @@ class ScheduleSlotListCreateView(APIView):
             instructor=d["instructor"], classroom=d.get("classroom"),
             time_slot=d["time_slot"], date=d["date"],
             created_by=request.user,
-            force=bool(request.data.get("force", False)),
+            force=_forced(request, request.user),
             notes=d.get("notes", ""),
         )
         if not slot:
@@ -109,7 +118,7 @@ class ScheduleSlotListCreateView(APIView):
 
 
 class ScheduleSlotDetailView(APIView):
-    permission_classes = [IsAuthenticated, ScheduleAccess]
+    permission_classes = [IsAuthenticated, TimetableAccess]
 
     def _obj(self, pk):
         try:
@@ -123,7 +132,7 @@ class ScheduleSlotDetailView(APIView):
     def patch(self, request, pk):
         slot = self._obj(pk)
         # Re-validate conflicts if a key field changes.
-        force = bool(request.data.get("force", False))
+        force = _forced(request, request.user)
         s = ScheduleSlotSerializer(slot, data=request.data, partial=True)
         s.is_valid(raise_exception=True)
 
@@ -193,7 +202,7 @@ class BulkWeeklyPublishView(APIView):
             weekday=d["weekday"], batch=batch, subject=subject,
             instructor=instructor, classroom=classroom,
             time_slot=time_slot, created_by=request.user,
-            force=d.get("force", False),
+            force=d.get("force", False) and _forced(request, request.user),
         )
         return Response(result, status=http.HTTP_201_CREATED)
 
@@ -260,7 +269,8 @@ class WeeklyGridPublishView(APIView):
         result = bulk_publish_weekly_grid(
             start_date=d["start_date"], end_date=d["end_date"],
             batch=batch, cells=d["cells"], resolver=_resolve,
-            created_by=request.user, force=d.get("force", False),
+            created_by=request.user,
+            force=d.get("force", False) and _forced(request, request.user),
         )
         return Response(result, status=http.HTTP_201_CREATED)
 
@@ -314,7 +324,7 @@ class ConflictCheckView(APIView):
     """Dry-run check — returns what would happen if a slot was created
     with the given fields. Useful for the HOD UI to give live feedback
     before submitting."""
-    permission_classes = [IsAuthenticated, ScheduleAccess]
+    permission_classes = [IsAuthenticated, TimetableAccess]
 
     def post(self, request):
         try:
@@ -355,8 +365,9 @@ class AttendanceRosterView(APIView):
     """`GET` — returns the slot's roster + each student's current
     attendance row (or null). `POST` — bulk mark.
 
-    Per-method auth: GET open to any auth user; POST checks
-    `_can_mark_attendance` (instructor-of-slot or perm holder)."""
+    Both methods allow the slot's own instructor through; everyone else
+    needs `academics.attendance.view_roster` to read and
+    `academics.attendance.mark` to write."""
     permission_classes = [IsAuthenticated]
 
     def _slot(self, pk):
@@ -369,6 +380,10 @@ class AttendanceRosterView(APIView):
 
     def get(self, request, pk):
         slot = self._slot(pk)
+        if not (_can_mark_attendance(request.user, slot)
+                or has_perm(request.user, "academics.attendance.view_roster")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
         existing = {
             a.student_id: a
             for a in Attendance.objects.filter(schedule_slot=slot)
@@ -424,6 +439,15 @@ class AttendanceRosterView(APIView):
 
         notified = 0
         if s.validated_data.get("notify_absent"):
+            # Messaging parents is a separate capability from recording
+            # the register. Fail loudly rather than saving and silently
+            # skipping the alerts.
+            if not has_perm(request.user, "academics.attendance.notify_absent"):
+                return Response(
+                    {"detail": "You cannot send absence alerts. Save "
+                               "without 'notify absent' ticked."},
+                    status=http.HTTP_403_FORBIDDEN,
+                )
             notified = notify_absent_students(slot)
 
         return Response({**result, "notified_absent": notified},
@@ -479,9 +503,14 @@ class BatchAttendanceReportView(APIView):
             batch = Batch.objects.get(pk=pk)
         except Batch.DoesNotExist as e:
             raise Http404 from e
-        if not (request.user.is_superuser
-                or has_perm(request.user, "academics.attendance.view_report")
-                or request.user.campuses.filter(pk=batch.campus_id).exists()):
+        # Campus membership alone used to be enough here, unlike every
+        # other attendance report. It now needs the report permission,
+        # scoped to your campuses unless you hold view_all_campuses.
+        u = request.user
+        if not has_perm(u, "academics.attendance.view_report"):
+            raise Http404
+        if not (has_perm(u, "academics.attendance.view_all_campuses")
+                or u.campuses.filter(pk=batch.campus_id).exists()):
             raise Http404
         params = request.query_params
         from_date = parse_date(params.get("from") or "") or None
@@ -563,6 +592,9 @@ class AssignmentListCreateView(APIView):
 
     def get(self, request):
         u = request.user
+        if not has_perm(u, "academics.assignment.view"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
         qs = Assignment.objects.select_related("subject", "program", "batch")
         params = request.query_params
         if v := params.get("subject"):
@@ -588,8 +620,9 @@ class AssignmentListCreateView(APIView):
                 qs = qs.filter(due_date__date__lte=d)
 
         # Campus scope: non-admins only see assignments for batches in
-        # their campus(es).
-        if not (u.is_superuser or has_perm(u, "academics.schedule.view_all")):
+        # their campus(es). This used to key off the Slot module's
+        # `academics.schedule.view_all`.
+        if not has_perm(u, "academics.assignment.view_all_campuses"):
             qs = qs.filter(batch__campus__in=u.campuses.all())
         return Response(AssignmentSerializer(
             qs[:500], many=True, context={"request": request}).data)
@@ -615,6 +648,9 @@ class AssignmentDetailView(APIView):
             raise Http404 from e
 
     def get(self, request, pk):
+        if not has_perm(request.user, "academics.assignment.view"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
         return Response(AssignmentSerializer(
             self._obj(pk), context={"request": request}).data)
 
@@ -650,7 +686,8 @@ class AssignmentSubmissionsView(APIView):
         except Assignment.DoesNotExist as e:
             raise Http404 from e
         u = request.user
-        if not (u.is_superuser or _is_assignment_owner(u, a)
+        if not (_is_assignment_owner(u, a)
+                or has_perm(u, "academics.assignment.view_submissions")
                 or has_perm(u, "academics.assignment.grade")):
             raise Http404
         qs = a.submissions.select_related("student", "graded_by").all()
@@ -789,9 +826,7 @@ class MarksListCreateView(APIView):
 
     def get(self, request):
         u = request.user
-        if not (u.is_superuser
-                or has_perm(u, "academics.marks.enter")
-                or has_perm(u, "academics.marks.publish")):
+        if not has_perm(u, "academics.marks.view"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         qs = MarksEntry.objects.select_related(
@@ -838,8 +873,7 @@ class MarksDetailView(APIView):
 
     def get(self, request, pk):
         u = request.user
-        if not (u.is_superuser or has_perm(u, "academics.marks.enter")
-                or has_perm(u, "academics.marks.publish")):
+        if not has_perm(u, "academics.marks.view"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         return Response(MarksEntrySerializer(self._obj(pk)).data)
@@ -887,7 +921,7 @@ class MarksUnpublishView(APIView):
 
     def post(self, request, pk):
         u = request.user
-        if not has_perm(u, "academics.marks.publish"):
+        if not has_perm(u, "academics.marks.unpublish"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         try:
@@ -939,6 +973,14 @@ class MyTranscriptView(APIView):
 
 # === G.5 — Certificates + Alumni ====================================
 
+def _record_campus_ids(user, scope_key: str):
+    """Campus ids the caller may see for a Records list, or None for
+    institute-wide. `scope_key` is the module's *_all_campuses key."""
+    if has_perm(user, scope_key):
+        return None
+    return list(user.campuses.values_list("pk", flat=True))
+
+
 class CertificateListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -949,11 +991,16 @@ class CertificateListCreateView(APIView):
             "requested_by", "issued_by",
         )
         # Visibility: own / view_all / superuser
-        if not (u.is_superuser or has_perm(u, "academics.certificate.view_all")):
+        if not has_perm(u, "academics.certificate.view_all"):
             student = getattr(u, "student", None)
             if student is None:
                 return Response([])
             qs = qs.filter(student=student)
+        else:
+            allowed = _record_campus_ids(
+                u, "academics.certificate.view_all_campuses")
+            if allowed is not None:
+                qs = qs.filter(student__campus_id__in=allowed)
         params = request.query_params
         if v := params.get("type"):
             qs = qs.filter(type=v)
@@ -1027,9 +1074,13 @@ class CertificateDetailView(APIView):
     def _can_view(self, user, cert: Certificate) -> bool:
         if user.is_superuser:
             return True
-        if has_perm(user, "academics.certificate.view_all"):
+        if cert.student.user_account_id == user.id:
             return True
-        return cert.student.user_account_id == user.id
+        if not has_perm(user, "academics.certificate.view_all"):
+            return False
+        allowed = _record_campus_ids(
+            user, "academics.certificate.view_all_campuses")
+        return allowed is None or cert.student.campus_id in allowed
 
     def get(self, request, pk):
         cert = self._obj(pk)
@@ -1123,7 +1174,7 @@ class CertificateRejectView(APIView):
 
     def post(self, request, pk):
         u = request.user
-        if not has_perm(u, "academics.certificate.issue"):
+        if not has_perm(u, "academics.certificate.reject"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         try:
@@ -1154,8 +1205,14 @@ class CertificatePdfView(APIView):
             raise Http404 from e
         u = request.user
         if not (u.is_superuser
-                or has_perm(u, "academics.certificate.view_all")
-                or cert.student.user_account_id == u.id):
+                or cert.student.user_account_id == u.id
+                or (has_perm(u, "academics.certificate.view_all")
+                    and (
+                        (allowed := _record_campus_ids(
+                            u, "academics.certificate.view_all_campuses"))
+                        is None
+                        or cert.student.campus_id in allowed
+                    ))):
             raise Http404
         if cert.status != Certificate.Status.ISSUED:
             return Response(
@@ -1193,8 +1250,7 @@ class EnrollmentGraduateView(APIView):
     def post(self, request, pk):
         from apps.admissions.models import Enrollment
         u = request.user
-        if not (u.is_superuser
-                or has_perm(u, "admissions.enrollment.edit")):
+        if not has_perm(u, "academics.certificate.graduate"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         try:
@@ -1225,8 +1281,13 @@ class AlumniListView(APIView):
             "student", "final_program", "final_batch",
         )
         # Default: own record only. HR/admin sees all.
-        if not (u.is_superuser or has_perm(u, "academics.alumni.view_all")):
+        if not has_perm(u, "academics.alumni.view_all"):
             qs = qs.filter(student__user_account=u)
+        else:
+            allowed = _record_campus_ids(
+                u, "academics.alumni.view_all_campuses")
+            if allowed is not None:
+                qs = qs.filter(student__campus_id__in=allowed)
         params = request.query_params
         if v := params.get("year"):
             qs = qs.filter(graduation_year=v)
@@ -1260,7 +1321,12 @@ class AlumniDetailView(APIView):
         u = request.user
         is_self = (a.student.user_account_id == u.id)
         if not (u.is_superuser or is_self
-                or has_perm(u, "academics.alumni.view_all")):
+                or (has_perm(u, "academics.alumni.view_all")
+                    and (
+                        (allowed := _record_campus_ids(
+                            u, "academics.alumni.view_all_campuses")) is None
+                        or a.student.campus_id in allowed
+                    ))):
             raise Http404
         return Response(AlumniRecordSerializer(a).data)
 
@@ -1331,8 +1397,11 @@ class TestListCreateView(APIView):
 
     def get(self, request):
         u = request.user
+        if not has_perm(u, "academics.test.view"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
         qs = _Test.objects.select_related("subject", "program", "academic_year")
-        if not (u.is_superuser or has_perm(u, "academics.test.view_all")):
+        if not has_perm(u, "academics.test.view_all"):
             # Faculty default: own tests; others get nothing on this endpoint.
             qs = qs.filter(created_by=u)
         params = request.query_params
@@ -1362,7 +1431,13 @@ class TestDetailView(APIView):
             raise Http404 from e
 
     def get(self, request, pk):
-        return Response(TestSerializer(self._obj(pk)).data)
+        t = self._obj(pk)
+        # Owners keep access to their own test without the view key.
+        if not (_is_test_owner(request.user, t)
+                or has_perm(request.user, "academics.test.view")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        return Response(TestSerializer(t).data)
 
     def patch(self, request, pk):
         t = self._obj(pk)
@@ -1752,6 +1827,9 @@ class LessonListCreateView(APIView):
 
     def get(self, request):
         u = request.user
+        if not has_perm(u, "academics.lesson.view"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
         qs = Lesson.objects.select_related(
             "batch", "hod", "class_mentor", "created_by",
         )
@@ -1774,10 +1852,9 @@ class LessonListCreateView(APIView):
                          | Q(mentor_status=Lesson.ReviewStatus.PENDING))
             qs = qs.filter(cond) if cond.children else qs.none()
 
-        # Campus scope for non-privileged users.
-        if not (u.is_superuser
-                or has_perm(u, "academics.lesson.view_all")
-                or has_perm(u, "academics.schedule.view_all")):
+        # Campus scope for non-privileged users. No longer widened by
+        # the Slot module's `academics.schedule.view_all`.
+        if not has_perm(u, "academics.lesson.view_all"):
             qs = qs.filter(batch__campus__in=u.campuses.all())
 
         rows = list(qs[:500])

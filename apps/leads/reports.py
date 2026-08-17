@@ -35,10 +35,15 @@ def _has_perm(user, key: str) -> bool:
 
 
 class _ReportBase(APIView):
+    """Each report declares the key it needs. `leads.report.view` used to
+    cover all seven, which put course-wise revenue and the counsellor
+    leaderboard on the same checkbox as a duplicate-phone count."""
+
     permission_classes = [IsAuthenticated]
+    required_perm = None
 
     def _check(self, request):
-        if not _has_perm(request.user, "leads.report.view"):
+        if not _has_perm(request.user, self.required_perm):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         return None
@@ -57,6 +62,8 @@ class _ReportBase(APIView):
 # --- Conversion funnel ------------------------------------------------
 
 class ConversionFunnelView(_ReportBase):
+    required_perm = "leads.report.funnel"
+
     def get(self, request):
         if (resp := self._check(request)) is not None:
             return resp
@@ -109,6 +116,8 @@ class ConversionFunnelView(_ReportBase):
 # --- Counsellor leaderboard -------------------------------------------
 
 class CounsellorLeaderboardView(_ReportBase):
+    required_perm = "leads.report.leaderboard"
+
     def get(self, request):
         if (resp := self._check(request)) is not None:
             return resp
@@ -143,6 +152,8 @@ class CounsellorLeaderboardView(_ReportBase):
 # --- Time spent at each pipeline stage --------------------------------
 
 class TimePerStageView(_ReportBase):
+    required_perm = "leads.report.funnel"
+
     def get(self, request):
         if (resp := self._check(request)) is not None:
             return resp
@@ -179,6 +190,8 @@ class TimePerStageView(_ReportBase):
 # --- Lost-lead analysis (Cold dispositions) ---------------------------
 
 class LostLeadAnalysisView(_ReportBase):
+    required_perm = "leads.report.quality"
+
     def get(self, request):
         if (resp := self._check(request)) is not None:
             return resp
@@ -211,6 +224,8 @@ class LostLeadAnalysisView(_ReportBase):
 # --- Course-wise enrollment + revenue forecast ------------------------
 
 class CoursewiseRevenueView(_ReportBase):
+    required_perm = "leads.report.revenue"
+
     def get(self, request):
         if (resp := self._check(request)) is not None:
             return resp
@@ -251,6 +266,8 @@ class CoursewiseRevenueView(_ReportBase):
 # --- Duplicate frequency by phone -------------------------------------
 
 class DuplicateFrequencyView(_ReportBase):
+    required_perm = "leads.report.quality"
+
     def get(self, request):
         if (resp := self._check(request)) is not None:
             return resp
@@ -275,6 +292,9 @@ class DuplicateFrequencyView(_ReportBase):
 class SummaryView(_ReportBase):
     """Single endpoint returning the headline numbers a manager wants
     to see in the morning email."""
+
+    required_perm = "leads.report.funnel"
+
     def get(self, request):
         if (resp := self._check(request)) is not None:
             return resp

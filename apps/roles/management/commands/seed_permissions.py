@@ -10,6 +10,15 @@ class Command(BaseCommand):
     )
 
     def handle(self, *args, **opts):
+        # Reseeding alone strips access on an existing install: the
+        # granular split introduced narrow keys that no role holds yet,
+        # and it prunes retired ones. `migrate_permissions` seeds AND
+        # carries roles across; use this command only on a fresh DB.
+        self.stdout.write(self.style.WARNING(
+            "Note: on an existing database use `migrate_permissions` "
+            "instead — it seeds and backfills roles. This command also "
+            "resets the Faculty role to its baseline keys.",
+        ))
         removed = seed_permissions()
         seed_admin_role()
         seed_faculty_role()

@@ -1,3 +1,4 @@
+from django.core.exceptions import ImproperlyConfigured
 from django.utils.dateparse import parse_date
 from django.utils.timezone import now
 from rest_framework import status as http
@@ -167,7 +168,8 @@ class LeadReassignView(APIView):
 
 
 class LeadHistoryView(APIView):
-    permission_classes = [IsAuthenticated, LeadVisibility]
+    permission_classes = [IsAuthenticated, LeadVisibility, HasPerm]
+    required_perm = "leads.lead.view_history"
 
     def get(self, request, pk):
         lead = Lead.objects.get(pk=pk)
@@ -183,7 +185,7 @@ class LeadApplicationCloseView(APIView):
     403. Counsellor-side edits via authenticated endpoints are
     unaffected."""
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "leads.lead.edit"
+    required_perm = "leads.application_form.lock"
 
     def post(self, request, pk):
         from django.utils import timezone
@@ -201,7 +203,7 @@ class LeadApplicationCloseView(APIView):
 class LeadApplicationOpenView(APIView):
     """Re-open the form so the student can edit again."""
     permission_classes = [IsAuthenticated, HasPerm]
-    required_perm = "leads.lead.edit"
+    required_perm = "leads.application_form.lock"
 
     def post(self, request, pk):
         lead = Lead.objects.get(pk=pk)
@@ -286,10 +288,21 @@ class LeadCommunicationListCreateView(APIView):
 
 # --- Counsellor pools (F.3) -------------------------------------------
 
+def _require_pool_view(request):
+    """Pool reads were open to any authenticated user; `leads.pool.view`
+    now gates them the same way add/edit/delete are gated."""
+    u = request.user
+    if u.is_superuser or u.roles.filter(permissions__key="leads.pool.view").exists():
+        return None
+    return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
+
+
 class PoolListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        if (err := _require_pool_view(request)) is not None:
+            return err
         qs = CounsellorPool.objects.prefetch_related("memberships__user")
         if request.query_params.get("active") == "1":
             qs = qs.filter(is_active=True)
@@ -310,6 +323,8 @@ class PoolDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
+        if (err := _require_pool_view(request)) is not None:
+            return err
         try:
             pool = CounsellorPool.objects.prefetch_related("memberships__user").get(pk=pk)
         except CounsellorPool.DoesNotExist as e:
@@ -335,6 +350,8 @@ class PoolMembershipListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        if (err := _require_pool_view(request)) is not None:
+            return err
         qs = CounsellorPoolMembership.objects.select_related("pool", "user")
         if v := request.query_params.get("pool"):
             qs = qs.filter(pool_id=v)
@@ -400,10 +417,13 @@ class LeadPromoteView(APIView):
             return Response({"detail": "Lead not found."}, status=http.HTTP_404_NOT_FOUND)
         self.check_object_permissions(request, lead)
 
-        from apps.accounts.permissions import HasPerm
+        # Promotion needs BOTH keys: the Leads-side permission to convert
+        # a lead, and the Admissions-side permission to create the
+        # student record it produces.
         from apps.admissions.permissions import has_perm as has_adm_perm
         if not (request.user.is_superuser
-                or has_adm_perm(request.user, "admissions.student.create")):
+                or (has_adm_perm(request.user, "admissions.student.create")
+                    and has_adm_perm(request.user, "leads.lead.promote"))):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
 
         from apps.admissions.serializers import PromotionResultSerializer
@@ -426,10 +446,15 @@ class LeadPromoteView(APIView):
 # --- Send Application / Fee / Welcome links ---------------------------
 
 class _SendLinkBase(APIView):
-    """Shared permission gate + lead lookup for the three Send actions."""
+    """Shared lead lookup + permission gate for the Send / fee actions.
+
+    Each subclass declares its own `required_perm` — sending a fee link,
+    sending an application link and recording an application fee are
+    distinct capabilities, not one blanket "communications" grant.
+    """
 
     permission_classes = [IsAuthenticated, LeadVisibility]
-    required_perm = "leads.communication.log"
+    required_perm = None
 
     def _resolve(self, request, pk):
         try:
@@ -439,6 +464,10 @@ class _SendLinkBase(APIView):
                 {"detail": "Lead not found."}, status=http.HTTP_404_NOT_FOUND,
             )
         self.check_object_permissions(request, lead)
+        if not self.required_perm:
+            raise ImproperlyConfigured(
+                f"{type(self).__name__} must declare a `required_perm`.",
+            )
         if not (request.user.is_superuser
                 or request.user.roles.filter(
                     permissions__key=self.required_perm,
@@ -451,6 +480,8 @@ class _SendLinkBase(APIView):
 
 class LeadSendApplicationLinkView(_SendLinkBase):
     """Body: { "institute": "JDIFT" | "JDSD" }"""
+
+    required_perm = "leads.send.application_link"
 
     def post(self, request, pk):
         from .send_links import send_application_link
@@ -477,6 +508,8 @@ class LeadSendApplicationLinkView(_SendLinkBase):
 class LeadSendFeeLinkView(_SendLinkBase):
     """Body: { "institute": "JDIFT" | "JDSD" }"""
 
+    required_perm = "leads.send.fee_link"
+
     def post(self, request, pk):
         from .send_links import send_fee_link
 
@@ -502,6 +535,8 @@ class LeadSendFeeLinkView(_SendLinkBase):
 class LeadSendWelcomeView(_SendLinkBase):
     """No body. Sends welcome email to lead.email."""
 
+    required_perm = "leads.send.welcome"
+
     def post(self, request, pk):
         from .send_links import send_welcome_message
 
@@ -517,6 +552,8 @@ class LeadSendWelcomeView(_SendLinkBase):
 
 
 class LeadMarkFeePaidView(_SendLinkBase):
+    required_perm = "leads.application_fee.record"
+
     """Body: { amount?, mode?, ref?, paid_at?, notes? }
 
     Records the application fee as paid on the lead. This is the gate
@@ -570,6 +607,8 @@ class LeadMarkFeePaidView(_SendLinkBase):
 
 class LeadClearFeePaidView(_SendLinkBase):
     """Undo a mark-paid (mistake correction). All fields cleared."""
+
+    required_perm = "leads.application_fee.clear"
 
     def post(self, request, pk):
         lead, err = self._resolve(request, pk)

@@ -141,6 +141,41 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    # Personal, family and address fields — withheld from staff who lack
+    # `employees.employee.view_sensitive`. Mirrors
+    # `StudentDetailSerializer.SENSITIVE_FIELDS`; identity and posting
+    # (name, code, designation, department, campus) stay visible so the
+    # record is still usable as a directory entry.
+    SENSITIVE_FIELDS = (
+        "dob", "nationality", "blood_group", "gender", "qualification",
+        "current_address", "current_city", "current_state",
+        "permanent_address", "permanent_city", "permanent_state",
+        "mobile_primary", "mobile_alternate",
+        "email_primary", "email_alternate",
+    )
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if not self._can_view_sensitive(instance):
+            for f in self.SENSITIVE_FIELDS:
+                data.pop(f, None)
+        return data
+
+    def _can_view_sensitive(self, obj) -> bool:
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user is None or not user.is_authenticated:
+            return False
+        if user.is_superuser:
+            return True
+        # An employee always sees their own record in full — the
+        # self-edit form depends on it.
+        if obj.user_account_id and obj.user_account_id == user.id:
+            return True
+        return user.roles.filter(
+            permissions__key="employees.employee.view_sensitive",
+        ).exists()
+
     def get_photo_url(self, obj):
         request = self.context.get("request")
         return request.build_absolute_uri(obj.photo.url) if obj.photo and request else None
@@ -171,7 +206,7 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
         if obj.user_account_id and obj.user_account_id == user.id:
             return False
         return user.roles.filter(
-            permissions__key="employees.employee.edit",
+            permissions__key="employees.employee.provision_portal",
         ).exists()
 
 

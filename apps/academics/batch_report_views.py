@@ -1,8 +1,18 @@
 """Batch Report module — read endpoints (batch list + student roster)
 plus the two feedback-link mutations (edit link, toggle enable).
 
-Read is gated on ``academics.batch_report.view``; the feedback-link
-mutation on ``academics.batch_report.edit_feedback``.
+The batch list needs ``academics.batch_report.view``; the roster needs
+``academics.batch_report.view_roster``; the feedback-link mutation needs
+``academics.batch_report.edit_feedback``.
+
+Two extra rules keep this report from being a side door around the
+Students module:
+
+* results are scoped to the caller's campuses unless they hold
+  ``academics.batch_report.view_all_campuses``;
+* the roster's personal / family / address columns are withheld unless
+  the caller also holds ``admissions.student.view_sensitive`` — the same
+  key that gates those fields on the student profile.
 """
 
 from django.http import Http404
@@ -21,8 +31,29 @@ def _can_view(user) -> bool:
     return user.is_superuser or has_perm(user, "academics.batch_report.view")
 
 
+def _can_view_roster(user) -> bool:
+    return has_perm(user, "academics.batch_report.view_roster")
+
+
 def _can_edit(user) -> bool:
     return user.is_superuser or has_perm(user, "academics.batch_report.edit_feedback")
+
+
+def _allowed_campus_ids(user):
+    """Campus ids the caller may see, or None for institute-wide."""
+    if has_perm(user, "academics.batch_report.view_all_campuses"):
+        return None
+    return list(user.campuses.values_list("pk", flat=True))
+
+
+def _in_scope(user, batch) -> bool:
+    allowed = _allowed_campus_ids(user)
+    return allowed is None or batch.campus_id in allowed
+
+
+def _can_view_sensitive(user) -> bool:
+    """Mirrors `StudentDetailSerializer._can_view_sensitive`."""
+    return has_perm(user, "admissions.student.view_sensitive")
 
 
 def _deny():
@@ -55,6 +86,7 @@ class BatchReportListView(APIView):
             academic_year=_int(p, "academic_year"),
             campus=_int(p, "campus"),
             program=_int(p, "program"),
+            allowed_campus_ids=_allowed_campus_ids(request.user),
         ))
 
 
@@ -64,9 +96,15 @@ class BatchRosterView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
-        if not _can_view(request.user):
+        if not _can_view_roster(request.user):
             return _deny()
-        return Response(reports.batch_roster(_get_batch(pk)))
+        batch = _get_batch(pk)
+        if not _in_scope(request.user, batch):
+            raise Http404
+        return Response(reports.batch_roster(
+            batch,
+            include_sensitive=_can_view_sensitive(request.user),
+        ))
 
 
 class BatchFeedbackView(APIView):
@@ -79,6 +117,8 @@ class BatchFeedbackView(APIView):
         if not _can_edit(request.user):
             return _deny()
         batch = _get_batch(pk)
+        if not _in_scope(request.user, batch):
+            raise Http404
         data = request.data or {}
         updated = []
         if "feedback_link" in data:

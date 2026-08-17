@@ -2,8 +2,6 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
-from apps.employees.models import Employee
-
 from .models import (
     CompOffApplication, EmailDispatchLog,
     LeaveAllocation, LeaveApplication, LeaveType,
@@ -115,10 +113,9 @@ class LeaveApplyInputSerializer(serializers.Serializer):
     reason = serializers.CharField(min_length=3, max_length=2000)
     manager_email = serializers.EmailField(required=False, allow_blank=True)
     cc_emails = serializers.CharField(required=False, allow_blank=True, max_length=255)
-    employee = serializers.PrimaryKeyRelatedField(
-        queryset=Employee.objects.all(), required=False,
-        help_text="HR-only: apply on behalf of another employee.",
-    )
+    # No `employee` field: a leave application is always for yourself.
+    # The on-behalf-of path was authorised by the *approval* key, which
+    # let an approver create records for colleagues.
 
     def validate(self, attrs):
         if attrs["to_date"] < attrs["from_date"]:
@@ -170,9 +167,9 @@ class CompOffApplyInputSerializer(serializers.Serializer):
     worked_session_1 = serializers.IntegerField(min_value=0, max_value=1)
     worked_session_2 = serializers.IntegerField(min_value=0, max_value=1)
     reason = serializers.CharField(min_length=3, max_length=2000)
-    employee = serializers.PrimaryKeyRelatedField(
-        queryset=Employee.objects.all(), required=False,
-    )
+    # No `employee` field — see LeaveApplyInputSerializer. This one was
+    # worse: the override had no permission check at all, so any user
+    # could file a comp-off against any colleague.
 
     def validate(self, attrs):
         s1, s2 = attrs["worked_session_1"], attrs["worked_session_2"]

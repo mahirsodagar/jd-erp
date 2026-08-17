@@ -71,7 +71,7 @@ class LeadBulkMessageView(APIView):
 
     permission_classes = [IsAuthenticated, LeadVisibility]
     parser_classes = [MultiPartParser, FormParser]
-    required_perm = "leads.communication.log"
+    required_perm = "leads.bulk_message.send"
 
     def post(self, request):
         if not (request.user.is_superuser

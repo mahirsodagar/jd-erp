@@ -170,10 +170,16 @@ class StateManageView(APIView):
 
 
 class StateDetailView(_MasterDetailMixin, APIView):
-    permission_classes = [IsAuthenticated, HasPerm]
+    """Reads open like the list above; writes need `master.state.*`."""
+
     perm_base = "master.state"
     model = State
     serializer = StateSerializer
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), HasPerm()]
 
 
 # --- City ---------------------------------------------------------------
@@ -205,8 +211,14 @@ class CityListCreateView(APIView):
 
 
 class CityDetailView(_MasterDetailMixin, APIView):
-    permission_classes = [IsAuthenticated, HasPerm]
+    """Reads open like the list above; writes need `master.city.*`."""
+
     perm_base = "master.city"
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), HasPerm()]
     model = City
     serializer = CitySerializer
 
@@ -217,6 +229,19 @@ class CityDetailView(_MasterDetailMixin, APIView):
 # CUD requires the relevant manage perm.
 
 class _ListCreateBase(APIView):
+    """Reference-data list + create.
+
+    Reads are OPEN to any authenticated user by design: these lists feed
+    dropdowns all over the app (the schedule builder needs subjects and
+    classrooms, enrolment needs batches and semesters, and so on), so
+    gating them would break pickers for everyone without master keys.
+    Consequently these resources carry no `.view` permission — only
+    `add` / `edit` / `delete`, which are enforced here.
+
+    Fee templates are the exception: they are pricing data, not picker
+    data, and gate their reads (see `FeeTemplateListCreateView`).
+    """
+
     model = None
     serializer = None
     required_perm = ""
@@ -240,6 +265,8 @@ class _ListCreateBase(APIView):
 
 
 class _DetailBase(APIView):
+    """Detail counterpart of `_ListCreateBase` — same open-read rule."""
+
     model = None
     serializer = None
     required_perm = ""
@@ -397,9 +424,16 @@ class TimeSlotDetailView(_DetailBase):
 
 
 class FeeTemplateListCreateView(_ListCreateBase):
+    """Pricing data, not picker data — reads are gated too, unlike the
+    other reference lists on `_ListCreateBase`."""
+
+    permission_classes = [IsAuthenticated, HasPerm]
     model = FeeTemplate
     serializer = FeeTemplateSerializer
     perm_base = "master.feetemplate"
+
+    def get_permissions(self):
+        return [IsAuthenticated(), HasPerm()]
 
     def get(self, request):
         qs = FeeTemplate.objects.select_related(
@@ -417,9 +451,14 @@ class FeeTemplateListCreateView(_ListCreateBase):
 
 
 class FeeTemplateDetailView(_DetailBase):
+    """Reads gated — see `FeeTemplateListCreateView`."""
+
     model = FeeTemplate
     serializer = FeeTemplateSerializer
     perm_base = "master.feetemplate"
+
+    def get_permissions(self):
+        return [IsAuthenticated(), HasPerm()]
 
 
 # --- Lead Source --------------------------------------------------------

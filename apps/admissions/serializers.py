@@ -97,6 +97,44 @@ class StudentDetailSerializer(serializers.ModelSerializer):
             "application_fee_recorded_by_name",
         ]
 
+    # Personal, family and address fields. Withheld from staff who lack
+    # `admissions.student.view_sensitive` — the student's own name,
+    # mobile and email stay visible so the record is still identifiable.
+    SENSITIVE_FIELDS = (
+        "father_name", "mother_name",
+        "gender", "dob", "category", "study_medium",
+        "nationality", "blood_group",
+        "current_address", "current_city", "current_city_name",
+        "current_state", "current_state_name", "current_pincode",
+        "permanent_address", "permanent_city", "permanent_city_name",
+        "permanent_state", "permanent_state_name", "permanent_pincode",
+        "father_mobile", "mother_mobile",
+        "father_email", "mother_email",
+        "father_occupation", "mother_occupation",
+    )
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if not self._can_view_sensitive(instance):
+            for f in self.SENSITIVE_FIELDS:
+                data.pop(f, None)
+        return data
+
+    def _can_view_sensitive(self, obj) -> bool:
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user is None or not user.is_authenticated:
+            return False
+        if user.is_superuser:
+            return True
+        # A student always sees their own record in full — the `me/`
+        # panel and the self-fill form depend on it.
+        if obj.user_account_id and obj.user_account_id == user.id:
+            return True
+        return user.roles.filter(
+            permissions__key="admissions.student.view_sensitive",
+        ).exists()
+
     def get_photo_url(self, obj):
         request = self.context.get("request")
         return request.build_absolute_uri(obj.photo.url) if obj.photo and request else None
@@ -125,7 +163,7 @@ class StudentDetailSerializer(serializers.ModelSerializer):
         if obj.user_account_id and obj.user_account_id == user.id:
             return False
         return user.roles.filter(
-            permissions__key="admissions.student.edit",
+            permissions__key="admissions.student.send_credentials",
         ).exists()
 
 

@@ -27,6 +27,16 @@ def _has_perm(user, key: str) -> bool:
     )
 
 
+def _is_mentor_of(user, application) -> bool:
+    """True when this user is the batch mentor on that application.
+
+    Mentorship is carried as a denormalised `batch_mentor_email` (legacy
+    PHP port), so it is matched by email rather than by FK.
+    """
+    email = (application.batch_mentor_email or "").lower()
+    return bool(email) and email in _mentor_emails(user)
+
+
 def _mentor_emails(user) -> list[str]:
     """Emails identifying this user as a batch mentor: the account email plus
     the linked employee's primary email (batch_mentor_email is stored as the
@@ -101,18 +111,42 @@ class StudentLeaveReportView(APIView):
 
 
 class StudentLeaveDecideView(APIView):
+    """Approve or reject one application.
+
+    Approving and rejecting are separate permissions, and both are
+    scoped the same way the console list is: you may only decide leaves
+    for batches you mentor, unless you hold `student_leaves.view_all`.
+    Previously `student_leaves.decide` let you act on any application
+    by id, even one the console would never show you.
+    """
+
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        if not _has_perm(request.user, "student_leaves.decide"):
-            return Response({"detail": "Permission denied."},
-                            status=http.HTTP_403_FORBIDDEN)
         try:
             app = StudentLeaveApplication.objects.select_related("student").get(pk=pk)
         except StudentLeaveApplication.DoesNotExist as e:
             raise Http404 from e
+
         s = DecideStudentLeaveSerializer(data=request.data)
         s.is_valid(raise_exception=True)
+
+        decision = s.validated_data["decision"]
+        needed = (
+            "student_leaves.approve"
+            if decision == StudentLeaveApplication.Status.APPROVED
+            else "student_leaves.reject"
+        )
+        if not _has_perm(request.user, needed):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        if not (_has_perm(request.user, "student_leaves.view_all")
+                or _is_mentor_of(request.user, app)):
+            return Response(
+                {"detail": "You are not the batch mentor for this student."},
+                status=http.HTTP_403_FORBIDDEN,
+            )
+
         try:
             services.decide_leave(
                 application=app,

@@ -2,7 +2,12 @@
 inline awards / portfolio / remarks upsert.
 
 Read is gated on ``academics.closing_report.view``; the awards upsert on
-``academics.closing_report.edit``.
+``academics.closing_report.edit``. Both are scoped to the caller's
+campuses unless they hold ``academics.closing_report.view_all_campuses``.
+
+The sheet carries no personal contact data (name, application id,
+attendance % and the three award columns only), so unlike the Batch
+Report roster it needs no ``admissions.student.view_sensitive`` check.
 """
 
 from django.http import Http404
@@ -31,6 +36,13 @@ def _deny():
                     status=http.HTTP_403_FORBIDDEN)
 
 
+def _in_scope(user, batch) -> bool:
+    """Campus scope, mirroring the Batch Report."""
+    if has_perm(user, "academics.closing_report.view_all_campuses"):
+        return True
+    return user.campuses.filter(pk=batch.campus_id).exists()
+
+
 def _get_batch(pk):
     try:
         return (Batch.objects
@@ -48,7 +60,10 @@ class ClosingReportView(APIView):
     def get(self, request, pk):
         if not _can_view(request.user):
             return _deny()
-        return Response(reports.closing_report(_get_batch(pk)))
+        batch = _get_batch(pk)
+        if not _in_scope(request.user, batch):
+            raise Http404
+        return Response(reports.closing_report(batch))
 
 
 class ClosingAwardSaveView(APIView):
@@ -62,6 +77,8 @@ class ClosingAwardSaveView(APIView):
         if not _can_edit(request.user):
             return _deny()
         batch = _get_batch(pk)
+        if not _in_scope(request.user, batch):
+            raise Http404
         data = request.data or {}
         student_id = data.get("student")
         if not student_id:

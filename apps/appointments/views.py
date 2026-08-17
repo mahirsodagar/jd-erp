@@ -21,16 +21,42 @@ def _has_perm(user, key: str) -> bool:
     )
 
 
+def _my_employee_id(user):
+    """The Employee id a faculty request would be addressed to, if any."""
+    emp = getattr(user, "employee", None)
+    return emp.id if emp is not None else None
+
+
+def _addressed_to_me(user, appt) -> bool:
+    """True when this request names the caller as the faculty member.
+
+    Team-addressed requests (no `faculty`) are never "mine" — there is
+    no team-membership model to resolve them against, so they are
+    visible only with `appointments.view_all`.
+    """
+    emp_id = _my_employee_id(user)
+    return emp_id is not None and appt.faculty_id == emp_id
+
+
+def _in_scope(user, appt) -> bool:
+    return _has_perm(user, "appointments.view_all") or _addressed_to_me(user, appt)
+
+
 class AppointmentListView(APIView):
     """Staff: list student appointment requests across the system."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        if not _has_perm(request.user, "appointments.view_all"):
-            return Response({"detail": "Permission denied."},
-                            status=http.HTTP_403_FORBIDDEN)
+        u = request.user
         qs = (StudentAppointment.objects
               .select_related("student", "faculty", "decided_by"))
+        if not _has_perm(u, "appointments.view_all"):
+            # Self-service: a faculty member sees requests addressed to
+            # them, and nothing if none are.
+            emp_id = _my_employee_id(u)
+            if emp_id is None:
+                return Response([])
+            qs = qs.filter(faculty_id=emp_id)
         p = request.query_params
         if v := p.get("status"):
             qs = qs.filter(status=v)
@@ -48,16 +74,31 @@ class AppointmentDecideView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        if not _has_perm(request.user, "appointments.decide"):
-            return Response({"detail": "Permission denied."},
-                            status=http.HTTP_403_FORBIDDEN)
         try:
             appt = StudentAppointment.objects.select_related("student").get(pk=pk)
         except StudentAppointment.DoesNotExist as e:
             raise Http404 from e
+
         s = DecideAppointmentSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         d = s.validated_data
+
+        needed = (
+            "appointments.confirm"
+            if d["decision"] == StudentAppointment.Status.CONFIRMED
+            else "appointments.decline"
+        )
+        if not _has_perm(request.user, needed):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        # Same scope as the list — otherwise a request addressed to a
+        # colleague could still be answered by id.
+        if not _in_scope(request.user, appt):
+            return Response(
+                {"detail": "This request is not addressed to you."},
+                status=http.HTTP_403_FORBIDDEN,
+            )
+
         try:
             services.decide_appointment(
                 appointment=appt,
@@ -79,13 +120,18 @@ class AppointmentCompleteView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        if not _has_perm(request.user, "appointments.decide"):
+        if not _has_perm(request.user, "appointments.complete"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         try:
             appt = StudentAppointment.objects.select_related("student").get(pk=pk)
         except StudentAppointment.DoesNotExist as e:
             raise Http404 from e
+        if not _in_scope(request.user, appt):
+            return Response(
+                {"detail": "This request is not addressed to you."},
+                status=http.HTTP_403_FORBIDDEN,
+            )
         try:
             services.complete_appointment(appointment=appt,
                                           decided_by=request.user)

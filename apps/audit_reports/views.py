@@ -55,17 +55,31 @@ def _student_of(user):
 # Nobody edits another faculty's report (no submit-on-behalf).
 
 def _fd_can_view(user, *, is_own: bool) -> bool:
-    if user.is_superuser or has_perm(user, "audit.faculty_daily.view_all"):
+    if (has_perm(user, "audit.faculty_daily.view_all")
+            or has_perm(user, "audit.faculty_daily.edit_any")
+            or has_perm(user, "audit.faculty_daily.delete_any")):
         return True
     return is_own and has_perm(user, "dashboard.daily_report.submit")
 
 
 def _fd_can_manage(user, *, is_own: bool) -> bool:
-    """Create / edit / delete — own rows only."""
+    """Create / upsert — own rows only. There is no submit-on-behalf."""
     return bool(
         user.is_superuser
         or (is_own and has_perm(user, "dashboard.daily_report.submit"))
     )
+
+
+def _fd_can_edit(user, *, is_own: bool) -> bool:
+    """Own row with `submit`, or anyone's with `edit_any`."""
+    return (_fd_can_manage(user, is_own=is_own)
+            or has_perm(user, "audit.faculty_daily.edit_any"))
+
+
+def _fd_can_delete(user, *, is_own: bool) -> bool:
+    """Own row with `submit`, or anyone's with `delete_any`."""
+    return (_fd_can_manage(user, is_own=is_own)
+            or has_perm(user, "audit.faculty_daily.delete_any"))
 
 
 def _fd_is_own(user, faculty_id) -> bool:
@@ -86,7 +100,11 @@ class FacultyDailyReportListCreateView(APIView):
     def get(self, request):
         u = request.user
         qs = FacultyDailyReport.objects.select_related("faculty")
-        if not (u.is_superuser or has_perm(u, "audit.faculty_daily.view_all")):
+        # `*_any` holders need to reach the rows they may edit / delete,
+        # otherwise the permission is unusable without `view_all` too.
+        if not (has_perm(u, "audit.faculty_daily.view_all")
+                or has_perm(u, "audit.faculty_daily.edit_any")
+                or has_perm(u, "audit.faculty_daily.delete_any")):
             # Restricted to own rows — requires the dashboard submit perm.
             emp = _emp_of(u)
             if emp is None or not has_perm(u, "dashboard.daily_report.submit"):
@@ -145,8 +163,8 @@ class FacultyDailyReportDetailView(APIView):
 
     def patch(self, request, pk):
         obj = self._obj(pk)
-        if not _fd_can_manage(request.user,
-                              is_own=_fd_is_own(request.user, obj.faculty_id)):
+        if not _fd_can_edit(request.user,
+                            is_own=_fd_is_own(request.user, obj.faculty_id)):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         s = FacultyDailyReportSerializer(obj, data=request.data, partial=True)
@@ -156,7 +174,7 @@ class FacultyDailyReportDetailView(APIView):
 
     def delete(self, request, pk):
         obj = self._obj(pk)
-        if not _fd_can_manage(request.user,
+        if not _fd_can_delete(request.user,
                               is_own=_fd_is_own(request.user, obj.faculty_id)):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
@@ -198,9 +216,10 @@ class FacultyDailyComputedView(APIView):
 
 def _can_use_audit_filters(user) -> bool:
     return bool(
-        user.is_superuser
-        or has_perm(user, "audit.faculty_daily.view_all")
+        has_perm(user, "audit.faculty_daily.view_all")
         or has_perm(user, "audit.admin_daily.view_all")
+        or has_perm(user, "audit.faculty_daily.edit_any")
+        or has_perm(user, "audit.admin_daily.edit_any")
     )
 
 
@@ -303,17 +322,29 @@ class AuditFilterAdminDailyAuthorsView(APIView):
 # Nobody edits another user's report.
 
 def _ad_can_view(user, *, is_own: bool) -> bool:
-    if user.is_superuser or has_perm(user, "audit.admin_daily.view_all"):
+    if (has_perm(user, "audit.admin_daily.view_all")
+            or has_perm(user, "audit.admin_daily.edit_any")
+            or has_perm(user, "audit.admin_daily.delete_any")):
         return True
     return is_own and has_perm(user, "dashboard.admin_daily.submit")
 
 
 def _ad_can_manage(user, *, is_own: bool) -> bool:
-    """Create / edit / delete — own rows only."""
+    """Create / upsert — own rows only. There is no submit-on-behalf."""
     return bool(
         user.is_superuser
         or (is_own and has_perm(user, "dashboard.admin_daily.submit"))
     )
+
+
+def _ad_can_edit(user, *, is_own: bool) -> bool:
+    return (_ad_can_manage(user, is_own=is_own)
+            or has_perm(user, "audit.admin_daily.edit_any"))
+
+
+def _ad_can_delete(user, *, is_own: bool) -> bool:
+    return (_ad_can_manage(user, is_own=is_own)
+            or has_perm(user, "audit.admin_daily.delete_any"))
 
 
 class AdminDailyReportListCreateView(APIView):
@@ -322,7 +353,9 @@ class AdminDailyReportListCreateView(APIView):
     def get(self, request):
         u = request.user
         qs = AdminDailyReport.objects.select_related("user")
-        if not (u.is_superuser or has_perm(u, "audit.admin_daily.view_all")):
+        if not (has_perm(u, "audit.admin_daily.view_all")
+                or has_perm(u, "audit.admin_daily.edit_any")
+                or has_perm(u, "audit.admin_daily.delete_any")):
             if not has_perm(u, "dashboard.admin_daily.submit"):
                 return Response([])
             qs = qs.filter(user=u)
@@ -369,7 +402,7 @@ class AdminDailyReportDetailView(APIView):
 
     def patch(self, request, pk):
         obj = self._obj(pk)
-        if not _ad_can_manage(request.user, is_own=obj.user_id == request.user.id):
+        if not _ad_can_edit(request.user, is_own=obj.user_id == request.user.id):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         s = AdminDailyReportSerializer(obj, data=request.data, partial=True)
@@ -379,7 +412,7 @@ class AdminDailyReportDetailView(APIView):
 
     def delete(self, request, pk):
         obj = self._obj(pk)
-        if not _ad_can_manage(request.user, is_own=obj.user_id == request.user.id):
+        if not _ad_can_delete(request.user, is_own=obj.user_id == request.user.id):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         obj.delete()
@@ -396,7 +429,9 @@ class CourseEndReportListCreateView(APIView):
         qs = CourseEndReport.objects.select_related(
             "instructor", "subject", "batch",
         )
-        if not (u.is_superuser or has_perm(u, "audit.course_end.view_all")):
+        if not (has_perm(u, "audit.course_end.view_all")
+                or has_perm(u, "audit.course_end.edit_any")
+                or has_perm(u, "audit.course_end.delete_any")):
             emp = _emp_of(u)
             qs = qs.filter(instructor=emp) if emp else qs.none()
         params = request.query_params
@@ -420,20 +455,30 @@ class CourseEndReportListCreateView(APIView):
 
 
 class CourseEndReportReviewView(APIView):
-    """HOD approves / returns the course-end report."""
+    """HOD approves the course-end report, or returns it for rework.
+
+    Signing a report off and sending it back to its author are separate
+    permissions — `review` used to cover both.
+    """
+
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
         u = request.user
-        if not (u.is_superuser or has_perm(u, "audit.course_end.review")):
-            return Response({"detail": "Permission denied."},
-                            status=http.HTTP_403_FORBIDDEN)
         try:
             obj = CourseEndReport.objects.get(pk=pk)
         except CourseEndReport.DoesNotExist as e:
             raise Http404 from e
         s = CourseEndReviewSerializer(data=request.data)
         s.is_valid(raise_exception=True)
+        needed = (
+            "audit.course_end.approve"
+            if s.validated_data["hod_status"] == "APPROVED"
+            else "audit.course_end.return"
+        )
+        if not has_perm(u, needed):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
         obj.hod_status = s.validated_data["hod_status"]
         obj.hod_remarks = s.validated_data.get("hod_remarks", "")
         obj.hod_reviewed_at = timezone.now()
@@ -445,6 +490,78 @@ class CourseEndReportReviewView(APIView):
         return Response(CourseEndReportSerializer(obj).data)
 
 
+class CourseEndReportDetailView(APIView):
+    """Read / edit / delete one course-end report.
+
+    Neither editing nor deleting existed before — not even for
+    superusers — so a typo in a filed report was permanent.
+
+    The author may fix their own report while it is still PENDING; once
+    an HOD has approved or returned it, changing it needs `edit_any`, so
+    a signed-off report cannot be rewritten under the reviewer.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def _obj(self, pk):
+        try:
+            return CourseEndReport.objects.select_related(
+                "instructor", "subject", "batch").get(pk=pk)
+        except CourseEndReport.DoesNotExist as e:
+            raise Http404 from e
+
+    def _is_own(self, user, obj) -> bool:
+        emp = _emp_of(user)
+        return bool(emp and obj.instructor_id == emp.id)
+
+    def get(self, request, pk):
+        obj = self._obj(pk)
+        u = request.user
+        if not (has_perm(u, "audit.course_end.view_all")
+                or has_perm(u, "audit.course_end.edit_any")
+                or has_perm(u, "audit.course_end.delete_any")
+                or self._is_own(u, obj)):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        return Response(CourseEndReportSerializer(obj).data)
+
+    def patch(self, request, pk):
+        obj = self._obj(pk)
+        u = request.user
+        own_and_pending = (
+            self._is_own(u, obj)
+            and obj.hod_status == "PENDING"
+            and has_perm(u, "audit.course_end.submit")
+        )
+        if not (own_and_pending or has_perm(u, "audit.course_end.edit_any")):
+            return Response(
+                {"detail": "You can only edit your own report while it is "
+                           "still pending review."},
+                status=http.HTTP_403_FORBIDDEN,
+            )
+        s = CourseEndReportSerializer(obj, data=request.data, partial=True)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(s.data)
+
+    def delete(self, request, pk):
+        obj = self._obj(pk)
+        u = request.user
+        own_and_pending = (
+            self._is_own(u, obj)
+            and obj.hod_status == "PENDING"
+            and has_perm(u, "audit.course_end.submit")
+        )
+        if not (own_and_pending or has_perm(u, "audit.course_end.delete_any")):
+            return Response(
+                {"detail": "You can only delete your own report while it is "
+                           "still pending review."},
+                status=http.HTTP_403_FORBIDDEN,
+            )
+        obj.delete()
+        return Response(status=http.HTTP_204_NO_CONTENT)
+
+
 # === 4. Batch Mentor Report =========================================
 
 class BatchMentorReportListCreateView(APIView):
@@ -453,7 +570,9 @@ class BatchMentorReportListCreateView(APIView):
     def get(self, request):
         u = request.user
         qs = BatchMentorReport.objects.select_related("batch", "mentor")
-        if not (u.is_superuser or has_perm(u, "audit.batch_mentor.view_all")):
+        if not (has_perm(u, "audit.batch_mentor.view_all")
+                or has_perm(u, "audit.batch_mentor.edit_any")
+                or has_perm(u, "audit.batch_mentor.delete_any")):
             emp = _emp_of(u)
             qs = qs.filter(mentor=emp) if emp else qs.none()
         params = request.query_params
@@ -478,13 +597,76 @@ class BatchMentorReportListCreateView(APIView):
         return Response(s.data, status=http.HTTP_201_CREATED)
 
 
+class BatchMentorReportDetailView(APIView):
+    """Read / edit / delete one batch-mentor report.
+
+    Mirrors the course-end detail view. There is no review flow on this
+    report, so the mentor may fix their own at any time; `edit_any` /
+    `delete_any` cover everyone else's.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def _obj(self, pk):
+        try:
+            return BatchMentorReport.objects.select_related(
+                "batch", "mentor").get(pk=pk)
+        except BatchMentorReport.DoesNotExist as e:
+            raise Http404 from e
+
+    def _is_own(self, user, obj) -> bool:
+        emp = _emp_of(user)
+        return bool(emp and obj.mentor_id == emp.id)
+
+    def get(self, request, pk):
+        obj = self._obj(pk)
+        u = request.user
+        if not (has_perm(u, "audit.batch_mentor.view_all")
+                or has_perm(u, "audit.batch_mentor.edit_any")
+                or has_perm(u, "audit.batch_mentor.delete_any")
+                or self._is_own(u, obj)):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        return Response(BatchMentorReportSerializer(obj).data)
+
+    def patch(self, request, pk):
+        obj = self._obj(pk)
+        u = request.user
+        if not (self._is_own(u, obj)
+                or has_perm(u, "audit.batch_mentor.edit_any")):
+            return Response(
+                {"detail": "Only the batch mentor can edit this report."},
+                status=http.HTTP_403_FORBIDDEN,
+            )
+        s = BatchMentorReportSerializer(obj, data=request.data, partial=True)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(s.data)
+
+    def delete(self, request, pk):
+        obj = self._obj(pk)
+        u = request.user
+        if not (self._is_own(u, obj)
+                or has_perm(u, "audit.batch_mentor.delete_any")):
+            return Response(
+                {"detail": "Only the batch mentor can delete this report."},
+                status=http.HTTP_403_FORBIDDEN,
+            )
+        obj.delete()
+        return Response(status=http.HTTP_204_NO_CONTENT)
+
+
 # === 4b. Zero-Hour Report ===========================================
 #
 # Two-permission model, mirroring the other batch reports:
-#   academics.zero_hour.submit → fill / see / edit / delete OWN reports
-#                                (shows under Academics)
-#   audit.zero_hour.view_all   → auditors' read-only sight of everyone's
-#                                (shows under Audit, date-wise + paginated)
+#   academics.zero_hour.submit     → fill / see / edit OWN reports
+#                                    (shows under Academics)
+#   academics.zero_hour.delete     → delete OWN report
+#   academics.zero_hour.edit_any   → edit anyone's (was superuser-only)
+#   academics.zero_hour.delete_any → delete anyone's (was superuser-only)
+#   audit.zero_hour.view_all       → auditors' read-only sight of
+#                                    everyone's (shows under Audit,
+#                                    date-wise + paginated)
 
 class ZeroHourPagination(StandardPagination):
     """Audit report defaults to the 10 most recent, page_size overridable."""
@@ -500,6 +682,22 @@ def _zh_can_submit(user) -> bool:
                 or has_perm(user, "academics.zero_hour.submit"))
 
 
+def _zh_can_edit(user, obj) -> bool:
+    """Own report with `submit`, or anyone's with `edit_any`."""
+    if has_perm(user, "academics.zero_hour.edit_any"):
+        return True
+    return (obj.submitted_by_id == user.id
+            and has_perm(user, "academics.zero_hour.submit"))
+
+
+def _zh_can_delete(user, obj) -> bool:
+    """Own report with `delete`, or anyone's with `delete_any`."""
+    if has_perm(user, "academics.zero_hour.delete_any"):
+        return True
+    return (obj.submitted_by_id == user.id
+            and has_perm(user, "academics.zero_hour.delete"))
+
+
 class ZeroHourReportListCreateView(PaginatedAPIViewMixin, APIView):
     permission_classes = [IsAuthenticated]
     pagination_class = ZeroHourPagination
@@ -508,7 +706,9 @@ class ZeroHourReportListCreateView(PaginatedAPIViewMixin, APIView):
         u = request.user
         qs = ZeroHourReport.objects.select_related("batch", "mentor",
                                                     "submitted_by")
-        if not _zh_can_view_all(u):
+        if not (_zh_can_view_all(u)
+                or has_perm(u, "academics.zero_hour.edit_any")
+                or has_perm(u, "academics.zero_hour.delete_any")):
             # Fillers see only their own submissions.
             if not _zh_can_submit(u):
                 return Response({"results": [], "count": 0,
@@ -548,14 +748,12 @@ class ZeroHourReportDetailView(APIView):
         except ZeroHourReport.DoesNotExist as e:
             raise Http404 from e
 
-    def _is_own(self, user, obj) -> bool:
-        return obj.submitted_by_id == user.id
-
     def get(self, request, pk):
         obj = self._obj(pk)
         u = request.user
         if not (_zh_can_view_all(u)
-                or (_zh_can_submit(u) and self._is_own(u, obj))):
+                or _zh_can_edit(u, obj)
+                or _zh_can_delete(u, obj)):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         return Response(ZeroHourReportSerializer(obj).data)
@@ -563,9 +761,7 @@ class ZeroHourReportDetailView(APIView):
     def patch(self, request, pk):
         obj = self._obj(pk)
         u = request.user
-        # Submitters edit their own; superusers edit any.
-        if not (u.is_superuser
-                or (_zh_can_submit(u) and self._is_own(u, obj))):
+        if not _zh_can_edit(u, obj):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         s = ZeroHourReportSerializer(obj, data=request.data, partial=True)
@@ -576,8 +772,7 @@ class ZeroHourReportDetailView(APIView):
     def delete(self, request, pk):
         obj = self._obj(pk)
         u = request.user
-        if not (u.is_superuser
-                or (_zh_can_submit(u) and self._is_own(u, obj))):
+        if not _zh_can_delete(u, obj):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         obj.delete()
@@ -595,7 +790,9 @@ class StudentFeedbackListCreateView(APIView):
             "student", "subject", "instructor", "batch",
         )
         # Visibility: students see their own; auditors see all
-        if not (u.is_superuser or has_perm(u, "audit.feedback.view_all")):
+        if not (has_perm(u, "audit.feedback.view_all")
+                or has_perm(u, "audit.feedback.edit_any")
+                or has_perm(u, "audit.feedback.delete_any")):
             student = _student_of(u)
             qs = qs.filter(student=student) if student else qs.none()
         params = request.query_params
@@ -622,6 +819,65 @@ class StudentFeedbackListCreateView(APIView):
         return Response(s.data, status=http.HTTP_201_CREATED)
 
 
+class StudentFeedbackDetailView(APIView):
+    """Read / edit / delete one feedback row.
+
+    Editing did not exist before, so a student who filed feedback
+    against the wrong instructor could never correct it. A student may
+    fix or withdraw their OWN feedback; `edit_any` / `delete_any` cover
+    everyone else's.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def _obj(self, pk):
+        try:
+            return StudentFeedback.objects.select_related(
+                "student", "subject", "instructor", "batch").get(pk=pk)
+        except StudentFeedback.DoesNotExist as e:
+            raise Http404 from e
+
+    def _is_own(self, user, obj) -> bool:
+        student = _student_of(user)
+        return bool(student and obj.student_id == student.id)
+
+    def get(self, request, pk):
+        obj = self._obj(pk)
+        u = request.user
+        if not (has_perm(u, "audit.feedback.view_all")
+                or has_perm(u, "audit.feedback.edit_any")
+                or has_perm(u, "audit.feedback.delete_any")
+                or self._is_own(u, obj)):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        return Response(StudentFeedbackSerializer(obj).data)
+
+    def patch(self, request, pk):
+        obj = self._obj(pk)
+        u = request.user
+        if not (self._is_own(u, obj)
+                or has_perm(u, "audit.feedback.edit_any")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        # A student can never reassign feedback to another student.
+        data = dict(request.data)
+        data.pop("student", None)
+        s = StudentFeedbackSerializer(obj, data=data, partial=True)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(s.data)
+
+    def delete(self, request, pk):
+        obj = self._obj(pk)
+        u = request.user
+        if not (self._is_own(u, obj)
+                or has_perm(u, "audit.feedback.delete_any")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        obj.delete()
+        return Response(status=http.HTTP_204_NO_CONTENT)
+
+
 # === 6. Faculty Self-Appraisal ======================================
 
 class FacultySelfAppraisalListCreateView(APIView):
@@ -630,7 +886,9 @@ class FacultySelfAppraisalListCreateView(APIView):
     def get(self, request):
         u = request.user
         qs = FacultySelfAppraisal.objects.select_related("faculty")
-        if not (u.is_superuser or has_perm(u, "audit.self_appraisal.view_all")):
+        if not (has_perm(u, "audit.self_appraisal.view_all")
+                or has_perm(u, "audit.self_appraisal.edit_any")
+                or has_perm(u, "audit.self_appraisal.delete_any")):
             emp = _emp_of(u)
             if emp is None or not has_perm(u, "audit.self_appraisal.view_own"):
                 return Response([])
@@ -679,6 +937,78 @@ class SelfAppraisalReviewView(APIView):
             "auditor_reviewed_by", "updated_at",
         ])
         return Response(FacultySelfAppraisalSerializer(obj).data)
+
+
+class FacultySelfAppraisalDetailView(APIView):
+    """Read / edit / delete one self-appraisal.
+
+    The author may revise their own until an auditor has reviewed it —
+    after that, changing it needs `edit_any`, so a reviewed appraisal
+    cannot be rewritten under the reviewer. Same rule as course-end.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def _obj(self, pk):
+        try:
+            return FacultySelfAppraisal.objects.select_related(
+                "faculty").get(pk=pk)
+        except FacultySelfAppraisal.DoesNotExist as e:
+            raise Http404 from e
+
+    def _is_own(self, user, obj) -> bool:
+        emp = _emp_of(user)
+        return bool(emp and obj.faculty_id == emp.id)
+
+    def get(self, request, pk):
+        obj = self._obj(pk)
+        u = request.user
+        own = self._is_own(u, obj)
+        if not (has_perm(u, "audit.self_appraisal.view_all")
+                or has_perm(u, "audit.self_appraisal.edit_any")
+                or has_perm(u, "audit.self_appraisal.delete_any")
+                or (own and has_perm(u, "audit.self_appraisal.view_own"))):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        return Response(FacultySelfAppraisalSerializer(obj).data)
+
+    def patch(self, request, pk):
+        obj = self._obj(pk)
+        u = request.user
+        own_and_unreviewed = (
+            self._is_own(u, obj)
+            and obj.auditor_reviewed_at is None
+            and has_perm(u, "audit.self_appraisal.submit")
+        )
+        if not (own_and_unreviewed
+                or has_perm(u, "audit.self_appraisal.edit_any")):
+            return Response(
+                {"detail": "You can only revise your own appraisal before "
+                           "it has been reviewed."},
+                status=http.HTTP_403_FORBIDDEN,
+            )
+        s = FacultySelfAppraisalSerializer(obj, data=request.data, partial=True)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(s.data)
+
+    def delete(self, request, pk):
+        obj = self._obj(pk)
+        u = request.user
+        own_and_unreviewed = (
+            self._is_own(u, obj)
+            and obj.auditor_reviewed_at is None
+            and has_perm(u, "audit.self_appraisal.submit")
+        )
+        if not (own_and_unreviewed
+                or has_perm(u, "audit.self_appraisal.delete_any")):
+            return Response(
+                {"detail": "You can only delete your own appraisal before "
+                           "it has been reviewed."},
+                status=http.HTTP_403_FORBIDDEN,
+            )
+        obj.delete()
+        return Response(status=http.HTTP_204_NO_CONTENT)
 
 
 # === 7. Compliance Flag =============================================
@@ -751,18 +1081,100 @@ class ComplianceFlagResolveView(APIView):
         return Response(ComplianceFlagSerializer(obj).data)
 
 
+class ComplianceFlagDetailView(APIView):
+    """Read / edit / delete one flag or star.
+
+    Nothing here could be changed before, by anyone — a flag raised
+    against the wrong colleague stayed on their record permanently, and
+    a star is by design never resolved.
+
+    The person who raised it may correct or withdraw it while it is
+    still open; `edit_any` / `delete_any` cover everything else. `kind`
+    is immutable, so a flag can never be quietly rewritten into a star
+    (or vice versa) — the categories are validated per polarity.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def _obj(self, pk):
+        try:
+            return ComplianceFlag.objects.select_related(
+                "target_faculty", "target_batch", "target_student",
+                "raised_by", "resolved_by").get(pk=pk)
+        except ComplianceFlag.DoesNotExist as e:
+            raise Http404 from e
+
+    def _is_own(self, user, obj) -> bool:
+        return obj.raised_by_id == user.id
+
+    def _own_and_open(self, user, obj) -> bool:
+        # Stars are never resolved, so for them this is simply "mine".
+        return self._is_own(user, obj) and obj.resolved_at is None
+
+    def get(self, request, pk):
+        obj = self._obj(pk)
+        u = request.user
+        if not (has_perm(u, "audit.compliance.view")
+                or has_perm(u, "audit.compliance.edit_any")
+                or has_perm(u, "audit.compliance.delete_any")
+                or self._is_own(u, obj)):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        return Response(ComplianceFlagSerializer(obj).data)
+
+    def patch(self, request, pk):
+        obj = self._obj(pk)
+        u = request.user
+        if not (self._own_and_open(u, obj)
+                or has_perm(u, "audit.compliance.edit_any")):
+            return Response(
+                {"detail": "You can only edit a flag you raised, while it "
+                           "is still open."},
+                status=http.HTTP_403_FORBIDDEN,
+            )
+        data = dict(request.data)
+        data.pop("kind", None)
+        s = ComplianceFlagSerializer(obj, data=data, partial=True)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(s.data)
+
+    def delete(self, request, pk):
+        obj = self._obj(pk)
+        u = request.user
+        if not (self._own_and_open(u, obj)
+                or has_perm(u, "audit.compliance.delete_any")):
+            return Response(
+                {"detail": "You can only withdraw a flag you raised, while "
+                           "it is still open."},
+                status=http.HTTP_403_FORBIDDEN,
+            )
+        obj.delete()
+        return Response(status=http.HTTP_204_NO_CONTENT)
+
+
 # === Dashboard reports ==============================================
 
 def _can_view_dashboards(user) -> bool:
-    return (user.is_superuser
-            or has_perm(user, "audit.report.consolidated"))
+    """Roll-up dashboards: consolidated monthly + batch progression."""
+    return has_perm(user, "audit.report.consolidated")
+
+
+def _can_view_live_faculty(user) -> bool:
+    """Live tracking + timetable adherence — who is teaching, when."""
+    return has_perm(user, "audit.report.live_faculty")
+
+
+def _can_view_instructor_feedback(user) -> bool:
+    """A named instructor's student-feedback scores."""
+    return has_perm(user, "audit.report.instructor_feedback")
 
 
 class LiveFacultyTrackingView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        if not _can_view_dashboards(request.user):
+        if not _can_view_live_faculty(request.user):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         d = parse_date(request.query_params.get("date") or "") or None
@@ -773,7 +1185,7 @@ class TimetableAdherenceView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        if not _can_view_dashboards(request.user):
+        if not _can_view_live_faculty(request.user):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         params = request.query_params
@@ -803,7 +1215,7 @@ class FeedbackSummaryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
-        if not _can_view_dashboards(request.user):
+        if not _can_view_instructor_feedback(request.user):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         try:
@@ -881,6 +1293,15 @@ class AuditFormListCreateView(APIView):
         if not _can_form(request.user, "add"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
+        # Creating straight into PUBLISHED would otherwise sidestep the
+        # publish permission.
+        if (request.data.get("status") not in (None, "", AuditForm.Status.DRAFT)
+                and not _can_form(request.user, "publish")):
+            return Response(
+                {"detail": "Creating a form in that status requires "
+                           "audit.form.publish."},
+                status=http.HTTP_403_FORBIDDEN,
+            )
         s = AuditFormSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         s.save(created_by=request.user)
@@ -908,7 +1329,20 @@ class AuditFormDetailView(APIView):
         if not _can_form(request.user, "edit"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
-        s = AuditFormSerializer(self._obj(pk), data=request.data, partial=True)
+        form = self._obj(pk)
+        # Publishing pushes the form to a whole role's worth of staff and
+        # closing stops collection — a different act from renaming a
+        # question, so it carries its own key. Gate on the status
+        # actually changing, since the builder PATCHes the whole form.
+        new_status = request.data.get("status")
+        if (new_status and new_status != form.status
+                and not _can_form(request.user, "publish")):
+            return Response(
+                {"detail": "Changing a form's status requires "
+                           "audit.form.publish."},
+                status=http.HTTP_403_FORBIDDEN,
+            )
+        s = AuditFormSerializer(form, data=request.data, partial=True)
         s.is_valid(raise_exception=True)
         s.save()
         return Response(s.data)
@@ -917,7 +1351,18 @@ class AuditFormDetailView(APIView):
         if not _can_form(request.user, "delete"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
-        self._obj(pk).delete()
+        form = self._obj(pk)
+        # `AuditSubmission.form` cascades, so deleting a form that has
+        # been filled would silently destroy every collected response.
+        # Same rule as a consumed leave allocation or an installment
+        # with receipts: close it instead.
+        if form.submissions.exists():
+            return Response(
+                {"detail": "This form has responses and cannot be deleted. "
+                           "Close it instead to stop collection."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+        form.delete()
         return Response(status=http.HTTP_204_NO_CONTENT)
 
 
@@ -959,9 +1404,14 @@ class AuditSubmissionListView(APIView):
         qs = (AuditSubmission.objects
               .select_related("form", "submitted_by")
               .prefetch_related("answers__field"))
-        if not _can_view_all_submissions(request.user):
-            qs = qs.filter(submitted_by=request.user)
         params = request.query_params
+        # `?mine=1` asks for the caller's own submissions regardless of
+        # `view_all` — without it a holder of that key could never see
+        # just their own filed forms.
+        if params.get("mine") == "1":
+            qs = qs.filter(submitted_by=request.user)
+        elif not _can_view_all_submissions(request.user):
+            qs = qs.filter(submitted_by=request.user)
         if v := params.get("form"):
             qs = qs.filter(form_id=v)
         if v := params.get("role"):

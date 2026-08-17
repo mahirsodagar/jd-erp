@@ -17,12 +17,19 @@ from apps.admissions.models import Enrollment
 from apps.master.models import Batch
 
 
-def batch_list(*, academic_year=None, campus=None, program=None) -> list[dict]:
+def batch_list(*, academic_year=None, campus=None, program=None,
+               allowed_campus_ids=None) -> list[dict]:
     """Every batch matching the year/campus/program filter, with its
-    active-enrolment headcount, mentor, and feedback-link fields."""
+    active-enrolment headcount, mentor, and feedback-link fields.
+
+    `allowed_campus_ids` restricts the result to the caller's campuses;
+    pass None for an unrestricted (institute-wide) view.
+    """
     qs = (Batch.objects
           .select_related("program", "campus", "academic_year", "mentor")
           .order_by("name"))
+    if allowed_campus_ids is not None:
+        qs = qs.filter(campus_id__in=allowed_campus_ids)
     if academic_year:
         qs = qs.filter(academic_year_id=academic_year)
     if campus:
@@ -54,11 +61,22 @@ def batch_list(*, academic_year=None, campus=None, program=None) -> list[dict]:
     ]
 
 
-def batch_roster(batch) -> dict:
+#: Roster columns carrying personal / family / address data. Mirrors
+#: `StudentDetailSerializer.SENSITIVE_FIELDS` — the batch roster used to
+#: hand these out for a whole batch on the batch-report key alone.
+SENSITIVE_ROSTER_FIELDS = (
+    "mobile", "email", "dob", "blood_group",
+    "father_name", "father_mobile", "mother_name", "mother_mobile",
+    "category", "current_address", "permanent_address",
+)
+
+
+def batch_roster(batch, *, include_sensitive: bool = True) -> dict:
     """Full student roster for one batch — the 17-column modal table.
 
     Rows come from the batch's ACTIVE enrolments, ordered by student
-    name."""
+    name. With `include_sensitive=False` the personal / family / address
+    columns are omitted, leaving the identifying ones."""
     enrolments = (Enrollment.objects
                   .filter(batch=batch, status=Enrollment.Status.ACTIVE)
                   .select_related("student", "student__program",
@@ -87,6 +105,10 @@ def batch_roster(batch) -> dict:
             "program": s.program.name,
             "campus": s.campus.name,
         })
+    if not include_sensitive:
+        for row in rows:
+            for f in SENSITIVE_ROSTER_FIELDS:
+                row.pop(f, None)
     return {
         "batch_id": batch.id,
         "batch_name": batch.name,
