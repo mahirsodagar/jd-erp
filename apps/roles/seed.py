@@ -508,6 +508,14 @@ CATALOGUE = [
     ("dashboard", "dashboard.students.view", "See the total students count"),
     ("dashboard", "dashboard.engagement.view", "See the engagement metrics chart"),
     ("dashboard", "dashboard.my_work.view", "See my reports and plans feed"),
+    # Campus cards (ported from the PHP dashboard) + the batch-wise
+    # breakdown behind each card. Unlike the tiles above this one is NOT
+    # purely presentational: it backs its own endpoints, so the card key
+    # is a real read permission and the scope key widens it from the
+    # user's own campuses to every campus (same split as
+    # `academics.batch_report.view` / `.view_all_campuses`).
+    ("dashboard", "dashboard.campuses.view", "See the campus cards and their batch-wise student counts"),
+    ("dashboard", "dashboard.campuses.view_all_campuses", "See campus cards for every campus, not just mine"),
     ("dashboard", "dashboard.daily_report.submit", "Fill in my daily report"),
     ("dashboard", "dashboard.admin_daily.submit", "Fill in my admin daily report"),
 

@@ -10,6 +10,7 @@ from .models import (
 class CampusSerializer(serializers.ModelSerializer):
     institute_name = serializers.CharField(source="institute.name", read_only=True, default="")
     program_count = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Campus
@@ -17,12 +18,25 @@ class CampusSerializer(serializers.ModelSerializer):
             "id", "name", "code",
             "institute", "institute_name",
             "city", "state",
+            "image", "image_url",
             "is_active", "program_count", "created_at", "updated_at",
         ]
-        read_only_fields = ["id", "institute_name", "program_count", "created_at", "updated_at"]
+        read_only_fields = [
+            "id", "institute_name", "image_url", "program_count",
+            "created_at", "updated_at",
+        ]
+        extra_kwargs = {"image": {"write_only": True, "required": False}}
 
     def get_program_count(self, obj):
         return obj.programs.count()
+
+    def get_image_url(self, obj):
+        """Absolute URL so the SPA can use it directly. Mirrors
+        `EmployeeSerializer.get_photo_url` — needs `request` in context."""
+        request = self.context.get("request")
+        if obj.image and request:
+            return request.build_absolute_uri(obj.image.url)
+        return obj.image.url if obj.image else None
 
 
 class ProgramSerializer(serializers.ModelSerializer):

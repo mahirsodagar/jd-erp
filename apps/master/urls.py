@@ -1,5 +1,6 @@
 from django.urls import path
 
+from .dashboard_views import CampusBatchesView, CampusCardsView
 from .views import (
     AcademicYearDetailView,
     AcademicYearListCreateView,
@@ -36,6 +37,13 @@ from .views import (
 )
 
 urlpatterns = [
+    # Dashboard campus cards + their batch-wise drill-down. Declared
+    # before `campuses/<int:pk>/` so "dashboard" is never read as a pk.
+    path("dashboard/campuses/", CampusCardsView.as_view(),
+         name="dashboard-campus-cards"),
+    path("dashboard/campuses/<int:pk>/batches/", CampusBatchesView.as_view(),
+         name="dashboard-campus-batches"),
+
     path("institutes/", InstituteListCreateView.as_view(), name="institute-list-create"),
     path("institutes/<int:pk>/", InstituteDetailView.as_view(), name="institute-detail"),
 

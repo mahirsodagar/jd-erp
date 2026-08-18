@@ -68,6 +68,10 @@ class Campus(models.Model):
     )
     city = models.CharField(max_length=80, blank=True)
     state = models.CharField(max_length=80, blank=True)
+    image = models.ImageField(
+        upload_to="campus/images/", blank=True, null=True,
+        help_text="Shown on the dashboard campus cards (PHP `campus_img`).",
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -64,20 +64,39 @@ class CampusListCreateView(APIView):
         qs = Campus.objects.all()
         if request.query_params.get("active") == "1":
             qs = qs.filter(is_active=True)
-        return Response(CampusSerializer(qs, many=True).data)
+        return Response(
+            CampusSerializer(qs, many=True, context={"request": request}).data,
+        )
 
     def post(self, request):
-        s = CampusSerializer(data=request.data)
+        s = CampusSerializer(data=request.data, context={"request": request})
         s.is_valid(raise_exception=True)
         s.save()
         return Response(s.data, status=status.HTTP_201_CREATED)
 
 
 class CampusDetailView(_MasterDetailMixin, APIView):
+    """Overrides the mixin's read/write so `image_url` can be built —
+    the serializer needs `request` in context to absolutise it."""
+
     permission_classes = [IsAuthenticated, HasPerm]
     perm_base = "master.campus"
     model = Campus
     serializer = CampusSerializer
+
+    def get(self, request, pk):
+        return Response(
+            CampusSerializer(self._obj(pk), context={"request": request}).data,
+        )
+
+    def patch(self, request, pk):
+        obj = self._obj(pk)
+        s = CampusSerializer(
+            obj, data=request.data, partial=True, context={"request": request},
+        )
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(CampusSerializer(obj, context={"request": request}).data)
 
 
 class CampusProgramsView(APIView):
