@@ -80,18 +80,30 @@ def open_application_fee_request(lead) -> PaymentRequest | None:
     )
 
 
+def _public_api_base() -> str:
+    """Origin of THIS API as the outside world reaches it.
+
+    Deliberately has no fallback to FRONTEND_BASE_URL: that is the SPA
+    host, which does not serve `/api/`, so falling back would mint a link
+    that 404s for every lead it reached — silently, and only for real
+    people. Better to refuse to build the URL at all.
+    """
+    base = (getattr(settings, "SMARTGATEWAY_PUBLIC_BASE_URL", "") or "").strip()
+    if not base:
+        raise SmartGatewayError(
+            "SMARTGATEWAY_PUBLIC_BASE_URL is not set. It must be the "
+            "public HTTPS origin of this API (the bank has to reach the "
+            "return_url, and leads have to reach the pay link).",
+        )
+    return base.rstrip("/")
+
+
 def pay_url_for(payment_request: PaymentRequest) -> str:
     """The public URL we put in the SMS/WhatsApp/email.
 
     Points at *us*, not the bank: the bank's page expires, this doesn't.
-    Built off SMARTGATEWAY_PUBLIC_BASE_URL because the payer reaches the
-    API directly, not through the SPA host.
     """
-    base = (
-        getattr(settings, "SMARTGATEWAY_PUBLIC_BASE_URL", "")
-        or getattr(settings, "FRONTEND_BASE_URL", "")
-    ).rstrip("/")
-    return f"{base}/api/public/pay/{payment_request.token}/"
+    return f"{_public_api_base()}/api/public/pay/{payment_request.token}/"
 
 
 def application_fee_request_for(
@@ -175,12 +187,15 @@ def _parse_expiry(value) -> datetime | None:
 
 
 def return_url_for(payment_request: PaymentRequest) -> str:
-    """Where SmartGateway sends the payer's browser after payment."""
-    base = (
-        getattr(settings, "SMARTGATEWAY_PUBLIC_BASE_URL", "")
-        or getattr(settings, "FRONTEND_BASE_URL", "")
-    ).rstrip("/")
-    return f"{base}/api/public/pay/{payment_request.token}/return/"
+    """Where SmartGateway sends the payer's browser after payment.
+
+    SmartGateway requires this to be an HTTPS endpoint reachable from the
+    bank's servers, which is why it shares `_public_api_base()` with the
+    pay link rather than guessing.
+    """
+    return (
+        f"{_public_api_base()}/api/public/pay/{payment_request.token}/return/"
+    )
 
 
 def start_or_resume_order(payment_request: PaymentRequest) -> PaymentOrder:

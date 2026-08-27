@@ -367,10 +367,21 @@ def _fee_link_url(*, lead: Lead, institute_key: str, payment: dict, actor=None):
 
     Returns `(url, payment_request_or_None)`.
     """
-    from apps.payments.gateway import SmartGatewayError, is_enabled
+    from apps.payments.gateway import (
+        SmartGatewayError, is_enabled, missing_settings,
+    )
     from apps.payments.services import application_fee_request_for, pay_url_for
 
     if not is_enabled():
+        # Distinguish "deliberately off" from "switched on but broken".
+        # Both fall back safely, but the second is a misconfiguration
+        # someone needs to see rather than a silent no-op.
+        if getattr(settings, "SMARTGATEWAY_ENABLED", False):
+            logger.error(
+                "leads: SMARTGATEWAY_ENABLED is True but these settings "
+                "are unset: %s. Sending the manual fee link instead.",
+                ", ".join(missing_settings()),
+            )
         return _static_fee_link_url(institute_key), None
 
     amount = _application_fee_for_lead(lead, payment)

@@ -272,9 +272,23 @@ the `return_url` are built from it, and SmartGateway requires
 `return_url` to be a reachable HTTPS endpoint. It cannot be localhost in
 any environment that actually takes money.
 
-`is_enabled()` requires the switch **and** the API key, merchant id and
-client id, so a half-filled `.env` behaves as "off" rather than erroring
-at send time.
+`is_enabled()` requires the switch **and** every name in
+`gateway.REQUIRED_SETTINGS`, so a half-filled `.env` behaves as "off"
+rather than sending leads a link that doesn't work.
+
+`SMARTGATEWAY_PUBLIC_BASE_URL` is in that required set for a specific
+reason: with it blank, the pay link would once have been built off
+`FRONTEND_BASE_URL` — the SPA host, which doesn't serve `/api/` — giving
+every lead a 404 with no error anywhere. `_public_api_base()` now raises
+instead of guessing, and `missing_settings()` reports the gap.
+
+**If fee links are still going out as the old UPI/bank instructions**,
+that is this check firing. Look for an `ERROR` from `apps.leads` naming
+the unset settings, or call
+`GET /api/payments/smartgateway/status/` — `misconfigured: true` with a
+`missing_settings` list means switched-on-but-inert, as opposed to a
+deliberate `SMARTGATEWAY_ENABLED=False`. The lead page shows the same
+thing on its *Online payments* card.
 
 ### Amount resolution
 

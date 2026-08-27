@@ -74,19 +74,45 @@ class SmartGatewayError(Exception):
 # Configuration
 # ---------------------------------------------------------------------
 
+#: Settings without which the flow cannot work end to end. Each maps to
+#: the concrete thing that breaks if it's blank.
+REQUIRED_SETTINGS = {
+    "SMARTGATEWAY_API_KEY": "no authentication for /session or /orders",
+    "SMARTGATEWAY_MERCHANT_ID": "the x-merchantid header would be empty",
+    "SMARTGATEWAY_CLIENT_ID": "payment_page_client_id would be empty",
+    # Without this the pay link and return_url would be built off
+    # FRONTEND_BASE_URL — the SPA host, not the API — producing a link
+    # that 404s for every lead it is sent to.
+    "SMARTGATEWAY_PUBLIC_BASE_URL": (
+        "the pay link would point at the SPA host instead of this API"
+    ),
+}
+
+
+def missing_settings() -> list[str]:
+    """Required settings that are unset. Empty means good to go.
+
+    Separate from `is_enabled()` so callers can *report* why the gateway
+    is inert rather than just falling back in silence — a half-filled
+    .env is otherwise indistinguishable from a deliberate opt-out.
+    """
+    return [
+        name for name in REQUIRED_SETTINGS
+        if not getattr(settings, name, "")
+    ]
+
+
 def is_enabled() -> bool:
     """True when SmartGateway is switched on AND actually usable.
 
     Both halves matter: `SMARTGATEWAY_ENABLED` is the per-environment
-    kill switch, but a half-filled .env would otherwise blow up at send
-    time. Callers treat False as "fall back to UPI/bank instructions".
+    kill switch, but a half-filled .env must not send leads a broken
+    link. Callers treat False as "fall back to UPI/bank instructions",
+    which is always safe.
     """
-    return bool(
-        getattr(settings, "SMARTGATEWAY_ENABLED", False)
-        and getattr(settings, "SMARTGATEWAY_API_KEY", "")
-        and getattr(settings, "SMARTGATEWAY_MERCHANT_ID", "")
-        and getattr(settings, "SMARTGATEWAY_CLIENT_ID", "")
-    )
+    if not getattr(settings, "SMARTGATEWAY_ENABLED", False):
+        return False
+    return not missing_settings()
 
 
 def is_sandbox() -> bool:

@@ -27,6 +27,8 @@ from apps.payments.gateway import (
     SmartGatewayError,
     check_webhook_auth,
     format_amount,
+    is_enabled,
+    missing_settings,
     normalise_phone,
     signature_payload,
     validate_order_id,
@@ -324,6 +326,34 @@ class RequestCreationTests(_LeadFixture):
             services.application_fee_request_for(
                 lead=self.lead, amount=Decimal("1000.00"),
             )
+
+    @override_settings(SMARTGATEWAY_PUBLIC_BASE_URL="")
+    def test_missing_public_base_url_disables_the_gateway(self):
+        """Without it the pay link would be built off the SPA host and
+        404 for every lead it reached. Fall back instead."""
+        self.assertIn("SMARTGATEWAY_PUBLIC_BASE_URL", missing_settings())
+        self.assertFalse(is_enabled())
+
+    @override_settings(SMARTGATEWAY_PUBLIC_BASE_URL="")
+    def test_pay_url_refuses_to_guess_a_host(self):
+        req = PaymentRequest.objects.create(
+            purpose=PaymentRequest.Purpose.APPLICATION_FEE,
+            lead=self.lead, amount=Decimal("1000.00"),
+        )
+        # Must raise, NOT silently fall back to FRONTEND_BASE_URL.
+        with self.assertRaises(SmartGatewayError):
+            services.pay_url_for(req)
+        with self.assertRaises(SmartGatewayError):
+            services.return_url_for(req)
+
+    @override_settings(SMARTGATEWAY_API_KEY="")
+    def test_partial_config_reports_what_is_missing(self):
+        self.assertEqual(missing_settings(), ["SMARTGATEWAY_API_KEY"])
+        self.assertFalse(is_enabled())
+
+    def test_full_config_reports_nothing_missing(self):
+        self.assertEqual(missing_settings(), [])
+        self.assertTrue(is_enabled())
 
 
 @override_settings(**SG_ON)
@@ -702,3 +732,16 @@ class FeeLinkIntegrationTests(_LeadFixture):
         result = send_fee_link(lead=self.lead, institute_key="JDIFT")
         self.assertEqual(result["gateway"], "manual")
         self.assertEqual(PaymentRequest.objects.count(), 0)
+
+    @override_settings(SMARTGATEWAY_PUBLIC_BASE_URL="")
+    def test_enabled_but_misconfigured_falls_back_and_says_so(self):
+        """The dangerous case: switched on, but the pay link would be
+        built off the wrong host. Must send the manual link, loudly."""
+        from apps.leads.send_links import send_fee_link
+
+        with self.assertLogs("apps.leads", level="ERROR") as logs:
+            result = send_fee_link(lead=self.lead, institute_key="JDIFT")
+
+        self.assertEqual(result["gateway"], "manual")
+        self.assertEqual(PaymentRequest.objects.count(), 0)
+        self.assertIn("SMARTGATEWAY_PUBLIC_BASE_URL", "\n".join(logs.output))

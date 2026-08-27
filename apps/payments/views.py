@@ -29,6 +29,7 @@ from .gateway import (
     check_webhook_auth,
     is_enabled,
     is_sandbox,
+    missing_settings,
     verify_return_signature,
 )
 from .models import PaymentOrder, PaymentRequest
@@ -308,8 +309,15 @@ class SmartGatewayStatusView(APIView):
 
     def get(self, request):
         enabled = is_enabled()
+        gaps = missing_settings()
         return Response({
             "enabled": enabled,
+            # Switched on but unusable — the UI calls this out rather than
+            # looking identical to a deliberate opt-out.
+            "misconfigured": bool(
+                getattr(settings, "SMARTGATEWAY_ENABLED", False) and gaps,
+            ),
+            "missing_settings": gaps,
             "mode": ("sandbox" if is_sandbox() else "production") if enabled else None,
             "webhook_configured": bool(
                 getattr(settings, "SMARTGATEWAY_WEBHOOK_USERNAME", "")
