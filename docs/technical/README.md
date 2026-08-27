@@ -54,6 +54,7 @@ Start here, then read in order — each chapter assumes the ones before it.
 | 11 | [Notifications](11-notifications.md) | `notifications` — the queue, template registry, and the MSG91 / BulkSMS / XIRCLS / SMTP transports |
 | 12 | [Frontend](12-frontend.md) | `jd-erp-web` — routing, auth store, API layer, permission gating, page inventory |
 | 13 | [Cross-module map & change impact](13-cross-module-map.md) | Dependency graph, data flow, "if I change X, what breaks" |
+| 14 | [Payments — HDFC SmartGateway](14-payments-smartgateway.md) | `payments` — online application-fee collection, hosted payment pages, webhook settlement, reconciliation |
 
 > **Looking for the end-user manual?** Non-technical instructions for the
 > people who *use* the software — counsellors, admissions, accounts, faculty,

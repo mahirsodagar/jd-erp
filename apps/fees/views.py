@@ -1,7 +1,8 @@
 from datetime import date as _date
+from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, Sum
 from django.http import Http404, HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -27,8 +28,11 @@ from .serializers import (
     InstallmentSerializer,
     OtherFeeSerializer,
 )
-from .services.balance import enrollment_balance
+from .services.balance import (
+    active_fee_template, concession_ceiling, enrollment_balance,
+)
 from .services.pdf import render_receipt_pdf
+from .services.registration import ensure_registration_installment
 from .services.receipt_no import generate_receipt_no
 
 
@@ -100,6 +104,18 @@ class InstallmentBulkCreateView(APIView):
         ).exists():
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
 
+        # The serializer's one-per-year check reads the database, which
+        # cannot see the other rows of this same payload — so catch a
+        # doubled registration row here before any of them insert.
+        if sum(
+            1 for raw in items
+            if raw.get("kind") == Installment.Kind.REGISTRATION
+        ) > 1:
+            return Response(
+                {"items": "Only one registration installment per schedule."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+
         # Validate each row through the existing serializer (gets us
         # type checks + decimal conversion + sequence-uniqueness errors
         # for free).
@@ -119,6 +135,18 @@ class InstallmentBulkCreateView(APIView):
             for s in serializers:
                 s.save(created_by=request.user)
                 created.append(s.data)
+            # The registration fee is mandatory, so a schedule that omits
+            # it gets one anyway. Idempotent per (student, academic year):
+            # a caller that already sent the row, or a student promoted
+            # mid-year who paid it under their previous enrollment, is a
+            # no-op.
+            seeded = ensure_registration_installment(
+                enrollment, actor=request.user,
+            )
+            if seeded is not None and not any(
+                row.get("id") == seeded.id for row in created
+            ):
+                created.append(InstallmentSerializer(seeded).data)
         return Response(created, status=http.HTTP_201_CREATED)
 
 
@@ -142,6 +170,19 @@ class InstallmentDetailView(APIView):
         if not has_perm(request.user, "fees.installment.edit"):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         inst = self._obj(request, pk)
+        # The registration fee is mandatory: only its due date may be
+        # rescheduled. The amount is fixed by the fee template and the
+        # serializer would reject a mismatch anyway, but refusing the
+        # whole request gives a clearer error than a field-level one.
+        if inst.kind == Installment.Kind.REGISTRATION:
+            editable = {"due_date", "description"}
+            attempted = set(request.data) - editable - {"id", "enrollment", "kind"}
+            if attempted:
+                return Response(
+                    {"detail": "Only the due date of a registration "
+                               "installment can be changed."},
+                    status=http.HTTP_400_BAD_REQUEST,
+                )
         s = InstallmentSerializer(inst, data=request.data, partial=True)
         s.is_valid(raise_exception=True)
         s.save()
@@ -151,6 +192,12 @@ class InstallmentDetailView(APIView):
         if not has_perm(request.user, "fees.installment.delete"):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         inst = self._obj(request, pk)
+        if inst.kind == Installment.Kind.REGISTRATION:
+            return Response(
+                {"detail": "The registration fee is mandatory and cannot be "
+                           "removed from the schedule."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
         if inst.receipts.filter(status=FeeReceipt.Status.ACTIVE).exists():
             return Response(
                 {"detail": "Installment has active receipts; cancel them first."},
@@ -441,6 +488,32 @@ class ConcessionDecisionView(APIView):
                             status=http.HTTP_400_BAD_REQUEST)
         s = ConcessionDecisionSerializer(data=request.data)
         s.is_valid(raise_exception=True)
+
+        # The registration fee is payable in full, so concessions may only
+        # discount what is left of the total after it is fenced off.
+        # Checked at approval time — a PENDING request can be raised for
+        # any amount, it just cannot be granted past the ceiling.
+        if s.validated_data["status"] == Concession.Status.APPROVED:
+            tmpl = active_fee_template(c.enrollment)
+            ceiling = concession_ceiling(
+                Decimal(getattr(tmpl, "total_fee", None) or 0),
+                Decimal(getattr(tmpl, "registration_fee", None) or 0),
+            )
+            already = Decimal(
+                Concession.objects.filter(
+                    enrollment=c.enrollment,
+                    status=Concession.Status.APPROVED,
+                ).exclude(pk=c.pk).aggregate(s=Sum("amount"))["s"] or 0
+            )
+            if already + Decimal(c.amount) > ceiling:
+                return Response(
+                    {"detail": f"Approving this would discount more than the "
+                               f"fee allows. At most {ceiling - already} can "
+                               f"still be granted — the registration fee is "
+                               f"mandatory and cannot be waived."},
+                    status=http.HTTP_400_BAD_REQUEST,
+                )
+
         c.status = s.validated_data["status"]
         c.approver = request.user
         c.approver_remarks = s.validated_data.get("remarks", "")

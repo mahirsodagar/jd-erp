@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import models
 from django.utils.text import slugify
 
@@ -321,6 +323,14 @@ class FeeTemplate(models.Model):
     course_fee = models.DecimalField(
         max_digits=10, decimal_places=2, default=0,
         help_text="Tuition / course fee for the period.",
+    )
+    registration_fee = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal("10000.00"),
+        help_text="Mandatory yearly registration charge, CARVED OUT of "
+                  "total_fee (not added on top) — it is part of the course "
+                  "fee, scheduled as its own installment and payable in "
+                  "full every academic year. Concessions cannot reduce it. "
+                  "Set to 0 to disable for this template.",
     )
     other_fee = models.DecimalField(
         max_digits=10, decimal_places=2, default=0,

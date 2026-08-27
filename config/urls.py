@@ -7,6 +7,9 @@ from apps.admissions.public_views import PublicApplicationView
 from apps.leads.exam_views import (
     PublicExamStartView, PublicExamSubmitView, PublicExamView,
 )
+from apps.payments.views import (
+    PayRedirectView, PayReturnView, SmartGatewayWebhookView,
+)
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -20,6 +23,18 @@ urlpatterns = [
          PublicExamStartView.as_view(), name="public-exam-start"),
     path("api/public/exam/<uuid:token>/submit/",
          PublicExamSubmitView.as_view(), name="public-exam-submit"),
+    # Public, no-auth pay link — what the fee SMS/email points at. Mints a
+    # SmartGateway session on click and 302s to the hosted payment page,
+    # so the URL in the student's SMS never goes stale.
+    path("api/public/pay/<uuid:token>/",
+         PayRedirectView.as_view(), name="public-pay"),
+    # SmartGateway's return_url — where the payer's browser lands after.
+    path("api/public/pay/<uuid:token>/return/",
+         PayReturnView.as_view(), name="public-pay-return"),
+    # SmartGateway webhook. No JWT — authenticated by the Basic
+    # credentials configured in the SmartGateway dashboard.
+    path("api/public/smartgateway/webhook/",
+         SmartGatewayWebhookView.as_view(), name="smartgateway-webhook"),
     path("api/", include("apps.accounts.urls")),
     path("api/", include("apps.roles.urls")),
     path("api/audit/", include("apps.audit.urls")),
@@ -39,6 +54,7 @@ urlpatterns = [
     path("api/portal/", include("apps.portal.urls")),
     path("api/common/", include("apps.common.urls")),
     path("api/tasks/", include("apps.tasks.urls")),
+    path("api/payments/", include("apps.payments.urls")),
 ]
 
 if settings.DEBUG:

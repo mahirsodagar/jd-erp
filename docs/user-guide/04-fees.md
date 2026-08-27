@@ -31,11 +31,36 @@ The balance you see on screen is worked out like this:
    = Balance outstanding
 ```
 
-Two things worth understanding:
+Three things worth understanding:
 
 - **Only *approved* concessions count.** A pending request changes nothing.
 - **Only *active* receipts count.** A cancelled receipt is excluded
   immediately.
+- **The registration fee is already inside the total fee.** See below.
+
+### The registration fee
+
+Most fee templates carry a **registration fee** (₹10,000 by default). Two
+things about it catch people out:
+
+- **It is part of the total fee, not an extra on top.** A ₹2,00,000 course with
+  a ₹10,000 registration fee still costs ₹2,00,000 — ₹10,000 of it is simply
+  labelled and scheduled separately.
+- **It is charged once every academic year**, for as long as the course runs.
+  A three-year course collects it three times. Each year's charge appears
+  automatically when the student is promoted into that year.
+
+It is mandatory, so the system protects it: the amount cannot be edited, the
+row cannot be deleted from the schedule, and a concession can never reduce it.
+If you try to grant a discount that would eat into it, the approval is
+refused and tells you the largest amount you *can* still grant.
+
+Admins can set it to 0 on a template for courses that do not charge it.
+
+> **Existing students are unaffected.** Templates that were already in the
+> system when this was introduced have their registration fee set to 0, so no
+> schedule anyone has already signed changes. It applies to templates created
+> from now on.
 
 ## 4.2 Getting in
 
@@ -63,6 +88,11 @@ labels it wrongly.
 
 You can edit an installment's amount or due date later, and delete one, each
 with its own permission.
+
+**The registration row is added for you and is locked.** It appears in the
+schedule marked *Registration fee*. You can move its due date, but not change
+its amount or remove it — and the plan will not add up to the total fee unless
+it is counted, which is why the form shows it in the running total.
 
 ## 4.4 Recording a payment
 
@@ -146,6 +176,10 @@ A concession is a discount on the course fee.
 
 There is only one approval step. Whoever holds the approval permission can
 decide.
+
+**A concession can never touch the registration fee.** The most you can
+approve is the total fee minus the registration fee. Approving more is
+refused, with a message telling you the ceiling.
 
 ## 4.8 Receipts and documents
 

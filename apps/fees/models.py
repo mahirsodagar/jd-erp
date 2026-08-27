@@ -11,9 +11,23 @@ class Installment(models.Model):
     one installment (split payments allowed).
     """
 
+    class Kind(models.TextChoices):
+        COURSE = "COURSE", "Course fee"
+        REGISTRATION = "REGISTRATION", "Registration fee"
+
     enrollment = models.ForeignKey(
         "admissions.Enrollment", on_delete=models.CASCADE,
         related_name="installments",
+    )
+    kind = models.CharField(
+        max_length=12, choices=Kind.choices, default=Kind.COURSE,
+        db_index=True,
+        help_text="REGISTRATION rows carry the mandatory yearly "
+                  "registration charge (FeeTemplate.registration_fee). "
+                  "They are carved out of the same total_fee as COURSE "
+                  "rows — never added on top — and are locked: the amount "
+                  "cannot be edited, the row cannot be deleted, and at "
+                  "most one exists per (student, academic year).",
     )
     sequence = models.PositiveSmallIntegerField(
         help_text="1-indexed installment number for this enrollment.",

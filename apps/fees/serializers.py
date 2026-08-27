@@ -53,7 +53,7 @@ class InstallmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Installment
         fields = [
-            "id", "enrollment", "student_name",
+            "id", "enrollment", "student_name", "kind",
             "sequence", "due_date", "amount", "description",
             "paid", "balance",
             "created_by", "created_on",
@@ -62,6 +62,58 @@ class InstallmentSerializer(serializers.ModelSerializer):
             "id", "student_name", "paid", "balance",
             "created_by", "created_on",
         ]
+
+    def validate(self, attrs):
+        """Keep REGISTRATION rows honest.
+
+        The mandatory yearly fee is enforced here rather than only in the
+        UI, so the API is the guard: the amount must match the template
+        exactly, a student can hold at most one per academic year (across
+        all their enrollments — a mid-year semester promotion must not
+        charge twice), and a locked row can never be relabelled COURSE to
+        sidestep those rules.
+        """
+        from apps.fees.services.registration import (
+            registration_fee_for, registration_installment_for_year,
+        )
+
+        inst = self.instance
+        kind = attrs.get("kind", getattr(inst, "kind", Installment.Kind.COURSE))
+
+        if kind != Installment.Kind.REGISTRATION:
+            if inst is not None and inst.kind == Installment.Kind.REGISTRATION:
+                raise serializers.ValidationError({
+                    "kind": "A registration installment cannot be converted "
+                            "to a course installment.",
+                })
+            return attrs
+
+        enrollment = attrs.get("enrollment") or getattr(inst, "enrollment", None)
+        if enrollment is None:
+            raise serializers.ValidationError({"enrollment": "Required."})
+
+        expected = registration_fee_for(enrollment)
+        if expected <= Decimal("0"):
+            raise serializers.ValidationError({
+                "kind": "No active fee template for this enrollment charges a "
+                        "registration fee.",
+            })
+        amount = attrs.get("amount", getattr(inst, "amount", None))
+        if amount is None or Decimal(amount) != expected:
+            raise serializers.ValidationError({
+                "amount": f"The registration fee is fixed by the fee template "
+                          f"at {expected} and cannot be changed here.",
+            })
+
+        dup = registration_installment_for_year(
+            enrollment.student_id, enrollment.academic_year_id,
+        )
+        if dup is not None and dup.pk != getattr(inst, "pk", None):
+            raise serializers.ValidationError({
+                "kind": "This student already has a registration fee for "
+                        "this academic year.",
+            })
+        return attrs
 
     def _paid(self, obj) -> Decimal:
         from django.db.models import Sum

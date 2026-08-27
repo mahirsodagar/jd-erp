@@ -185,7 +185,8 @@ class FeeTemplateSerializer(serializers.ModelSerializer):
             "campus", "campus_name",
             "program", "program_name",
             "course", "course_name",
-            "application_fee", "course_fee", "other_fee", "total_fee",
+            "application_fee", "course_fee", "registration_fee",
+            "other_fee", "total_fee",
             "notes", "is_active",
             "created_at", "updated_at",
         ]
@@ -193,6 +194,25 @@ class FeeTemplateSerializer(serializers.ModelSerializer):
             "id", "academic_year_code", "campus_name", "program_name",
             "course_name", "created_at", "updated_at",
         ]
+
+    def validate(self, attrs):
+        """The registration fee is carved out of `total_fee`, so it can
+        never exceed it — otherwise the installment schedule, which must
+        sum to the total, has nothing left to spread."""
+        def current(field):
+            return attrs.get(field, getattr(self.instance, field, None))
+
+        registration = current("registration_fee")
+        total = current("total_fee")
+        if registration is not None and total is not None and registration > total:
+            raise serializers.ValidationError({
+                "registration_fee": f"Cannot exceed the total fee "
+                                    f"({total}). The registration fee is "
+                                    f"part of the total, not on top of it "
+                                    f"— set it to 0 for courses that cost "
+                                    f"less than the registration charge.",
+            })
+        return attrs
 
 
 class LeadSourceSerializer(serializers.ModelSerializer):

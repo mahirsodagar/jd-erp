@@ -409,6 +409,8 @@ def promote_batch(
     """
     from datetime import date as _date
 
+    from apps.fees.services.registration import ensure_registration_installment
+
     from .models import Enrollment
 
     if (source_batch.id == target_batch.id
@@ -464,11 +466,22 @@ def promote_batch(
             entry_date=today,
             entry_user=actor,
         )
+        # The registration fee is charged once per academic year for the
+        # life of the course, so each promotion into a new year needs its
+        # row laid down. `ensure_registration_installment` keys on
+        # (student, academic year), which makes a sem 1 → sem 2 promotion
+        # inside the same year a no-op rather than a double charge. The
+        # rest of the year's schedule is still built by HR.
+        registration = ensure_registration_installment(new, actor=actor)
+
         promoted.append({
             "student_id": old.student_id,
             "student_name": old.student.student_name,
             "from_enrollment_id": old.id,
             "to_enrollment_id": new.id,
+            "registration_installment_id": (
+                registration.id if registration is not None else None
+            ),
         })
 
     return {

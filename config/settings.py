@@ -75,6 +75,7 @@ INSTALLED_APPS = [
     "apps.appointments",
     "apps.portal",
     "apps.tasks",
+    "apps.payments",
 ]
 
 
@@ -264,6 +265,78 @@ INSTITUTE_PAYMENT_DETAILS = env.json(
             "default_amount": "1000",
         },
     },
+)
+
+
+# --- HDFC SmartGateway payment gateway ----------------------------------
+
+# Master switch. While False the fee-link flow keeps sending the existing
+# static short URL + UPI/bank instructions, so a half-configured
+# environment degrades instead of breaking. Turn on per-environment once
+# the credentials below are filled AND the webhook is registered in the
+# SmartGateway dashboard.
+SMARTGATEWAY_ENABLED = env.bool("SMARTGATEWAY_ENABLED", default=False)
+
+# Sandbox (smartgateway.hdfcuat.bank.in) vs production
+# (smartgateway.hdfc.bank.in). Kept separate from the enable flag so a
+# staging box can run the real flow against the UAT bank.
+SMARTGATEWAY_SANDBOX = env.bool("SMARTGATEWAY_SANDBOX", default=True)
+# Only set this to point at a mock; normally the sandbox flag decides.
+SMARTGATEWAY_BASE_URL = env("SMARTGATEWAY_BASE_URL", default="")
+
+# From the HDFC SmartGateway dashboard. The API key is sent as HTTP Basic
+# with the key as username and an empty password.
+SMARTGATEWAY_API_KEY = env("SMARTGATEWAY_API_KEY", default="")
+# Provided by the bank; goes out as the x-merchantid header.
+SMARTGATEWAY_MERCHANT_ID = env("SMARTGATEWAY_MERCHANT_ID", default="")
+# payment_page_client_id: "hdfcmaster" on sandbox, your merchant id in
+# production.
+SMARTGATEWAY_CLIENT_ID = env("SMARTGATEWAY_CLIENT_ID", default="hdfcmaster")
+# x-resellerid. Usually "hdfc_reseller"; blank omits the header.
+SMARTGATEWAY_RESELLER_ID = env("SMARTGATEWAY_RESELLER_ID", default="")
+
+# RESPONSE_KEY from the dashboard config — a THIRD secret, distinct from
+# the API key and the webhook credentials. SmartGateway signs the
+# return_url parameters with it (HMAC-SHA256), which is what lets us
+# trust the redirect the payer's browser comes back on.
+SMARTGATEWAY_RESPONSE_KEY = env("SMARTGATEWAY_RESPONSE_KEY", default="")
+
+SMARTGATEWAY_TIMEOUT = env.int("SMARTGATEWAY_TIMEOUT", default=20)
+
+# Webhook credentials — the username/password pair configured under
+# Webhooks in the SmartGateway dashboard, which the bank replays to us as
+# an ordinary Basic auth header. Unrelated to SMARTGATEWAY_API_KEY.
+# Without both, every delivery is rejected with a 401.
+SMARTGATEWAY_WEBHOOK_USERNAME = env(
+    "SMARTGATEWAY_WEBHOOK_USERNAME", default="",
+)
+SMARTGATEWAY_WEBHOOK_PASSWORD = env(
+    "SMARTGATEWAY_WEBHOOK_PASSWORD", default="",
+)
+
+# SmartGateway does not sign webhook bodies — the shared credentials are
+# the whole of the authentication. So by default a webhook is treated as
+# a nudge and the order is re-read from /orders/{id} before anything is
+# marked paid. Only turn this on if you accept that anyone holding the
+# webhook credentials can assert a payment.
+SMARTGATEWAY_TRUST_WEBHOOK_PAYLOAD = env.bool(
+    "SMARTGATEWAY_TRUST_WEBHOOK_PAYLOAD", default=False,
+)
+
+# Public origin of THIS API, as the bank's servers and the student's
+# phone reach it. The pay link and the return_url are built off it, and
+# SmartGateway requires return_url to be a reachable HTTPS endpoint — so
+# this cannot be localhost in any environment that actually takes money.
+SMARTGATEWAY_PUBLIC_BASE_URL = env(
+    "SMARTGATEWAY_PUBLIC_BASE_URL", default="",
+)
+
+# Send the application-form link automatically the moment the fee is
+# paid, instead of waiting for a counsellor to click "Send application
+# link". Off by default: it messages a real lead with no human in the
+# loop.
+SMARTGATEWAY_AUTOSEND_APPLICATION_LINK = env.bool(
+    "SMARTGATEWAY_AUTOSEND_APPLICATION_LINK", default=False,
 )
 
 

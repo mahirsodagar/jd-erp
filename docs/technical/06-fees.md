@@ -30,13 +30,45 @@ admissions.Enrollment ──┬── Installment      (the schedule; seq 1..N)
 
 ### `Installment`
 
-Per-enrolment schedule row: `sequence` (1-indexed, unique per enrolment),
-`due_date`, `amount`, `description`. Created by HR after enrolment, usually in
-one shot via `POST /api/fees/installments/bulk/`.
+Per-enrolment schedule row: `kind` (COURSE / REGISTRATION), `sequence`
+(1-indexed, unique per enrolment), `due_date`, `amount`, `description`. Created
+by HR after enrolment, usually in one shot via
+`POST /api/fees/installments/bulk/`.
 
-> **Convention:** the React enrolment-create form writes the down payment as
-> `sequence = 1` with a `description` starting `"Down payment"`. The fee
-> undertaking PDF ([chapter 5](05-admissions.md) §5.6) depends on this.
+> **Convention:** the React enrolment-create form writes the registration row
+> first and the down payment with a `description` starting `"Down payment"`.
+> The fee undertaking PDF ([chapter 5](05-admissions.md) §5.6) pulls
+> REGISTRATION rows out first, then finds the down payment by description —
+> it no longer keys on `sequence == 1`.
+
+#### `kind = REGISTRATION` — the mandatory yearly fee
+
+`master.FeeTemplate.registration_fee` (default ₹10,000) is a **carved-out
+slice of `total_fee`, never an addition to it**. It rides the installment
+schedule rather than living in `OtherFee` because only installments carry a
+due date, link to receipts, and feed the due-date reminders and collection
+reports.
+
+Four rules, all enforced server-side rather than only in the UI:
+
+| Rule | Enforced by |
+|---|---|
+| Amount is fixed by the template | `InstallmentSerializer.validate` |
+| At most one per **(student, academic year)** — *not* per enrolment | `InstallmentSerializer.validate` + `services/registration.py`; the bulk endpoint also rejects two in one payload |
+| Cannot be deleted, and only its due date/description may be edited | `InstallmentDetailView.delete` / `.patch` |
+| Cannot be reduced by a concession | `ConcessionDecisionView` (400 on approval) with `enrollment_balance()` capping as a backstop |
+
+Keying on (student, academic year) matters because `promote_batch()` is used
+both for year-to-year promotion **and** for sem 1 → sem 2 inside the same year;
+keying on the enrolment would charge a mid-year promotion twice.
+`promote_batch()` calls `ensure_registration_installment()` for each new
+enrolment, so a 3-year course collects the fee three times without HR having to
+remember. The rest of each year's schedule is still built by hand.
+
+**Rolled out forward, not backfilled.** Migration `master.0012` sets
+`registration_fee = 0` on every pre-existing template, because their live
+enrolments already have schedules summing to `total_fee` with no registration
+line — and signed undertakings to match. New templates default to ₹10,000.
 
 ### `FeeReceipt`
 
@@ -76,13 +108,22 @@ APPROVED / REJECTED with `approver`, `approver_remarks`, `decided_on`.
 
 ```python
 enrollment_balance(enrollment) -> {
-  total_fee,          # FeeTemplate.total_fee for (academic_year, campus, program), active
-  concession_total,   # Σ APPROVED concessions
-  paid_total,         # Σ ACTIVE receipts WHERE other_fee IS NULL
-  payable,            # total_fee − concession_total
-  balance,            # payable − paid_total
+  total_fee,            # FeeTemplate.total_fee for (academic_year, campus, program), active
+  registration_fee,     # FeeTemplate.registration_fee — INSIDE total_fee, not added to it
+  concession_total,     # Σ APPROVED concessions (raw)
+  concession_applied,   # concession_total capped at total_fee − registration_fee
+  concession_capped,    # True when the two differ
+  paid_total,           # Σ ACTIVE receipts WHERE other_fee IS NULL
+  payable,              # total_fee − concession_applied
+  balance,              # payable − paid_total
+  registration_due,     # Σ REGISTRATION installments actually on the schedule
+  registration_paid,    # Σ ACTIVE receipts against them
+  registration_balance, # due − paid
 }
 ```
+
+A non-zero `registration_fee` alongside a zero `registration_due` means this
+year's schedule has not been built yet.
 
 Two behaviours to be aware of:
 
@@ -177,6 +218,7 @@ here without updating that map sends variables into the wrong slots.
 | If you change… | Effect |
 |---|---|
 | `FeeTemplate.total_fee` | Retroactively changes `payable` and `balance` for every matching enrolment |
+| `FeeTemplate.registration_fee` | Retroactively changes the concession ceiling for every matching enrolment, and the amount the API will accept for new REGISTRATION rows — existing rows keep the old amount. Raise it on a new template, not a live one |
 | A receipt's `other_fee` link | Moves the payment in or out of the course-fee `paid_total` |
 | Cancelling a receipt | `paid_total` drops; no notification fires; the PDF re-renders as cancelled |
 | Approving a concession | Reduces `payable` immediately; also feeds the fee undertaking's arithmetic |

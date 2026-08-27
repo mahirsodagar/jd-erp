@@ -12,6 +12,7 @@ Per-institute payment account details (UPI VPA + bank) live in
 from __future__ import annotations
 
 import io
+import logging
 import uuid
 from urllib.parse import quote
 
@@ -22,6 +23,8 @@ from django.utils import timezone
 from apps.notifications.services import queue_notification
 
 from .models import Lead, LeadCommunication
+
+logger = logging.getLogger("apps.leads")
 
 
 # --- Dispatch-status helpers ------------------------------------------------
@@ -331,6 +334,63 @@ def _fee_email_text(*, lead: Lead, payment: dict, amount: str) -> str:
     )
 
 
+def _static_fee_link_url(institute_key: str) -> str:
+    """The per-institute short URL + UPI/bank instructions.
+
+    The original, manually-reconciled flow. Still the fallback whenever
+    the gateway is off or a payment request can't be raised.
+    """
+    fee_urls = getattr(settings, "FEE_LINK_URLS", {}) or {}
+    url = fee_urls.get(institute_key)
+    if not url:
+        raise ValueError(
+            f"No fee-link URL configured for institute '{institute_key}'. "
+            f"Set FEE_LINK_URLS[{institute_key!r}] in settings or env.",
+        )
+    return url
+
+
+def _fee_link_url(*, lead: Lead, institute_key: str, payment: dict, actor=None):
+    """Resolve the URL to put in the fee SMS / WhatsApp / email.
+
+    Prefers a per-lead HDFC SmartGateway pay link, because that is what
+    makes the payment self-reconciling: the bank webhooks back to us and
+    the lead's `application_fee_paid_at` is stamped without anyone keying
+    it in. Falls back to the static per-institute short URL (UPI / bank
+    instructions, manually reconciled) when SmartGateway is switched off
+    or the request can't be raised — a gateway outage must never block a
+    counsellor from sending payment instructions.
+
+    The URL returned points at OUR public pay endpoint, not at the bank:
+    SmartGateway payment-page sessions expire, and a lead may pay days
+    after the SMS lands. See apps.payments.models for the full reasoning.
+
+    Returns `(url, payment_request_or_None)`.
+    """
+    from apps.payments.gateway import SmartGatewayError, is_enabled
+    from apps.payments.services import application_fee_request_for, pay_url_for
+
+    if not is_enabled():
+        return _static_fee_link_url(institute_key), None
+
+    amount = _application_fee_for_lead(lead, payment)
+    try:
+        payment_request = application_fee_request_for(
+            lead=lead,
+            amount=amount or None,
+            description=f"Application fee — {payment['payee_name']}",
+            actor=actor,
+        )
+    except SmartGatewayError as e:
+        logger.warning(
+            "leads: SmartGateway request failed for lead %s (%s) — "
+            "falling back to the static fee link.", lead.id, e,
+        )
+        return _static_fee_link_url(institute_key), None
+
+    return pay_url_for(payment_request), payment_request
+
+
 def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
     """Send the fee-payment link to the lead by both SMS and email.
 
@@ -344,13 +404,9 @@ def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
     institute_label = payment["payee_name"]
     short_name = payment.get("short_name", institute_label)
 
-    fee_urls = getattr(settings, "FEE_LINK_URLS", {}) or {}
-    url = fee_urls.get(institute_key)
-    if not url:
-        raise ValueError(
-            f"No fee-link URL configured for institute '{institute_key}'. "
-            f"Set FEE_LINK_URLS[{institute_key!r}] in settings or env.",
-        )
+    url, payment_request = _fee_link_url(
+        lead=lead, institute_key=institute_key, payment=payment, actor=actor,
+    )
 
     # SMS — verbatim DLT wording from PHP (`sendfeelink.php`).
     sms_body = (
@@ -433,6 +489,13 @@ def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
         "communication_id": comm.id,
         "url": url,
         "institute": institute_label,
+        # Non-null only when the URL above is a SmartGateway pay link,
+        # i.e. when this payment will reconcile itself. The UI keys the
+        # "awaiting payment" badge off this.
+        "payment_request_id": getattr(payment_request, "id", None),
+        "payment_token": str(getattr(payment_request, "token", "") or ""),
+        "gateway": "smartgateway" if payment_request else "manual",
+        "amount": str(getattr(payment_request, "amount", "") or ""),
     }
 
 

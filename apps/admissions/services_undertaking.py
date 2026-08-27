@@ -7,14 +7,18 @@ remarks. PHP source of truth is `JD_ERP/admissions/save.php` lines
 
 Concretely:
 
-- Down payment = first installment (sequence=1) with description
-  starting "Down payment" — that's how the React enrollment-create form
-  lays it down via `/api/fees/installments/bulk/`.
-- Installments = remaining sequences ordered by `sequence`.
+- Registration fee = the `kind=REGISTRATION` installment — the mandatory
+  yearly charge. Pulled out first so it prints on its own line and can
+  never be mistaken for the down payment.
+- Down payment = the remaining installment whose description starts
+  "Down payment" — that's how the React enrollment-create form lays it
+  down via `/api/fees/installments/bulk/`.
+- Installments = the remaining course rows ordered by `sequence`.
 - Concession = sum of APPROVED concessions on the enrollment.
-- Total fee = sum of installments + concession (matches the PHP rule
-  `down_payment + Σ installments + concession = total_fee` enforced by
-  the enrollment-create page client-side).
+- Total fee = sum of ALL installments (registration included — it is
+  carved out of the total, not added to it) + concession, matching the
+  rule `registration + down_payment + Σ installments + concession =
+  total_fee` enforced by the enrollment-create page client-side.
 
 We render to PDF with fpdf2 (same dependency the receipts service uses)
 and dispatch via the notifications email helper. The PDF is NOT
@@ -87,18 +91,30 @@ def render_undertaking_pdf(
     installments = list(
         Installment.objects.filter(enrollment=enrollment).order_by("sequence")
     )
-    # Down payment = sequence 1, by the convention set in the React
-    # enrollment-create form. If absent, leave blank — PDF still renders.
-    down_payment = next(
-        (i for i in installments if i.sequence == 1
-         and i.description.lower().startswith("down payment")),
+    # The mandatory registration fee is its own line on the undertaking —
+    # it is carved out of the same total, so it stays in `installments`
+    # for the arithmetic below but is kept out of the down-payment and
+    # balance-payment lists.
+    registration = next(
+        (i for i in installments if i.kind == Installment.Kind.REGISTRATION),
         None,
     )
-    if down_payment is None and installments:
-        # Fall back to lowest-sequence row as the down payment.
-        down_payment = installments[0]
+    course_installments = [i for i in installments if i is not registration]
 
-    other_installments = [i for i in installments if i is not down_payment]
+    # Down payment = the row the React enrollment-create form labels as
+    # such. Registration rows are excluded first, so a schedule that puts
+    # registration at sequence 1 can't be mistaken for the down payment.
+    # If absent, leave blank — PDF still renders.
+    down_payment = next(
+        (i for i in course_installments
+         if i.description.lower().startswith("down payment")),
+        None,
+    )
+    if down_payment is None and course_installments:
+        # Fall back to lowest-sequence course row as the down payment.
+        down_payment = course_installments[0]
+
+    other_installments = [i for i in course_installments if i is not down_payment]
 
     concession_total = Decimal(
         Concession.objects.filter(
@@ -151,10 +167,22 @@ def render_undertaking_pdf(
     _row(pdf, "Contact number", student.student_mobile or "-")
     _row(pdf, "Tuition fee applicable", _money(total_fee))
 
+    # NB: this row used to be labelled "Registration amount paid" while
+    # actually carrying the down payment (a PHP-era misnomer). Now that a
+    # real registration fee exists and prints on its own line below, the
+    # label has to say what it is.
     if down_payment is not None:
-        _row(pdf, "Registration amount paid", _money(down_payment.amount))
+        _row(pdf, "Down payment", _money(down_payment.amount))
     else:
-        _row(pdf, "Registration amount paid", "-")
+        _row(pdf, "Down payment", "-")
+
+    if registration is not None:
+        date_str = (
+            registration.due_date.strftime("%d-%b-%Y")
+            if registration.due_date else "-"
+        )
+        _row(pdf, "Registration fee (mandatory, payable yearly)",
+             f"{_money(registration.amount)} · due {date_str}")
 
     balance_due = total_fee - Decimal(
         down_payment.amount if down_payment is not None else 0
