@@ -52,6 +52,15 @@ PRODUCTION_BASE_URL = "https://smartgateway.hdfc.bank.in"
 #: server-side default change can't silently reshape the response.
 API_VERSION = "2023-06-30"
 
+#: SmartGateway sits behind Cloudflare, which blocks the default
+#: `Python-urllib/3.x` agent with a 1010 "Access denied" (403). A
+#: browser-shaped UA gets us to the origin — same trick as the MSG91
+#: client. (Fixed 2026-08: without this every /session + /orders call 403s.)
+_BROWSER_UA = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
 
 class SmartGatewayError(Exception):
     """Any non-2xx from SmartGateway, or a transport failure.
@@ -139,6 +148,7 @@ def _base_headers(customer_id: str = "") -> dict:
         "Authorization": _auth_header(),
         "x-merchantid": getattr(settings, "SMARTGATEWAY_MERCHANT_ID", ""),
         "Accept": "application/json",
+        "User-Agent": _BROWSER_UA,
     }
     reseller = getattr(settings, "SMARTGATEWAY_RESELLER_ID", "") or ""
     if reseller:
@@ -212,11 +222,11 @@ def _request(
 
     data = None
     if payload is not None:
-        # SmartGateway's session endpoint takes form-encoded bodies; the
-        # JSON content type is accepted but form encoding is what the
-        # reference examples use and what nested `metadata.*` keys need.
-        data = urllib.parse.urlencode(payload, doseq=True).encode("utf-8")
-        headers["Content-Type"] = "application/x-www-form-urlencoded"
+        # UAT's /session rejects form-encoded bodies with 415 and only
+        # accepts JSON (verified 2026-08 against smartgateway.hdfcuat).
+        # JSON also carries nested keys (udf/metadata) cleanly.
+        data = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
 
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     timeout = getattr(settings, "SMARTGATEWAY_TIMEOUT", 20)
