@@ -141,6 +141,40 @@ class PublicApplicationView(APIView):
         )
 
 
+def _fee_structures() -> list[dict]:
+    """Headline fee numbers per (campus, program), for the fee-structure
+    panel on the public form.
+
+    The student can change campus/program on the form, so we ship every
+    active template and let the frontend pick the matching one. Only the
+    program-wide template (course is NULL) is published — course-level
+    templates are an internal refinement the student hasn't chosen yet.
+    Where several academic years exist we keep the most recent, matching
+    the lookup order in `apps.leads.send_links`.
+    """
+    from apps.master.models import FeeTemplate
+
+    rows: dict[tuple[int, int], dict] = {}
+    for t in (
+        FeeTemplate.objects
+        .filter(is_active=True, course__isnull=True)
+        .select_related("academic_year")
+        .order_by("academic_year__id", "id")  # newest last — it wins
+    ):
+        rows[(t.campus_id, t.program_id)] = {
+            "campus": t.campus_id,
+            "program": t.program_id,
+            "academic_year": str(t.academic_year),
+            "application_fee": str(t.application_fee),
+            "course_fee": str(t.course_fee),
+            "registration_fee": str(t.registration_fee),
+            "other_fee": str(t.other_fee),
+            "total_fee": str(t.total_fee),
+            "notes": t.notes,
+        }
+    return list(rows.values())
+
+
 def _prefill(lead: Lead) -> dict:
     """Minimal payload the public form needs — never leaks lead status,
     history, internal ids beyond what the student already typed."""
@@ -232,6 +266,9 @@ def _prefill(lead: Lead) -> dict:
             .values("id", "name", "code", "institute").order_by("name")
         ),
         "programs": programs,
+        # Headline fee numbers per (campus, program) — the form shows the
+        # one matching the student's current selection.
+        "fee_structures": _fee_structures(),
         "states": list(
             State.objects.values("id", "name", "code").order_by("name")
         ),

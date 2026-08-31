@@ -1,5 +1,7 @@
 from django.urls import path
 
+from .application_views import ApplicationFormView
+from .fee_views import FeeSummaryView, InstallmentPayView
 from .views import (
     AppointmentCancelView, AppointmentFacultyView, AppointmentListCreateView,
     AssignmentListView, AssignmentSubjectsView, AssignmentSubmitView,
@@ -77,6 +79,15 @@ urlpatterns = [
          name="portal-feedback-link"),
     path("feedback/options/", FeedbackOptionsView.as_view(),
          name="portal-feedback-options"),
+
+    # Application form (read-only playback of what the student submitted)
+    path("application/", ApplicationFormView.as_view(),
+         name="portal-application"),
+
+    # Fees — schedule, receipts, and paying the next installment online
+    path("fees/", FeeSummaryView.as_view(), name="portal-fees"),
+    path("fees/installments/<int:pk>/pay/", InstallmentPayView.as_view(),
+         name="portal-fee-installment-pay"),
 
     # Qualifications (educational documents)
     path("qualifications/", QualificationListCreateView.as_view(),

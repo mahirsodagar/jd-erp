@@ -59,14 +59,18 @@ def _form_params(request) -> dict:
         return {}
 
 
-def _result_redirect(outcome: str, token=None):
+def _result_redirect(outcome: str, token=None, purpose: str = ""):
     """Bounce the payer to the SPA's result page.
 
     The SPA owns the "thanks / that failed" screen; this endpoint only
-    decides which outcome to name.
+    decides which outcome to name. `purpose` rides along so that screen
+    can say the right thing — an applicant paying a form fee and a
+    student paying an installment need different next steps.
     """
     base = getattr(settings, "FRONTEND_BASE_URL", "").rstrip("/")
     suffix = f"&ref={token}" if token else ""
+    if purpose:
+        suffix += f"&for={purpose}"
     return redirect(f"{base}/#/payment/result?status={outcome}{suffix}")
 
 
@@ -84,24 +88,29 @@ class PayRedirectView(APIView):
     def get(self, request, token):
         payment_request = (
             PaymentRequest.objects
-            .select_related("lead", "lead__campus")
+            .select_related(
+                "lead", "lead__campus",
+                "installment", "installment__enrollment",
+                "installment__enrollment__student",
+            )
             .filter(token=token)
             .first()
         )
         if payment_request is None:
             return _result_redirect("notfound")
+        purpose = payment_request.purpose
 
         if payment_request.status == PaymentRequest.Status.PAID:
-            return _result_redirect("alreadypaid", token)
+            return _result_redirect("alreadypaid", token, purpose)
         if payment_request.status == PaymentRequest.Status.CANCELLED:
-            return _result_redirect("cancelled", token)
+            return _result_redirect("cancelled", token, purpose)
 
         if not is_enabled():
             logger.error(
                 "payments: pay link opened for request %s but SmartGateway "
                 "is disabled.", payment_request.pk,
             )
-            return _result_redirect("unavailable", token)
+            return _result_redirect("unavailable", token, purpose)
 
         try:
             order = start_or_resume_order(payment_request)
@@ -110,7 +119,7 @@ class PayRedirectView(APIView):
                 "payments: could not start order for request %s: %s",
                 payment_request.pk, e,
             )
-            return _result_redirect("unavailable", token)
+            return _result_redirect("unavailable", token, purpose)
 
         return redirect(order.payment_page_url)
 
@@ -135,13 +144,22 @@ class PayReturnView(APIView):
         return self._handle(request, token)
 
     def _handle(self, request, token):
-        payment_request = PaymentRequest.objects.filter(token=token).first()
+        payment_request = (
+            PaymentRequest.objects
+            .select_related(
+                "lead", "installment", "installment__enrollment",
+                "installment__enrollment__student",
+            )
+            .filter(token=token)
+            .first()
+        )
         if payment_request is None:
             return _result_redirect("notfound")
+        purpose = payment_request.purpose
 
         order = payment_request.orders.order_by("-created_on").first()
         if order is None:
-            return _result_redirect("unknown", token)
+            return _result_redirect("unknown", token, purpose)
 
         # SmartGateway signs these params with the RESPONSE_KEY, so unlike
         # a bare redirect they can actually be trusted. We still prefer a
@@ -175,19 +193,19 @@ class PayReturnView(APIView):
             if signed_ok:
                 signed_status = str(params.get("status") or "").upper()
                 if signed_status in PaymentOrder.PAID_STATUSES:
-                    return _result_redirect("success", token)
+                    return _result_redirect("success", token, purpose)
                 if signed_status in PaymentOrder.TERMINAL_STATUSES:
-                    return _result_redirect("failed", token)
+                    return _result_redirect("failed", token, purpose)
             # The payment may well have succeeded — the webhook or the
             # reconcile cron will settle it. Don't tell the student it
             # failed.
-            return _result_redirect("pending", token)
+            return _result_redirect("pending", token, purpose)
 
         if order.is_paid:
-            return _result_redirect("success", token)
+            return _result_redirect("success", token, purpose)
         if order.is_terminal:
-            return _result_redirect("failed", token)
-        return _result_redirect("pending", token)
+            return _result_redirect("failed", token, purpose)
+        return _result_redirect("pending", token, purpose)
 
 
 class SmartGatewayWebhookView(APIView):

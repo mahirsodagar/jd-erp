@@ -23,9 +23,10 @@ So we send a link to *us*, not to the bank:
 constrains it hard: under 21 characters, no special characters.
 
 Kept in its own app rather than inside `leads` because none of this is
-lead-specific: `PaymentRequest.purpose` is the discriminator, and today
-only APPLICATION_FEE is wired up. Student fee installments would add a
-purpose and a nullable FK alongside `lead`.
+lead-specific: `PaymentRequest.purpose` is the discriminator, and each
+purpose hangs its own nullable FK off the request — `lead` for
+APPLICATION_FEE, `installment` for FEE_INSTALLMENT (the student portal's
+"pay this installment" button). Exactly one of them is set.
 """
 
 import uuid
@@ -44,6 +45,7 @@ class PaymentRequest(models.Model):
 
     class Purpose(models.TextChoices):
         APPLICATION_FEE = "APPLICATION_FEE", "Application fee (lead)"
+        FEE_INSTALLMENT = "FEE_INSTALLMENT", "Fee installment (student)"
 
     class Status(models.TextChoices):
         PENDING = "PENDING", "Awaiting payment"
@@ -63,6 +65,12 @@ class PaymentRequest(models.Model):
         "leads.Lead", null=True, blank=True, on_delete=models.CASCADE,
         related_name="payment_requests",
         help_text="Set for APPLICATION_FEE requests.",
+    )
+    installment = models.ForeignKey(
+        "fees.Installment", null=True, blank=True, on_delete=models.CASCADE,
+        related_name="payment_requests",
+        help_text="Set for FEE_INSTALLMENT requests — the scheduled row "
+                  "the student is paying from the portal.",
     )
 
     amount = models.DecimalField(
@@ -99,6 +107,7 @@ class PaymentRequest(models.Model):
         ordering = ("-created_on",)
         indexes = [
             models.Index(fields=["lead", "status"]),
+            models.Index(fields=["installment", "status"]),
             models.Index(fields=["purpose", "status"]),
         ]
 

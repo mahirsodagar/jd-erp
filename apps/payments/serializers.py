@@ -32,7 +32,7 @@ class PaymentRequestSerializer(serializers.ModelSerializer):
     class Meta:
         model = PaymentRequest
         fields = (
-            "id", "token", "purpose", "lead", "lead_name",
+            "id", "token", "purpose", "lead", "lead_name", "installment",
             "amount", "currency", "description",
             "status", "paid_at", "attempt_count", "pay_url", "orders",
             "created_by", "created_on", "updated_on",

@@ -66,6 +66,49 @@ def _customer_id_for(lead) -> str:
     return f"LEAD{lead.id}"
 
 
+def _student_of(payment_request: PaymentRequest):
+    """The Student behind a FEE_INSTALLMENT request, or None."""
+    installment = payment_request.installment
+    if installment is None:
+        return None
+    return installment.enrollment.student
+
+
+def _payer(payment_request: PaymentRequest) -> dict:
+    """Who SmartGateway should bill, whatever the request's purpose.
+
+    Both branches produce the same shape so `start_or_resume_order` never
+    has to know which kind of request it is looking at. The customer_id
+    is namespaced per party type (LEAD… / STU…) because leads and
+    students are separate id spaces that would otherwise collide.
+    """
+    lead = payment_request.lead
+    if lead is not None:
+        return {
+            "customer_id": _customer_id_for(lead),
+            "email": lead.email or "",
+            "phone": lead.phone or "",
+            "name": lead.name or "",
+            "udf1": str(lead.id),
+        }
+
+    student = _student_of(payment_request)
+    if student is not None:
+        return {
+            "customer_id": f"STU{student.id}",
+            "email": student.student_email or "",
+            "phone": student.student_mobile or "",
+            "name": student.student_name or "",
+            "udf1": str(student.id),
+        }
+
+    # No party attached — still payable, just anonymous to the bank.
+    return {
+        "customer_id": f"REQ{payment_request.pk}",
+        "email": "", "phone": "", "name": "", "udf1": "",
+    }
+
+
 def open_application_fee_request(lead) -> PaymentRequest | None:
     """The lead's still-payable application-fee request, if any."""
     return (
@@ -149,19 +192,88 @@ def application_fee_request_for(
     )
 
 
+def open_installment_request(installment) -> PaymentRequest | None:
+    """The still-payable request against this installment, if any."""
+    return (
+        PaymentRequest.objects
+        .filter(
+            installment=installment,
+            purpose=PaymentRequest.Purpose.FEE_INSTALLMENT,
+            status=PaymentRequest.Status.PENDING,
+        )
+        .order_by("-created_on")
+        .first()
+    )
+
+
+def installment_request_for(
+    installment, *, amount, description: str = "", actor=None,
+) -> PaymentRequest:
+    """Get (or raise) a payable request for one fee installment.
+
+    `amount` is the installment's *outstanding balance* at click time,
+    not its face value — a student who part-paid at the counter should
+    only be asked online for what is left.
+
+    A pending request whose amount no longer matches is cancelled rather
+    than left lying around: its token would otherwise still redirect to a
+    live payment page for the stale figure.
+
+    Raises `SmartGatewayError` when the gateway is off or the amount is
+    not a positive number. Makes no network call.
+    """
+    if not is_enabled():
+        raise SmartGatewayError(
+            "Online payment is not available right now. Please contact the "
+            "accounts office.",
+        )
+
+    amount = Decimal(str(amount))
+    if amount <= Decimal("0"):
+        raise SmartGatewayError("There is nothing left to pay on this installment.")
+
+    existing = open_installment_request(installment)
+    if existing is not None:
+        if existing.amount == amount:
+            return existing
+        existing.status = PaymentRequest.Status.CANCELLED
+        existing.save(update_fields=["status", "updated_on"])
+
+    student = installment.enrollment.student
+    return PaymentRequest.objects.create(
+        purpose=PaymentRequest.Purpose.FEE_INSTALLMENT,
+        installment=installment,
+        amount=amount,
+        description=description or (
+            f"Installment #{installment.sequence} — {student.student_name}"
+        ),
+        created_by=actor,
+    )
+
+
 # ---------------------------------------------------------------------
 # Minting an order (the student opened the link)
 # ---------------------------------------------------------------------
 
-def _build_order_id(payment_request: PaymentRequest, attempt: int) -> str:
-    """`AF{request}N{attempt}` — alphanumeric, under 20 chars.
+#: Order-id prefix per purpose, so a glance at the bank's dashboard says
+#: what was being paid. Two letters each, keeping the id well inside the
+#: gateway's 20-character cap.
+_ORDER_ID_PREFIX = {
+    PaymentRequest.Purpose.APPLICATION_FEE: "AF",
+    PaymentRequest.Purpose.FEE_INSTALLMENT: "FI",
+}
 
-    Keyed on the request's own pk rather than the lead's so that two
-    requests for one lead can't collide. Truncation is impossible in
-    practice (a 10-digit pk with a 99-attempt suffix is 15 chars) but the
-    gateway validates it again before the call goes out.
+
+def _build_order_id(payment_request: PaymentRequest, attempt: int) -> str:
+    """`{XX}{request}N{attempt}` — alphanumeric, under 20 chars.
+
+    Keyed on the request's own pk rather than the payer's so that two
+    requests for one lead or student can't collide. Truncation is
+    impossible in practice (a 10-digit pk with a 99-attempt suffix is 15
+    chars) but the gateway validates it again before the call goes out.
     """
-    order_id = f"AF{payment_request.pk}N{attempt:02d}"
+    prefix = _ORDER_ID_PREFIX.get(payment_request.purpose, "PR")
+    order_id = f"{prefix}{payment_request.pk}N{attempt:02d}"
     return order_id[:ORDER_ID_MAX_LENGTH]
 
 
@@ -213,7 +325,7 @@ def start_or_resume_order(payment_request: PaymentRequest) -> PaymentOrder:
 
     attempt = payment_request.attempt_count + 1
     order_id = _build_order_id(payment_request, attempt)
-    lead = payment_request.lead
+    payer = _payer(payment_request)
 
     order = PaymentOrder.objects.create(
         request=payment_request,
@@ -225,23 +337,21 @@ def start_or_resume_order(payment_request: PaymentRequest) -> PaymentOrder:
     payment_request.attempt_count = attempt
     payment_request.save(update_fields=["attempt_count", "updated_on"])
 
-    name = (getattr(lead, "name", "") or "").strip()
-    first_name, _, last_name = name.partition(" ")
+    first_name, _, last_name = payer["name"].strip().partition(" ")
 
     try:
         response = create_session(
             order_id=order_id,
             amount=payment_request.amount,
-            customer_id=_customer_id_for(lead) if lead else f"REQ{payment_request.pk}",
+            customer_id=payer["customer_id"],
             return_url=return_url_for(payment_request),
-            customer_email=getattr(lead, "email", "") or "",
-            customer_phone=getattr(lead, "phone", "") or "",
+            customer_email=payer["email"],
+            customer_phone=payer["phone"],
             first_name=first_name,
             last_name=last_name,
             description=payment_request.description,
             currency=payment_request.currency,
-            udf={"udf1": str(getattr(lead, "id", "") or ""),
-                 "udf2": payment_request.purpose},
+            udf={"udf1": payer["udf1"], "udf2": payment_request.purpose},
         )
     except SmartGatewayError:
         order.status = PaymentOrder.Status.JUSPAY_DECLINED
@@ -276,7 +386,7 @@ def start_or_resume_order(payment_request: PaymentRequest) -> PaymentOrder:
 def _payment_mode(order: PaymentOrder) -> str:
     """SmartGateway's method type → the ERP's payment-mode vocabulary.
 
-    `Lead.application_fee_mode` is capped at 10 chars and documented as
+    Both `Lead.application_fee_mode` and `FeeReceipt.payment_mode` use
     CASH / CHEQUE / DD / ONLINE / UPI / NEFT / RTGS, so only UPI maps
     across; cards, netbanking and wallets all collapse to ONLINE. The
     finer detail survives on the order.
@@ -312,6 +422,57 @@ def _mark_lead_fee_paid(payment_request: PaymentRequest, order: PaymentOrder) ->
         "application_fee_mode", "application_fee_ref",
         "application_fee_notes", "application_fee_recorded_by",
     ])
+
+
+def _record_installment_receipt(
+    payment_request: PaymentRequest, order: PaymentOrder,
+) -> None:
+    """Write the FeeReceipt for a settled portal installment payment.
+
+    This is the online twin of what accounts keys by hand in
+    `FeeReceiptListCreateView`, and it deliberately produces the same
+    shape of row — same numbering series, same `installment` link — so
+    the balance maths, the collection reports and the receipt PDF all
+    treat an online payment as an ordinary receipt.
+
+    Idempotent on `instrument_ref == order.order_id`: order ids are
+    unique, so a replayed webhook or a manual reconcile can't double-post.
+    No GST is split out — the gateway charges the gross amount and the
+    counter flow leaves those at zero for the same reason.
+    """
+    from apps.fees.models import FeeReceipt
+    from apps.fees.services.receipt_no import generate_receipt_no
+
+    installment = payment_request.installment
+    if installment is None:
+        return
+    if FeeReceipt.objects.filter(instrument_ref=order.order_id).exists():
+        return
+
+    enrollment = installment.enrollment
+    charged_at = order.charged_at or timezone.now()
+    FeeReceipt.objects.create(
+        receipt_no=generate_receipt_no(campus_code=enrollment.campus.code),
+        enrollment=enrollment,
+        installment=installment,
+        basic_fee=order.amount,
+        amount=order.amount,
+        payment_mode=_payment_mode(order),
+        # The bank's order id, not the txn id: it is what makes this
+        # write idempotent, and it is what support will quote back.
+        instrument_ref=order.order_id,
+        bank="HDFC SmartGateway",
+        received_date=timezone.localtime(charged_at).date(),
+        notes=(
+            f"Paid online by the student via HDFC SmartGateway "
+            f"(order {order.order_id}"
+            + (f", txn {order.txn_id}" if order.txn_id else "")
+            + (f", {order.payment_method}" if order.payment_method else "")
+            + ")."
+        ),
+        # Left as None deliberately: no human received this one.
+        received_by=None,
+    )
 
 
 def _institute_key_for(lead) -> str:
@@ -433,6 +594,9 @@ def apply_order_body(order: PaymentOrder, body: dict) -> PaymentOrder:
             "status", "paid_order", "paid_at", "updated_on",
         ])
 
+    if payment_request.installment_id:
+        _record_installment_receipt(payment_request, order)
+
     if payment_request.lead_id:
         _mark_lead_fee_paid(payment_request, order)
         # After commit so the lead is definitely marked paid before
@@ -451,10 +615,9 @@ def reconcile_order(order: PaymentOrder) -> PaymentOrder:
     webhooks with shared credentials rather than signing the body, so the
     payload alone is not proof that money moved.
     """
-    lead = order.request.lead
     body = fetch_order(
         order.order_id,
-        customer_id=_customer_id_for(lead) if lead else "",
+        customer_id=_payer(order.request)["customer_id"],
     )
     return apply_order_body(order, body)
 

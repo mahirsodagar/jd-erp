@@ -47,7 +47,11 @@ class Command(BaseCommand):
             .filter(created_on__gte=cutoff)
             .exclude(status__in=PaymentOrder.TERMINAL_STATUSES)
             .exclude(sg_order_ref="")
-            .select_related("request", "request__lead")
+            .select_related(
+                "request", "request__lead", "request__installment",
+                "request__installment__enrollment",
+                "request__installment__enrollment__student",
+            )
             .order_by("created_on")
         )
 
