@@ -750,7 +750,12 @@ DEFAULT_FROM_NAME = env("DEFAULT_FROM_NAME", default="JD Communications")
 
 AXES_FAILURE_LIMIT = env.int("AXES_FAILURE_LIMIT", default=5)
 AXES_COOLOFF_TIME = timedelta(minutes=env.int("AXES_COOLOFF_MINUTES", default=15))
-AXES_LOCKOUT_PARAMETERS = ["ip_address", "username"]
+# Lock on the COMBINATION of username AND ip_address (nested list = AND),
+# not each independently. Behind nginx every request's REMOTE_ADDR is the
+# proxy's 127.0.0.1, so a flat ["ip_address", "username"] (OR) meant 5
+# failures from ANY users locked out the shared 127.0.0.1 — i.e. everyone.
+# Keyed on the pair, one user's failures only lock that user.
+AXES_LOCKOUT_PARAMETERS = [["username", "ip_address"]]
 AXES_RESET_ON_SUCCESS = True
 AXES_ENABLE_ADMIN = False
 
