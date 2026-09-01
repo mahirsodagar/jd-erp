@@ -125,7 +125,7 @@ On a counsellor's user record there is an **available** switch, with a reason.
 - **Unavailable** — they are skipped. Their existing leads stay with them.
 
 Use this for leave, training or workload management, rather than removing
-someone from a counsellor pool — removing them loses their place in the
+someone from the counsellor list — removing them loses their place in the
 rotation.
 
 ## 13.5 Master Data
@@ -162,9 +162,8 @@ A campus with no institute set makes both of those actions fail too. Check
 older campuses; some may predate the field.
 
 **3. Program — category.**
-Regular, Short or Newly launched. This decides **which counsellor pool** new
-leads are routed to. A program in a category with no pool produces unassigned
-leads.
+Regular, Short or Newly launched. Reporting and grouping only — it no longer
+affects who a lead is assigned to, since all counsellors share one rotation.
 
 **4. Program — degree type.**
 Free text such as "B.Des", "M.Des" or "Diploma". Anything containing the word
@@ -214,7 +213,8 @@ historical record attached to it.
 6. Ask your technical team to check the **Casual Leave year window**, which is
    set in the system and must be updated annually.
 7. Confirm every campus has an **institute** set.
-8. Confirm every program category has a **counsellor pool**.
+8. Confirm the **counsellor list** has at least one active member, or new
+   leads arrive unassigned.
 
 ## 13.7 What your actions affect
 

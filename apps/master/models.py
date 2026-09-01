@@ -1,11 +1,18 @@
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import models
 from django.utils.text import slugify
 
 
 class Institute(models.Model):
-    """Top-level legal entity. One Institute → many Campuses."""
+    """Top-level legal entity.
+
+    An Institute owns Programs (legacy `program_master.inst_id`); it does
+    NOT own Campuses. A campus hosts whichever programs are offered
+    there, so a single campus can serve several institutes at once —
+    reach them via `Campus.institutes`.
+    """
 
     name = models.CharField(max_length=160, unique=True)
     code = models.CharField(max_length=20, unique=True)
@@ -61,13 +68,16 @@ class City(models.Model):
 
 
 class Campus(models.Model):
+    """A physical location. Institute-agnostic, as in legacy
+    `campus_master` — which stored only (campus_name, campus_shname).
+
+    A campus belongs to no single institute: it hosts programs, and each
+    program names its own institute. Use `Campus.institutes` for the set
+    of institutes present at this campus.
+    """
+
     name = models.CharField(max_length=120, unique=True)
     code = models.CharField(max_length=20, unique=True, help_text="Short code, e.g. BLR, GOA.")
-    institute = models.ForeignKey(
-        Institute, on_delete=models.PROTECT,
-        related_name="campuses", null=True, blank=True,
-        help_text="Parent institute. Optional for legacy data.",
-    )
     city = models.CharField(max_length=80, blank=True)
     state = models.CharField(max_length=80, blank=True)
     image = models.ImageField(
@@ -85,9 +95,30 @@ class Campus(models.Model):
     def __str__(self):
         return f"{self.name} ({self.code})"
 
+    @property
+    def institutes(self):
+        """Institutes with at least one active program at this campus.
+
+        Derived, not stored — the same fact legacy expressed by joining
+        `program_master` on FIND_IN_SET(campus_id) and reading inst_id.
+        """
+        return (Institute.objects
+                .filter(programs__campuses=self, programs__is_active=True)
+                .distinct()
+                .order_by("name"))
+
 
 class Program(models.Model):
-    """Academic program. Offered at one or more campuses."""
+    """Academic program — the join between an Institute and its campuses.
+
+    Ports legacy `program_master`: `institute` is inst_id, `degree` is
+    degree_id, and `campuses` replaces the comma-separated campus_id
+    column that was queried with FIND_IN_SET.
+
+    This is the ONLY place the institute is recorded for academic data.
+    Resolve a student's / lead's institute through their program, never
+    through their campus.
+    """
 
     class Category(models.TextChoices):
         REGULAR = "REGULAR", "Regular Course (1-4 yrs)"
@@ -96,14 +127,30 @@ class Program(models.Model):
 
     name = models.CharField(max_length=160, unique=True)
     code = models.CharField(max_length=30, unique=True)
+    institute = models.ForeignKey(
+        Institute, on_delete=models.PROTECT,
+        related_name="programs", null=True, blank=True,
+        help_text="Owning institute (legacy `program_master.inst_id`). "
+                  "Nullable only for legacy rows that could not be "
+                  "backfilled — set it on every new program.",
+    )
+    degree = models.ForeignKey(
+        "master.Degree", on_delete=models.PROTECT,
+        related_name="programs", null=True, blank=True,
+        help_text="Legacy `program_master.degree_id`.",
+    )
     degree_type = models.CharField(
         max_length=40, blank=True,
-        help_text="e.g. B.Des, M.Des, Diploma.",
+        help_text="Free-text degree label, e.g. B.Des, M.Des, Diploma. "
+                  "Kept alongside `degree` because notifications.sender "
+                  "routes the outgoing mail domain off this string "
+                  "(is_diploma()) — do not drop it.",
     )
     category = models.CharField(
         max_length=10, choices=Category.choices, default=Category.REGULAR,
         db_index=True,
-        help_text="Drives which counsellor pool a lead is routed to.",
+        help_text="Reporting / grouping only. Lead assignment rotates over "
+                  "all counsellors regardless of category.",
     )
     certification = models.CharField(
         max_length=20, blank=True,
@@ -144,13 +191,36 @@ class AcademicYear(models.Model):
 
 
 class Course(models.Model):
-    """Specific course/track inside a Program (e.g. "B.Des. Fashion Year 1").
-    Used by Student.course and Enrollment.course."""
+    """A PROGRAM YEAR — one year of a Program, spanning its semesters.
 
-    name = models.CharField(max_length=160)
+    This is legacy `course_master`, whose screen is titled "Add Program
+    year" (masters/course.php:83): `course_name` is the year's label
+    ("Year 1"), `program_id` its program, and `sem_id` a COMMA-SEPARATED
+    list of the semester numbers the year covers. PHP resolved the year
+    for a semester with:
+
+        SELECT * FROM course_master
+        WHERE FIND_IN_SET(<sem>, sem_id) AND program_id = <program>
+
+    `semesters` below is that CSV, normalised. The model keeps the name
+    `Course` because Student.course, Enrollment.course and
+    FeeTemplate.course all point at it; everything user-facing says
+    "Program year".
+    """
+
+    name = models.CharField(
+        max_length=160,
+        help_text='Year label, e.g. "Year 1" (legacy `course_name`).',
+    )
     code = models.CharField(max_length=30, unique=True)
     program = models.ForeignKey(
         "master.Program", on_delete=models.PROTECT, related_name="courses",
+    )
+    semesters = models.ManyToManyField(
+        "master.Semester", related_name="courses", blank=True,
+        help_text="Semesters this year covers — the normalised form of "
+                  "legacy `course_master.sem_id`, which held them as a "
+                  "comma-separated list queried with FIND_IN_SET.",
     )
     duration_months = models.PositiveSmallIntegerField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
@@ -160,9 +230,24 @@ class Course(models.Model):
     class Meta:
         ordering = ("name",)
         unique_together = (("name", "program"),)
+        verbose_name = "Program year"
+        verbose_name_plural = "Program years"
 
     def __str__(self):
         return f"{self.name} ({self.code})"
+
+    @classmethod
+    def for_semester(cls, *, program, semester):
+        """The program year covering `semester`, or None.
+
+        Django equivalent of the PHP FIND_IN_SET lookup above. Returns
+        the first match — legacy allowed several rows to claim the same
+        semester and simply took them in id order.
+        """
+        return (cls.objects
+                .filter(program=program, semesters=semester, is_active=True)
+                .order_by("pk")
+                .first())
 
 
 class Degree(models.Model):
@@ -227,14 +312,20 @@ class Batch(models.Model):
 
 
 class Subject(models.Model):
-    """Taught entity. Subjects are stand-alone — the curriculum linkage
-    (which subjects belong to which Program) is implicit via ScheduleSlot
-    (batch → program). Add a `Subject.programs` M2M later if explicit
-    linkage becomes needed."""
+    """Taught entity. The curriculum linkage — which subjects belong to
+    which Program, at which Semester, and who teaches them — is explicit
+    via `CurriculumMapping` (legacy `instur_program_sem_sub`)."""
 
     name = models.CharField(max_length=160)
     code = models.CharField(max_length=30, unique=True)
     credits = models.PositiveSmallIntegerField(null=True, blank=True)
+    is_elective = models.BooleanField(
+        default=False,
+        help_text="Legacy `subject_master.iselective`. Elective subjects "
+                  "may share one timetable slot with other electives, and "
+                  "their attendance roster is limited to the students who "
+                  "chose them (Enrollment.elective_subjects).",
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -244,6 +335,73 @@ class Subject(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.code})"
+
+
+class CurriculumMapping(models.Model):
+    """Which Subject is taught in which (Program, Semester), and by whom.
+
+    Ports legacy `instur_program_sem_sub` — the table the PHP subject
+    dropdowns filtered on (`where program_id=... and instur_id=...`).
+
+    `instructor` is nullable so the same table serves both jobs: rows
+    without one describe the curriculum (this subject belongs to this
+    program/semester), rows with one also record the teaching
+    assignment. Legacy always set it.
+    """
+
+    program = models.ForeignKey(
+        "master.Program", on_delete=models.CASCADE,
+        related_name="curriculum",
+    )
+    semester = models.ForeignKey(
+        "master.Semester", on_delete=models.PROTECT,
+        related_name="curriculum",
+    )
+    subject = models.ForeignKey(
+        "master.Subject", on_delete=models.PROTECT,
+        related_name="curriculum",
+    )
+    instructor = models.ForeignKey(
+        "employees.Employee", on_delete=models.SET_NULL,
+        related_name="curriculum", null=True, blank=True,
+        help_text="Legacy `instur_id`. Null = curriculum row only.",
+    )
+
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="curriculum_created",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("program", "semester__number", "subject__name")
+        verbose_name = "Curriculum mapping"
+        verbose_name_plural = "Curriculum mappings"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["program", "semester", "subject", "instructor"],
+                condition=models.Q(instructor__isnull=False),
+                name="uniq_curriculum_prog_sem_sub_instr",
+            ),
+            # NULLs compare as distinct in SQL, so the constraint above
+            # would not stop duplicate curriculum-only rows. Cover them
+            # with a partial unique index of their own.
+            models.UniqueConstraint(
+                fields=["program", "semester", "subject"],
+                condition=models.Q(instructor__isnull=True),
+                name="uniq_curriculum_prog_sem_sub_noinstr",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["program", "semester"]),
+            models.Index(fields=["instructor", "program"]),
+        ]
+
+    def __str__(self):
+        who = self.instructor_id or "—"
+        return f"{self.program.code} S{self.semester.number} {self.subject.code} ({who})"
 
 
 class Classroom(models.Model):

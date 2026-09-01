@@ -260,9 +260,11 @@ class _LeadFixture(TestCase):
     def setUpTestData(cls):
         cls.institute = Institute.objects.create(name="JD Fashion", code="JDIFT")
         cls.campus = Campus.objects.create(
-            name="Bengaluru", code="BLR", institute=cls.institute,
+            name="Bengaluru", code="BLR",
         )
-        cls.program = Program.objects.create(name="B.Des", code="BDES")
+        cls.program = Program.objects.create(
+            name="B.Des", code="BDES", institute=cls.institute,
+        )
         cls.source = LeadSource.objects.create(name="Website", slug="website")
         cls.lead = Lead.objects.create(
             name="Asha Rao", phone="9999999999", email="asha@example.com",

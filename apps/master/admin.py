@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from .models import (
-    AcademicYear, Batch, Campus, City, Classroom,
+    AcademicYear, Batch, Campus, City, Classroom, Course, CurriculumMapping,
     Degree, FeeTemplate, Institute, LeadSource, Program, Semester,
     State, Subject, TimeSlot,
 )
@@ -9,8 +9,8 @@ from .models import (
 
 @admin.register(Subject)
 class SubjectAdmin(admin.ModelAdmin):
-    list_display = ("name", "code", "credits", "is_active")
-    list_filter = ("is_active",)
+    list_display = ("name", "code", "credits", "is_elective", "is_active")
+    list_filter = ("is_active", "is_elective")
     search_fields = ("name", "code")
 
 
@@ -91,17 +91,51 @@ class CityAdmin(admin.ModelAdmin):
 
 @admin.register(Campus)
 class CampusAdmin(admin.ModelAdmin):
-    list_display = ("name", "code", "city", "state", "is_active")
+    list_display = ("name", "code", "city", "state",
+                    "institute_list", "is_active")
     list_filter = ("is_active",)
     search_fields = ("name", "code", "city")
+
+    @admin.display(description="Institutes")
+    def institute_list(self, obj):
+        """Derived — a campus hosts programs from any number of
+        institutes and stores none of them itself."""
+        return ", ".join(i.code for i in obj.institutes) or "—"
 
 
 @admin.register(Program)
 class ProgramAdmin(admin.ModelAdmin):
-    list_display = ("name", "code", "degree_type", "duration_months", "is_active")
-    list_filter = ("is_active", "degree_type")
+    list_display = ("name", "code", "institute", "degree", "degree_type",
+                    "duration_months", "is_active")
+    list_filter = ("is_active", "institute", "degree", "degree_type")
     search_fields = ("name", "code")
     filter_horizontal = ("campuses",)
+    autocomplete_fields = ("institute", "degree")
+
+
+@admin.register(Course)
+class CourseAdmin(admin.ModelAdmin):
+    """Legacy `course_master` — a PROGRAM YEAR, not a course."""
+
+    list_display = ("name", "code", "program", "semester_list", "is_active")
+    list_filter = ("is_active", "program")
+    search_fields = ("name", "code")
+    autocomplete_fields = ("program",)
+    filter_horizontal = ("semesters",)
+
+    @admin.display(description="Semesters")
+    def semester_list(self, obj):
+        return ", ".join(
+            s.name for s in obj.semesters.all().order_by("number")
+        ) or "—"
+
+
+@admin.register(CurriculumMapping)
+class CurriculumMappingAdmin(admin.ModelAdmin):
+    list_display = ("program", "semester", "subject", "instructor", "is_active")
+    list_filter = ("is_active", "program", "semester")
+    search_fields = ("subject__name", "subject__code", "program__name")
+    autocomplete_fields = ("program", "semester", "subject", "instructor")
 
 
 @admin.register(LeadSource)

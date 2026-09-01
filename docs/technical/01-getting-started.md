@@ -152,7 +152,6 @@ python manage.py seed_degrees
 python manage.py seed_programs           # depends on institutes/campuses
 python manage.py seed_lead_sources
 python manage.py seed_leave_types
-python manage.py seed_pools              # counsellor pools (one per program category)
 python manage.py seed_notification_templates
 ```
 

@@ -11,13 +11,12 @@ from apps.common.throttles import LeadIntakeThrottle
 
 from .intake_auth import HasIntakeApiKey
 from .models import (
-    CounsellorPool, CounsellorPoolMembership,
+    Counsellor,
     Lead, LeadCommunication, LeadFollowup,
 )
 from .permissions import LeadVisibility, can_see_all_leads, filter_visible
 from .serializers import (
-    CounsellorPoolMembershipSerializer,
-    CounsellorPoolSerializer,
+    CounsellorSerializer,
     LeadCommunicationSerializer,
     LeadCreateSerializer,
     LeadDetailSerializer,
@@ -28,7 +27,9 @@ from .serializers import (
     StatusChangeSerializer,
     StatusHistorySerializer,
 )
-from .services import change_status, create_lead, has_recent_outcome
+from .services import (
+    change_status, create_lead, eligible_counsellors, has_recent_outcome,
+)
 
 
 # --- Lead list/create ---------------------------------------------------
@@ -286,118 +287,150 @@ class LeadCommunicationListCreateView(APIView):
         return Response(s.data, status=http.HTTP_201_CREATED)
 
 
-# --- Counsellor pools (F.3) -------------------------------------------
+# --- Counsellors (F.3) ------------------------------------------------
 
-def _require_pool_view(request):
-    """Pool reads were open to any authenticated user; `leads.pool.view`
-    now gates them the same way add/edit/delete are gated."""
+def _has_perm(request, key):
     u = request.user
-    if u.is_superuser or u.roles.filter(permissions__key="leads.pool.view").exists():
-        return None
+    return u.is_superuser or u.roles.filter(permissions__key=key).exists()
+
+
+def _denied():
     return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
 
 
-class PoolListCreateView(APIView):
+def _counsellor_qs():
+    return Counsellor.objects.select_related(
+        "employee", "employee__designation", "employee__department",
+        "employee__campus", "employee__user_account",
+    )
+
+
+class CounsellorListCreateView(APIView):
+    """The Counsellors page: list who is a counsellor, and promote an
+    employee into one."""
+
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        if (err := _require_pool_view(request)) is not None:
-            return err
-        qs = CounsellorPool.objects.prefetch_related("memberships__user")
+        if not _has_perm(request, "leads.pool.view"):
+            return _denied()
+        qs = _counsellor_qs()
         if request.query_params.get("active") == "1":
             qs = qs.filter(is_active=True)
-        return Response(CounsellorPoolSerializer(qs, many=True).data)
+        return Response(CounsellorSerializer(qs, many=True).data)
 
     def post(self, request):
-        u = request.user
-        if not (u.is_superuser
-                or u.roles.filter(permissions__key="leads.pool.add").exists()):
-            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
-        s = CounsellorPoolSerializer(data=request.data)
+        if not _has_perm(request, "leads.pool.add"):
+            return _denied()
+        s = CounsellorSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         s.save()
         return Response(s.data, status=http.HTTP_201_CREATED)
 
 
-class PoolDetailView(APIView):
+class CounsellorDetailView(APIView):
     permission_classes = [IsAuthenticated]
+
+    def _get(self, pk):
+        try:
+            return _counsellor_qs().get(pk=pk)
+        except Counsellor.DoesNotExist as e:
+            raise Http404 from e
 
     def get(self, request, pk):
-        if (err := _require_pool_view(request)) is not None:
-            return err
-        try:
-            pool = CounsellorPool.objects.prefetch_related("memberships__user").get(pk=pk)
-        except CounsellorPool.DoesNotExist as e:
-            raise Http404 from e
-        return Response(CounsellorPoolSerializer(pool).data)
+        if not _has_perm(request, "leads.pool.view"):
+            return _denied()
+        return Response(CounsellorSerializer(self._get(pk)).data)
 
     def patch(self, request, pk):
-        u = request.user
-        if not (u.is_superuser
-                or u.roles.filter(permissions__key="leads.pool.edit").exists()):
-            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
-        try:
-            pool = CounsellorPool.objects.get(pk=pk)
-        except CounsellorPool.DoesNotExist as e:
-            raise Http404 from e
-        s = CounsellorPoolSerializer(pool, data=request.data, partial=True)
-        s.is_valid(raise_exception=True)
-        s.save()
-        return Response(s.data)
-
-
-class PoolMembershipListCreateView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        if (err := _require_pool_view(request)) is not None:
-            return err
-        qs = CounsellorPoolMembership.objects.select_related("pool", "user")
-        if v := request.query_params.get("pool"):
-            qs = qs.filter(pool_id=v)
-        if v := request.query_params.get("user"):
-            qs = qs.filter(user_id=v)
-        return Response(CounsellorPoolMembershipSerializer(qs, many=True).data)
-
-    def post(self, request):
-        u = request.user
-        if not (u.is_superuser
-                or u.roles.filter(permissions__key="leads.pool.add").exists()):
-            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
-        s = CounsellorPoolMembershipSerializer(data=request.data)
-        s.is_valid(raise_exception=True)
-        s.save()
-        return Response(s.data, status=http.HTTP_201_CREATED)
-
-
-class PoolMembershipDetailView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def patch(self, request, pk):
-        u = request.user
-        if not (u.is_superuser
-                or u.roles.filter(permissions__key="leads.pool.edit").exists()):
-            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
-        try:
-            m = CounsellorPoolMembership.objects.get(pk=pk)
-        except CounsellorPoolMembership.DoesNotExist as e:
-            raise Http404 from e
-        s = CounsellorPoolMembershipSerializer(m, data=request.data, partial=True)
+        if not _has_perm(request, "leads.pool.edit"):
+            return _denied()
+        c = self._get(pk)
+        # `employee` is fixed once set — removing and re-adding is the
+        # way to point a counsellor slot at somebody else.
+        data = {k: v for k, v in request.data.items() if k != "employee"}
+        s = CounsellorSerializer(c, data=data, partial=True)
         s.is_valid(raise_exception=True)
         s.save()
         return Response(s.data)
 
     def delete(self, request, pk):
-        u = request.user
-        if not (u.is_superuser
-                or u.roles.filter(permissions__key="leads.pool.delete").exists()):
-            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
-        try:
-            m = CounsellorPoolMembership.objects.get(pk=pk)
-        except CounsellorPoolMembership.DoesNotExist as e:
-            raise Http404 from e
-        m.delete()
+        if not _has_perm(request, "leads.pool.delete"):
+            return _denied()
+        self._get(pk).delete()
         return Response(status=http.HTTP_204_NO_CONTENT)
+
+
+class CounsellorEligibleEmployeesView(APIView):
+    """Employees that may be made counsellors — active, not deleted, with
+    a portal account, and not already a counsellor.
+
+    Lives here rather than reusing the employees list so the Counsellors
+    page needs only `leads.pool.add`, not `employees.employee.view`.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not _has_perm(request, "leads.pool.add"):
+            return _denied()
+
+        from apps.employees.models import Employee
+
+        qs = (
+            Employee.objects
+            .filter(
+                status=Employee.Status.ACTIVE,
+                user_account__isnull=False,
+                user_account__is_active=True,
+                counsellor__isnull=True,
+            )
+            .select_related("designation", "department", "campus")
+            .order_by("first_name", "family_name")
+        )
+        if q := request.query_params.get("search"):
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(first_name__icontains=q) | Q(family_name__icontains=q)
+                | Q(emp_code__icontains=q) | Q(email_primary__icontains=q)
+            )
+        return Response([
+            {
+                "id": e.id,
+                "emp_code": e.emp_code,
+                "full_name": e.full_name,
+                "designation": e.designation.name,
+                "department": e.department.name,
+                "campus": e.campus.name,
+                "email": e.email_primary,
+            }
+            for e in qs
+        ])
+
+
+class CounsellorOptionsView(APIView):
+    """Assignable counsellors for the lead forms' "Assign to" picker.
+
+    Open to any authenticated user — a counsellor filling in the Add
+    Lead form needs the list but has no business administering it. Only
+    people who can actually hold a lead are returned, so the dropdown
+    never offers somebody the backend would reject.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response([
+            {
+                "id": c.employee.user_account_id,
+                "counsellor_id": c.id,
+                "full_name": (c.employee.user_account.full_name
+                              or c.employee.full_name),
+                "username": c.employee.user_account.username,
+                "emp_code": c.employee.emp_code,
+            }
+            for c in eligible_counsellors()
+        ])
 
 
 # --- Public intake ------------------------------------------------------

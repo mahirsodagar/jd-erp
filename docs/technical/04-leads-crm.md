@@ -67,8 +67,8 @@ The central row. Field groups:
 
 | Model | Purpose |
 |---|---|
-| `CounsellorPool` | One pool per `Program.Category` (`REGULAR` / `SHORT` / `NEW`), each with a round-robin `pointer` |
-| `CounsellorPoolMembership` | Through table; `sort_order` sets the rotation order, `is_active` suspends a member |
+| `Counsellor` | One row per `Employee` marked as a counsellor. `sort_order` sets the rotation order, `is_active` suspends them. Replaced the per-category pools |
+| `CounsellorRotation` | Single row holding the round-robin `pointer`; the row `select_for_update()` locks |
 | `LeadFollowup` | One interaction: `followup_type`, `notes`, `next_followup_date`, and the **mandatory** `outcome_category` + `outcome_disposition` |
 | `LeadStatusHistory` | Append-only status trail. Written by `change_status()` only — no manual API |
 | `LeadCommunication` | Record of what was sent (does not itself send). Written by the send-link helpers and the bulk-message endpoint |
@@ -100,15 +100,19 @@ The rules, in order:
 
 ## 4.4 Round-robin assignment (`services.assign_via_round_robin`)
 
-- One pool per program category; `select_for_update()` on the pool row makes
-  concurrent creates race-safe.
-- Eligible members: `membership.is_active` **and** `user.is_active` **and**
-  `user.is_available`. The `is_available` flag on `User` is how a counsellor is
-  taken out of rotation while on leave.
-- Picks `memberships[pool.pointer % len(memberships)]`, then advances the
-  pointer.
-- Returns `None` (lead left unassigned) if there is no active pool for the
-  category or the pool is empty.
+- One flat list of counsellors — `Program.category` no longer routes leads.
+  `select_for_update()` on the single `CounsellorRotation` row makes concurrent
+  creates race-safe.
+- Eligible (`services.eligible_counsellors`): `counsellor.is_active` **and**
+  the employee is active and not soft-deleted **and** they have a
+  `user_account` that is `is_active` **and** `is_available`. The
+  `is_available` flag on `User` is how a counsellor is taken out of rotation
+  while on leave; the employee link is what keeps a lead from landing on a
+  login with nobody behind it.
+- Picks `eligible[pointer % len(eligible)]`, then advances the pointer. The
+  list is recomputed each call, so pausing or adding a counsellor shifts where
+  the next lead lands — fair over time, not a strict cycle.
+- Returns `None` (lead left unassigned) if nobody is eligible.
 
 ## 4.5 Visibility and permissions
 
@@ -138,7 +142,7 @@ being able to blast bulk SMS or declare fees received):
 | `leads.bulk_message.send` | Bulk message |
 | `leads.application_fee.record` / `.clear` | Mark paid / undo |
 | `leads.application_form.lock` | Close / reopen the student's self-fill form |
-| `leads.pool.view/add/edit/delete` | Counsellor pools |
+| `leads.pool.view/add/edit/delete` | Counsellors (keys keep the historical `pool` name so deployed role grants survive) |
 | `leads.escalation.receive` | Receive overdue-hot-lead alerts |
 | `leads.report.funnel` / `.leaderboard` / `.revenue` / `.quality` | The four report groups |
 | `leads.exam.*` | Entrance exams (§4.8) |
@@ -181,7 +185,9 @@ identity.
 | `POST /api/leads/<id>/send-welcome/` | Requires an email on the lead |
 | `POST /api/leads/<id>/application/close/` and `/open/` | Counsellor kill-switch on the public form |
 | `POST /api/leads/bulk-message/` | multipart; `lead_ids` (≤500), `channels` (`email`, `whatsapp`), `subject`, `body`, `attachments[]` |
-| `GET/POST /api/leads/pools/`, `/pool-members/` + detail routes | |
+| `GET/POST /api/leads/counsellors/` + `PATCH/DELETE /api/leads/counsellors/<id>/` | Admin the counsellor list |
+| `GET /api/leads/counsellors/eligible/` | Employees that may be made counsellors (active, has a portal account, not already one) |
+| `GET /api/leads/counsellors/options/` | Assignable counsellors for the "Assign to" pickers. Any authenticated user |
 | `GET /api/leads/reports/{funnel,leaderboard,time-per-stage,lost-analysis,coursewise-revenue,duplicates,summary}/` | |
 
 ## 4.7 The two gates
@@ -313,7 +319,7 @@ duplicate-count report.
 | If you change… | Effect |
 |---|---|
 | `normalize_phone` | Changes what counts as a duplicate. Existing `phone_normalized` values would need a backfill |
-| Pool membership / `User.is_available` | Immediately changes who receives the next lead |
+| The counsellor list / `User.is_available` | Immediately changes who receives the next lead, and who the "Assign to" pickers offer |
 | `Lead.status` choices | `LeadStatusHistory` stores strings — historical rows keep the old values; the funnel report needs updating |
 | Removing the fee gate | Students could receive an application form without paying. Confirm with the institute first |
 | `LeadFollowup.Outcome` values | Breaks the signal drip map, `outcomes.CATALOGUE`, and the lost-lead report |

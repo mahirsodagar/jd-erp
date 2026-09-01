@@ -590,6 +590,75 @@ def _build_inline_image(data: bytes, cid: str, filename: str):
 
 # --- Welcome ----------------------------------------------------------------
 
+# --- Entrance-exam link -----------------------------------------------------
+
+def send_entrance_exam_link(*, attempt, actor=None) -> dict:
+    """Email one mapped candidate their tokenized entrance-exam link.
+
+    `attempt` is an `EntranceExamAttempt`. The link carries the attempt's
+    `access_token`, so it is per-candidate and must never be forwarded —
+    unlike the application link, it is not regenerated on each send.
+
+    Email only: the exam link is long-lived and needs a real browser, and
+    there is no DLT-approved SMS template for it.
+    """
+    lead = attempt.lead
+    if not lead.email:
+        raise ValueError("Lead has no email on file.")
+
+    exam = attempt.exam
+    if exam.status != exam.Status.PUBLISHED:
+        raise ValueError(
+            f"Exam '{exam.name}' is {exam.status}; publish it before "
+            "sending links to candidates.",
+        )
+
+    base = getattr(settings, "FRONTEND_BASE_URL", "https://jdsd.netlify.app").rstrip("/")
+    # Hash router — mirrors `examLink()` in the SPA (src/lib/examLink.ts).
+    url = f"{base}/#/exam/{attempt.access_token}"
+
+    window_note = (
+        f"The exam is open from {timezone.localtime(attempt.start_dt):%d %b %Y, %I:%M %p} "
+        f"to {timezone.localtime(attempt.end_dt):%d %b %Y, %I:%M %p}."
+    )
+
+    email_log = queue_notification(
+        template_key="lead.entrance_exam_link.email",
+        recipient=lead.email,
+        context={
+            "name": lead.name,
+            "exam": exam.name,
+            "url": url,
+            "duration": str(exam.duration_min),
+            "window": window_note,
+            # Drives the From domain (Diploma → jdinstitute.edu.in,
+            # Degree/Bachelors → jdindia.com). See notifications.sender.
+            "degree_type": (
+                lead.program.degree_type if lead.program_id else ""
+            ),
+        },
+        related=lead,
+    )
+
+    comm = LeadCommunication.objects.create(
+        lead=lead,
+        type=LeadCommunication.Type.EMAIL,
+        subject=f"Entrance exam link — {exam.name}",
+        message=(
+            f"Entrance exam link sent to {lead.email} for '{exam.name}'. "
+            f"{window_note}"
+        ),
+        sent_at=timezone.now(),
+        logged_by=actor,
+    )
+
+    return {
+        **_email_result(email_log),
+        "communication_id": comm.id,
+        "url": url,
+    }
+
+
 def send_welcome_message(*, lead: Lead, actor=None) -> dict:
     if not lead.email:
         raise ValueError("Lead has no email on file.")

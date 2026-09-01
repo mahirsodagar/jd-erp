@@ -160,7 +160,7 @@ After login the app routes on the `is_student` / `is_parent` flags in the
 | Area | Pages |
 |---|---|
 | Dashboard | `DashboardPage`, `MyDailyReportPage`, `MyAdminDailyReportPage`, `SettingsPage` |
-| Leads | list / create / detail / edit, `LeadReportsPage`, `CounsellorPoolsPage`, entrance-exam list/create/detail/attempt, and lead-detail panels (`SendActionsBox`, `ApplicationFeeBox`, `ApplicationFormControls`, `PromoteToStudentBox`, `ReassignBox`, `StatusChangeBox`, `FollowupsSection`, `CommunicationsSection`, `HistorySection`, `LeadExamsSection`, `BulkMessageModal`) |
+| Leads | list / create / detail / edit, `LeadReportsPage`, `CounsellorsPage`, entrance-exam list/create/detail/attempt, and lead-detail panels (`SendActionsBox`, `ApplicationFeeBox`, `ApplicationFormControls`, `PromoteToStudentBox`, `ReassignBox`, `StatusChangeBox`, `FollowupsSection`, `CommunicationsSection`, `HistorySection`, `LeadExamsSection`, `BulkMessageModal`) |
 | Admission | students list/detail/edit with cards (education, fees, documents, remarks, parent account, portal access, attendance, enrolments), enrolments CRUD, `FeesCollectPage`, `FeeReportsPage`, `ConcessionReportsPage`, `BatchPromotionPage` |
 | LMS | assignments, courseware, lessons, marks, tests (+ `MyAssignmentsPage`, `MyTestsPage`) |
 | Slot | `ScheduleCreatePage`, `PublishTimetablePage`, `CalendarPage`, `SchedulePage`, `EditSlotModal`, `MyTimetablePage` |

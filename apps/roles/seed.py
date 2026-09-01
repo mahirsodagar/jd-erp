@@ -168,9 +168,14 @@ CATALOGUE = [
     # Module E.1 — Admissions + new masters
     *_writes("master", "master.academicyear", "academic years"),
     *_writes("master", "master.degree", "degrees"),
-    *_writes("master", "master.course", "courses"),
+    # Legacy `course_master` = "Program year". The permission key keeps
+    # its original name so existing role assignments keep working.
+    *_writes("master", "master.course", "program years"),
     *_writes("master", "master.semester", "semesters"),
     *_writes("master", "master.batch", "batches"),
+    # Subject ↔ program/semester/instructor mapping (legacy
+    # `instur_program_sem_sub`). Reads are open like the other pickers.
+    *_writes("master", "master.curriculum", "curriculum mappings"),
 
     # Module 3.1 — Admission › Students
     #
@@ -242,10 +247,12 @@ CATALOGUE = [
     ("fees", "fees.concession_report.view", "See the Concession Reports page"),
 
     # Module F — Lead Management Hardening
-    ("leads", "leads.pool.view", "See counsellor pools"),
-    ("leads", "leads.pool.add", "Create counsellor pools and add members"),
-    ("leads", "leads.pool.edit", "Edit counsellor pools and members"),
-    ("leads", "leads.pool.delete", "Remove members from a counsellor pool"),
+    # Keys keep the historical `pool` name so existing role grants on
+    # deployed tenants survive the move to a flat counsellor list.
+    ("leads", "leads.pool.view", "See the counsellor list"),
+    ("leads", "leads.pool.add", "Make an employee a counsellor"),
+    ("leads", "leads.pool.edit", "Edit counsellors (order, pause)"),
+    ("leads", "leads.pool.delete", "Remove a counsellor"),
     ("leads", "leads.escalation.receive", "Receive alerts about overdue hot leads"),
 
     # Lead reports — split so revenue and staff rankings are not on the

@@ -15,10 +15,38 @@ from .models import Attendance, ScheduleSlot
 
 
 def roster_for(slot: ScheduleSlot):
-    """Active enrollments in this slot's batch."""
-    return Enrollment.objects.filter(
+    """Active enrollments in this slot's batch.
+
+    For an ELECTIVE subject the roster narrows to the students who
+    actually picked it — several electives share one period, so the full
+    batch would be wrong for each of them. Mirrors the PHP roster query,
+    which added `student.elective_subjects = <subject>` when the joined
+    `subject_master.iselective` was 1 (academics/aget.php:2404).
+
+    `Enrollment.elective_subjects` is free text holding subject ids, so
+    the match is done in Python over a comma/space-separated list rather
+    than with a LIKE that would confuse "1" with "12".
+    """
+    qs = Enrollment.objects.filter(
         batch=slot.batch, status=Enrollment.Status.ACTIVE,
     ).select_related("student")
+
+    if not slot.is_elective:
+        return qs
+
+    wanted = str(slot.subject_id)
+    keep = [
+        e.pk for e in qs
+        if wanted in _elective_ids(e.elective_subjects)
+    ]
+    return qs.filter(pk__in=keep)
+
+
+def _elective_ids(raw: str) -> set[str]:
+    """Split the free-text elective field into a set of id tokens."""
+    return {
+        tok for tok in (raw or "").replace(",", " ").split() if tok
+    }
 
 
 @transaction.atomic

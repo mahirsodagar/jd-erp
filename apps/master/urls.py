@@ -15,6 +15,8 @@ from .views import (
     ClassroomListCreateView,
     CourseDetailView,
     CourseListCreateView,
+    CurriculumMappingDetailView,
+    CurriculumMappingListCreateView,
     DegreeDetailView,
     DegreeListCreateView,
     FeeTemplateDetailView,
@@ -72,6 +74,9 @@ urlpatterns = [
 
     path("courses/", CourseListCreateView.as_view(), name="course-list-create"),
     path("courses/<int:pk>/", CourseDetailView.as_view(), name="course-detail"),
+
+    path("curriculum/", CurriculumMappingListCreateView.as_view(), name="curriculum-list-create"),
+    path("curriculum/<int:pk>/", CurriculumMappingDetailView.as_view(), name="curriculum-detail"),
 
     path("semesters/", SemesterListCreateView.as_view(), name="semester-list-create"),
     path("semesters/<int:pk>/", SemesterDetailView.as_view(), name="semester-detail"),

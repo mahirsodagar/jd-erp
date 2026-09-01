@@ -9,10 +9,13 @@ Values are returned both raw and as `*_display` labels, because the form
 stores codes (`M`, `GEN`, `SSLC`) that mean nothing to a student.
 """
 
+from django.http import HttpResponse
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.admissions.application_terms import terms_for
 from apps.admissions.models import Student, StudentDocument
+from apps.admissions.services_application_pdf import render_application_pdf
 
 from .permissions import IsStudentOrParent
 
@@ -31,23 +34,26 @@ def _file_url(request, filefield):
     return request.build_absolute_uri(filefield.url)
 
 
+def _student_for(ctx) -> Student:
+    return (
+        Student.objects
+        .select_related(
+            "institute", "campus", "program", "course", "academic_year",
+            "current_city", "current_state",
+            "permanent_city", "permanent_state",
+            "lead_origin",
+        )
+        .get(pk=ctx.student.pk)
+    )
+
+
 class ApplicationFormView(APIView):
     """`GET /api/portal/application/` — the filled form, read-only."""
 
     permission_classes = [IsStudentOrParent]
 
     def get(self, request):
-        ctx = request.portal_ctx
-        s = (
-            Student.objects
-            .select_related(
-                "institute", "campus", "program", "course", "academic_year",
-                "current_city", "current_state",
-                "permanent_city", "permanent_state",
-                "lead_origin",
-            )
-            .get(pk=ctx.student.pk)
-        )
+        s = _student_for(request.portal_ctx)
 
         documents = [
             {
@@ -124,6 +130,19 @@ class ApplicationFormView(APIView):
                 "pincode": s.permanent_pincode,
             },
             "documents": documents,
+            # Same wording the public form showed, served from the one
+            # source of truth rather than restated in the frontend.
+            "terms": terms_for(getattr(s.institute, "code", "") or ""),
+            "consent": {
+                "declaration_accepted_at": (
+                    s.declaration_accepted_at.isoformat()
+                    if s.declaration_accepted_at else None
+                ),
+                "rules_accepted_at": (
+                    s.rules_accepted_at.isoformat()
+                    if s.rules_accepted_at else None
+                ),
+            },
             # Application fee, when this student came in through a lead.
             # Absent for students created directly by staff.
             "application_fee": None if lead is None else {
@@ -140,3 +159,26 @@ class ApplicationFormView(APIView):
                 "reference": lead.application_fee_ref,
             },
         })
+
+
+class ApplicationFormPdfView(APIView):
+    """`GET /api/portal/application/pdf/` — the same form, printable.
+
+    Rendered on the fly rather than stored: the DB is the record, so the
+    file is always current and there is nothing to keep in sync. Served
+    inline so the browser's PDF viewer opens it; the download filename is
+    the application id.
+    """
+
+    permission_classes = [IsStudentOrParent]
+
+    def get(self, request):
+        student = _student_for(request.portal_ctx)
+        pdf = render_application_pdf(student)
+
+        response = HttpResponse(pdf, content_type="application/pdf")
+        name = student.application_form_id or f"student-{student.pk}"
+        response["Content-Disposition"] = (
+            f'inline; filename="application-{name}.pdf"'
+        )
+        return response

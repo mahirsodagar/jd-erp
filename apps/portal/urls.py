@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .application_views import ApplicationFormView
+from .application_views import ApplicationFormPdfView, ApplicationFormView
 from .fee_views import FeeSummaryView, InstallmentPayView
 from .views import (
     AppointmentCancelView, AppointmentFacultyView, AppointmentListCreateView,
@@ -83,6 +83,8 @@ urlpatterns = [
     # Application form (read-only playback of what the student submitted)
     path("application/", ApplicationFormView.as_view(),
          name="portal-application"),
+    path("application/pdf/", ApplicationFormPdfView.as_view(),
+         name="portal-application-pdf"),
 
     # Fees — schedule, receipts, and paying the next installment online
     path("fees/", FeeSummaryView.as_view(), name="portal-fees"),

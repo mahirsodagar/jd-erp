@@ -140,6 +140,20 @@ class Student(models.Model):
     # Photo
     photo = models.ImageField(upload_to="students/photos/", blank=True, null=True)
 
+    # Consent captured on the public application form. Stamped once, when
+    # the student first ticks each box, and never cleared — the form is a
+    # permanent record, and a returning student must not be asked to
+    # re-agree to something they already agreed to. Also what the
+    # application PDF prints as evidence of acceptance.
+    declaration_accepted_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="When the student affirmed the declaration.",
+    )
+    rules_accepted_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="When the student accepted the rules & regulations.",
+    )
+
     # Linkage
     user_account = models.OneToOneField(
         settings.AUTH_USER_MODEL, null=True, blank=True,

@@ -4,40 +4,86 @@ from rest_framework import serializers
 from apps.master.models import Campus, LeadSource, Program
 
 from .models import (
-    CounsellorPool, CounsellorPoolMembership,
+    Counsellor,
     Lead, LeadCommunication, LeadFollowup, LeadStatusHistory, LeadUtm,
 )
 
 User = get_user_model()
 
 
-class CounsellorPoolMembershipSerializer(serializers.ModelSerializer):
-    username = serializers.CharField(source="user.username", read_only=True)
-    is_available = serializers.BooleanField(source="user.is_available", read_only=True)
+class CounsellorSerializer(serializers.ModelSerializer):
+    """One employee marked as a counsellor. Writes only take `employee`
+    (plus sort_order / is_active); everything else is read-through from
+    the employee record so the list needs no second call."""
 
-    class Meta:
-        model = CounsellorPoolMembership
-        fields = ["id", "pool", "user", "username",
-                  "sort_order", "is_active", "is_available", "created_at"]
-        read_only_fields = ["id", "username", "is_available", "created_at"]
-
-
-class CounsellorPoolSerializer(serializers.ModelSerializer):
-    member_count = serializers.SerializerMethodField()
-    members = CounsellorPoolMembershipSerializer(
-        source="memberships", many=True, read_only=True,
+    full_name = serializers.CharField(source="employee.full_name", read_only=True)
+    emp_code = serializers.CharField(source="employee.emp_code", read_only=True)
+    designation = serializers.CharField(
+        source="employee.designation.name", read_only=True,
+    )
+    department = serializers.CharField(
+        source="employee.department.name", read_only=True,
+    )
+    campus = serializers.CharField(source="employee.campus.name", read_only=True)
+    email = serializers.CharField(source="employee.email_primary", read_only=True)
+    user = serializers.IntegerField(
+        source="employee.user_account_id", read_only=True,
+    )
+    username = serializers.CharField(
+        source="employee.user_account.username", read_only=True, default="",
+    )
+    # Mirrors User.is_available — an unavailable counsellor is skipped
+    # by the round-robin but stays on the list.
+    is_available = serializers.BooleanField(
+        source="employee.user_account.is_available", read_only=True, default=False,
+    )
+    unavailable_reason = serializers.CharField(
+        source="employee.user_account.unavailable_reason",
+        read_only=True, default="",
     )
 
     class Meta:
-        model = CounsellorPool
-        fields = ["id", "name", "category", "is_active", "pointer",
-                  "member_count", "members",
-                  "created_at", "updated_at"]
-        read_only_fields = ["id", "pointer", "member_count", "members",
+        model = Counsellor
+        fields = ["id", "employee", "full_name", "emp_code", "designation",
+                  "department", "campus", "email", "user", "username",
+                  "sort_order", "is_active", "is_available",
+                  "unavailable_reason", "created_at", "updated_at"]
+        read_only_fields = ["id", "full_name", "emp_code", "designation",
+                            "department", "campus", "email", "user",
+                            "username", "is_available", "unavailable_reason",
                             "created_at", "updated_at"]
 
-    def get_member_count(self, obj):
-        return obj.memberships.filter(is_active=True).count()
+    def validate_employee(self, employee):
+        if employee.is_deleted:
+            raise serializers.ValidationError("This employee has been deleted.")
+        if employee.status != employee.Status.ACTIVE:
+            raise serializers.ValidationError("This employee is not active.")
+        if employee.user_account_id is None:
+            raise serializers.ValidationError(
+                "This employee has no portal account. Provision one from "
+                "the employee record before making them a counsellor."
+            )
+        return employee
+
+
+def validate_assign_to_is_counsellor(user):
+    """Leads may only be held by a counsellor.
+
+    The pickers already list counsellors only; this is the matching
+    check at the API boundary so a hand-rolled request can't park a lead
+    on somebody who is not on the list. Existing owners are untouched —
+    this fires only when an assignment is being set.
+    """
+    if user is None:
+        return user
+    from .services import eligible_counsellors
+
+    if not eligible_counsellors().filter(employee__user_account=user).exists():
+        raise serializers.ValidationError(
+            "This user is not a counsellor who can take leads. Add them on "
+            "the Counsellors page first."
+        )
+    return user
 
 
 class LeadUtmSerializer(serializers.ModelSerializer):
@@ -66,9 +112,8 @@ class LeadCreateSerializer(_LeadBaseSerializer):
     """Manual create, used by counselors via the Add Lead form.
 
     `assign_to` is optional — if omitted, the round-robin assigner picks
-    the next available counsellor from the pool for the program's
-    category (Module F.3). If the pool is empty, the create fails with
-    a clear error from the service layer.
+    the next eligible counsellor (Module F.3). If nobody is eligible the
+    lead is created unassigned.
 
     `father_mobile` and `father_email` are required on create (model is
     blank=True so historical rows stay valid, but the Add Lead form
@@ -88,6 +133,9 @@ class LeadCreateSerializer(_LeadBaseSerializer):
             "father_mobile": {"required": True, "allow_blank": False},
             "father_email": {"required": True, "allow_blank": False},
         }
+
+    def validate_assign_to(self, value):
+        return validate_assign_to_is_counsellor(value)
 
 
 class LeadUpdateSerializer(_LeadBaseSerializer):
@@ -215,11 +263,23 @@ class LeadIntakeSerializer(_LeadBaseSerializer):
             lookup_field="slug", lookup_value=attrs.pop("source_slug", None),
             label="source",
         )
-        attrs["assign_to"] = self._resolve(
-            User, id_value=attrs.get("assign_to"),
-            lookup_field="username", lookup_value=attrs.pop("assign_to_username", None),
-            label="assign_to",
-        )
+        # Unlike campus/program/source, an owner is optional: omitting it
+        # is how an automated caller asks for round-robin assignment
+        # (`Lead.assign_to` help_text). When one IS named it must be a
+        # counsellor, same rule as the manual form.
+        assign_to_username = attrs.pop("assign_to_username", None)
+        if attrs.get("assign_to") or assign_to_username:
+            owner = self._resolve(
+                User, id_value=attrs.get("assign_to"),
+                lookup_field="username", lookup_value=assign_to_username,
+                label="assign_to",
+            )
+            try:
+                attrs["assign_to"] = validate_assign_to_is_counsellor(owner)
+            except serializers.ValidationError as e:
+                raise serializers.ValidationError({"assign_to": e.detail}) from e
+        else:
+            attrs.pop("assign_to", None)
         return super().validate(attrs)
 
     def split_payload(self):
@@ -242,6 +302,9 @@ class StatusChangeSerializer(serializers.Serializer):
 
 class ReassignSerializer(serializers.Serializer):
     assign_to = serializers.PrimaryKeyRelatedField(queryset=User.objects.all())
+
+    def validate_assign_to(self, value):
+        return validate_assign_to_is_counsellor(value)
 
 
 class StatusHistorySerializer(serializers.ModelSerializer):

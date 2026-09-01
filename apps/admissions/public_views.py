@@ -21,13 +21,22 @@ from rest_framework.views import APIView
 
 from apps.leads.models import Lead
 
+from .application_terms import terms_for
 from .services import submit_application_from_lead
+
+
+def _bool(value) -> bool:
+    """Truthiness for a value that may have crossed a multipart boundary
+    and arrived as the *string* "false"."""
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"true", "1", "yes", "on"}
 
 
 def _resolve_lead(token: str) -> Lead:
     try:
         lead = Lead.objects.select_related(
-            "campus", "program", "campus__institute",
+            "campus", "program", "program__institute",
         ).get(application_token=token)
     except (Lead.DoesNotExist, ValueError):
         raise Http404("Invalid or expired application link.")
@@ -103,6 +112,10 @@ class PublicApplicationView(APIView):
             "mother_email": request.data.get("mother_email", ""),
             "father_occupation": request.data.get("father_occupation", ""),
             "mother_occupation": request.data.get("mother_occupation", ""),
+            # Consent. Multipart sends booleans as strings, so compare
+            # against the truthy spellings a form can produce.
+            "declaration_accepted": _bool(request.data.get("declaration_accepted")),
+            "rules_accepted": _bool(request.data.get("rules_accepted")),
             "documents": documents,
             "_photo_file": request.FILES.get("photo"),
             # Per-row certificate uploads. Frontend sends multipart
@@ -182,15 +195,21 @@ def _prefill(lead: Lead) -> dict:
 
     # Programs need their campus links so the form can filter the
     # Program dropdown by selected Campus.
+    # `institute` rides on the program because that is where it lives —
+    # the form reads it off the selected program for branding/terms.
     programs = []
     for p in (
         Program.objects.filter(is_active=True)
+        .select_related("institute")
         .prefetch_related("campuses")
         .order_by("name")
     ):
         programs.append({
             "id": p.id, "name": p.name, "code": p.code,
             "campus_ids": list(p.campuses.values_list("id", flat=True)),
+            "institute": p.institute_id,
+            "institute_code": p.institute.code if p.institute_id else "",
+            "institute_name": p.institute.name if p.institute_id else "",
         })
 
     # If the student already submitted once, send their saved values
@@ -228,6 +247,16 @@ def _prefill(lead: Lead) -> dict:
             "mother_occupation": existing.mother_occupation,
             "campus": existing.campus_id,
             "program": existing.program_id,
+            # Consent already given. The form seeds its checkboxes from
+            # these, so a returning student isn't made to re-agree.
+            "declaration_accepted_at": (
+                existing.declaration_accepted_at.isoformat()
+                if existing.declaration_accepted_at else None
+            ),
+            "rules_accepted_at": (
+                existing.rules_accepted_at.isoformat()
+                if existing.rules_accepted_at else None
+            ),
             "documents": list(
                 existing.documents.values(
                     "id", "header", "regno_yearpassing", "school_college",
@@ -251,19 +280,28 @@ def _prefill(lead: Lead) -> dict:
                    "code": lead.campus.code},
         "program": {"id": lead.program_id, "name": lead.program.name,
                     "code": lead.program.code},
+        # Institute comes from the PROGRAM, not the campus — a campus
+        # hosts programs from several institutes, so it cannot name one.
         "institute": (
-            {"id": lead.campus.institute_id,
-             "code": getattr(lead.campus.institute, "code", ""),
-             "name": getattr(lead.campus.institute, "name", "")}
-            if lead.campus.institute_id else None
+            {"id": lead.program.institute_id,
+             "code": getattr(lead.program.institute, "code", ""),
+             "name": getattr(lead.program.institute, "name", "")}
+            if lead.program_id and lead.program.institute_id else None
         ),
         # Previously-saved student values (None on first visit).
         "student": student_data,
+        # Declaration + rules + disclaimer, served rather than duplicated
+        # in the frontend so the form, the portal and the PDF all show
+        # the same wording. See apps/admissions/application_terms.py.
+        "terms": terms_for(
+            getattr(lead.program.institute, "code", "")
+            if lead.program_id and lead.program.institute_id else "",
+        ),
         # Reference data the form needs — bundled here so the form
         # makes a single round-trip and stays unauthenticated.
         "campuses": list(
             Campus.objects.filter(is_active=True)
-            .values("id", "name", "code", "institute").order_by("name")
+            .values("id", "name", "code").order_by("name")
         ),
         "programs": programs,
         # Headline fee numbers per (campus, program) — the form shows the

@@ -6,7 +6,7 @@ from rest_framework.views import APIView
 from apps.accounts.permissions import HasPerm
 
 from .models import (
-    AcademicYear, Batch, Campus, City, Classroom, Course,
+    AcademicYear, Batch, Campus, City, Classroom, Course, CurriculumMapping,
     Degree, FeeTemplate, Institute, LeadSource, Program, Semester,
     State, Subject, TimeSlot,
 )
@@ -17,6 +17,7 @@ from .serializers import (
     CitySerializer,
     ClassroomSerializer,
     CourseSerializer,
+    CurriculumMappingSerializer,
     DegreeSerializer,
     FeeTemplateSerializer,
     InstituteSerializer,
@@ -352,6 +353,42 @@ class CourseDetailView(_DetailBase):
     model = Course
     serializer = CourseSerializer
     perm_base = "master.course"
+
+
+class CurriculumMappingListCreateView(_ListCreateBase):
+    """Subject ↔ (program, semester, instructor) mapping.
+
+    Filterable by `program`, `semester`, `subject` and `instructor` —
+    the subject dropdowns filter on program (and, for the faculty view,
+    on instructor too), exactly as legacy `instur_program_sem_sub` did.
+    """
+
+    model = CurriculumMapping
+    serializer = CurriculumMappingSerializer
+    perm_base = "master.curriculum"
+
+    def get(self, request):
+        qs = (CurriculumMapping.objects
+              .select_related("program", "semester", "subject", "instructor"))
+        if request.query_params.get("active") == "1":
+            qs = qs.filter(is_active=True)
+        for param in ("program", "semester", "subject", "instructor"):
+            value = request.query_params.get(param)
+            if value:
+                qs = qs.filter(**{f"{param}_id": value})
+        return Response(self.serializer(qs, many=True).data)
+
+    def post(self, request):
+        s = self.serializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        s.save(created_by=request.user)
+        return Response(s.data, status=status.HTTP_201_CREATED)
+
+
+class CurriculumMappingDetailView(_DetailBase):
+    model = CurriculumMapping
+    serializer = CurriculumMappingSerializer
+    perm_base = "master.curriculum"
 
 
 class SemesterListCreateView(_ListCreateBase):

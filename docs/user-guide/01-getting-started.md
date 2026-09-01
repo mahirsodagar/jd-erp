@@ -60,7 +60,7 @@ On a narrow screen or a phone, the sidebar is hidden behind a menu button.
 | Group | What's inside |
 |---|---|
 | **Dashboard** | Your home screen, plus your Daily Report and Admin Daily Report |
-| **Leads** | All Leads, Add Lead, Entrance Exam, Lead Reports, Counsellor Pools |
+| **Leads** | All Leads, Add Lead, Entrance Exam, Lead Reports, Counsellors |
 | **Admission** | Students, Fee Collection, Batch Promotion, Fee Reports, Concession Reports, Fee Templates |
 | **LMS** | Assignments, Courseware, Lessons, Marks, Tests |
 | **Slot** | New Slot, Publish Timetable, Calendar, Timetable, Time Slots |

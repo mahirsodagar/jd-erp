@@ -29,9 +29,11 @@ class RegistrationFeeTests(TestCase):
     def setUpTestData(cls):
         cls.institute = Institute.objects.create(name="JD", code="JD")
         cls.campus = Campus.objects.create(
-            name="Main", code="MAIN", institute=cls.institute,
+            name="Main", code="MAIN",
         )
-        cls.program = Program.objects.create(name="B.Des", code="BDES")
+        cls.program = Program.objects.create(
+            name="B.Des", code="BDES", institute=cls.institute,
+        )
         cls.y1 = AcademicYear.objects.create(
             code="2026-27", start_date=date(2026, 6, 1),
             end_date=date(2027, 5, 31),

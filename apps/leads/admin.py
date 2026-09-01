@@ -1,31 +1,30 @@
 from django.contrib import admin
 
 from .models import (
-    CounsellorPool, CounsellorPoolMembership,
+    Counsellor, CounsellorRotation,
     Lead, LeadCommunication, LeadFollowup, LeadStatusHistory, LeadUtm,
 )
 
 
-class PoolMembershipInline(admin.TabularInline):
-    model = CounsellorPoolMembership
-    extra = 0
-    autocomplete_fields = ("user",)
+@admin.register(Counsellor)
+class CounsellorAdmin(admin.ModelAdmin):
+    list_display = ("employee", "sort_order", "is_active", "updated_at")
+    list_filter = ("is_active", "employee__department", "employee__campus")
+    search_fields = ("employee__first_name", "employee__family_name",
+                     "employee__emp_code")
+    autocomplete_fields = ("employee",)
 
 
-@admin.register(CounsellorPool)
-class CounsellorPoolAdmin(admin.ModelAdmin):
-    list_display = ("name", "category", "is_active", "pointer", "updated_at")
-    list_filter = ("category", "is_active")
-    search_fields = ("name",)
-    inlines = (PoolMembershipInline,)
+@admin.register(CounsellorRotation)
+class CounsellorRotationAdmin(admin.ModelAdmin):
+    """Single row — visible for debugging a rotation that looks stuck."""
+    list_display = ("pointer", "updated_at")
 
+    def has_add_permission(self, request):
+        return not CounsellorRotation.objects.exists()
 
-@admin.register(CounsellorPoolMembership)
-class CounsellorPoolMembershipAdmin(admin.ModelAdmin):
-    list_display = ("pool", "user", "sort_order", "is_active")
-    list_filter = ("pool", "is_active")
-    search_fields = ("user__username", "user__email")
-    autocomplete_fields = ("pool", "user")
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 class LeadFollowupInline(admin.TabularInline):

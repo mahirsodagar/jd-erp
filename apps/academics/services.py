@@ -14,11 +14,17 @@ from .models import ScheduleSlot
 
 
 def detect_conflicts(*, batch, instructor, classroom, time_slot, date,
-                     exclude_id: int | None = None) -> dict:
+                     exclude_id: int | None = None, subject=None) -> dict:
     """Returns dict with `errors` (hard) and `warnings` (soft).
 
     errors  → instructor / batch double-booked → reject the create.
     warnings → classroom double-booked → require force=True.
+
+    `subject` is optional and only consulted for its `is_elective` flag:
+    two ELECTIVE subjects may share a batch's period (each student
+    attends one of them), so the batch clash is not raised between two
+    electives. The instructor and classroom rules are unchanged — a
+    person or a room still cannot be in two places at once.
     """
     errors: list[str] = []
     warnings: list[str] = []
@@ -34,10 +40,15 @@ def detect_conflicts(*, batch, instructor, classroom, time_slot, date,
         errors.append(
             f"Instructor {instructor} is already scheduled in this slot."
         )
-    if batch and base.filter(batch=batch).exists():
-        errors.append(
-            f"Batch {batch} is already scheduled in this slot."
-        )
+    if batch:
+        clashing = base.filter(batch=batch)
+        if getattr(subject, "is_elective", False):
+            # Only a non-elective already in the period blocks us.
+            clashing = clashing.filter(is_elective=False)
+        if clashing.exists():
+            errors.append(
+                f"Batch {batch} is already scheduled in this slot."
+            )
     if classroom and base.filter(classroom=classroom).exists():
         warnings.append(
             f"Classroom {classroom} is already in use in this slot. "
@@ -54,6 +65,7 @@ def create_slot(*, batch, subject, instructor, classroom, time_slot, date,
     report = detect_conflicts(
         batch=batch, instructor=instructor,
         classroom=classroom, time_slot=time_slot, date=date,
+        subject=subject,
     )
     if report["errors"]:
         return None, report
@@ -65,6 +77,8 @@ def create_slot(*, batch, subject, instructor, classroom, time_slot, date,
         classroom=classroom, time_slot=time_slot, date=date,
         notes=notes, created_by=created_by,
         classroom_conflict_overridden=bool(report["warnings"] and force),
+        # Denormalised so the partial unique constraint can see it.
+        is_elective=bool(getattr(subject, "is_elective", False)),
     )
     return slot, report
 

@@ -87,6 +87,20 @@ TEMPLATES = [
     ("lead.application_link.wa", "WHATSAPP", "",
      "Dear {name}, Thank you for selecting JD. Your inquiry has been "
      "submitted. Please click the link to complete your application - {url}"),
+    # Entrance-exam link — per-candidate tokenized URL. Email only:
+    # there is no DLT-approved SMS body for it, and the link needs a
+    # real browser. Variables: {name}, {exam}, {url}, {duration}, {window}.
+    ("lead.entrance_exam_link.email", "EMAIL",
+     "Your JD entrance exam link — {exam}",
+     "Dear {name},\n\n"
+     "You have been scheduled for the JD entrance exam: {exam}.\n\n"
+     "{window}\n"
+     "Once you begin you will have {duration} minutes to finish, so "
+     "please make sure you have a stable internet connection before "
+     "you start.\n\n"
+     "Click the link below to take the exam — it is personal to you, "
+     "please do not share it:\n{url}\n\n"
+     "All the best!\n\nWith Regards,\nJD Admissions Team"),
     # Verbatim DLT-approved wording — must match what was registered
     # with BulkSMS (template_id 1307168958796572350) or the SMS won't
     # leave the gateway. Variables: {short_name}, {url}.

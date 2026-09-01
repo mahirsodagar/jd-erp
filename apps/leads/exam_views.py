@@ -333,6 +333,40 @@ class ExamAttemptDetailView(APIView):
         })
 
 
+class ExamAttemptSendLinkView(APIView):
+    """Email one mapped candidate their personal exam link.
+
+    Gated on the same permission as mapping — whoever can put a lead on
+    an exam can tell them about it.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            attempt = EntranceExamAttempt.objects.select_related(
+                "exam", "lead", "lead__program",
+            ).get(pk=pk)
+        except EntranceExamAttempt.DoesNotExist as e:
+            raise Http404 from e
+
+        if not (_is_exam_owner(request.user, attempt.exam)
+                or has_perm(request.user, "leads.exam.publish")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+
+        from .send_links import send_entrance_exam_link
+
+        try:
+            result = send_entrance_exam_link(
+                attempt=attempt, actor=request.user,
+            )
+        except ValueError as e:
+            return Response({"detail": str(e)},
+                            status=http.HTTP_400_BAD_REQUEST)
+        return Response(result)
+
+
 class ExamResponseReviewView(APIView):
     permission_classes = [IsAuthenticated]
 

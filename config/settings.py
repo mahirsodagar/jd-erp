@@ -637,6 +637,7 @@ EMAIL_SENDER_DOMAIN_POLICY = {
     # Fees + admission, to students/parents — domain by course type.
     "lead.fee_link.email":                "COURSE",
     "lead.application_link.email":         "COURSE",
+    "lead.entrance_exam_link.email":       "COURSE",
     "fees.receipt.email":                 "COURSE",
     "fees.application_fee_receipt.email":  "COURSE",
     "admissions.form_submitted.email":     "COURSE",  # "admission form filled"

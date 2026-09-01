@@ -40,6 +40,13 @@ class ScheduleSlot(models.Model):
     )
     notes = models.CharField(max_length=400, blank=True)
 
+    # Denormalised from `subject.is_elective` at create time. A partial
+    # unique constraint cannot reach across a FK, and the batch-clash
+    # rule differs for electives: several elective slots legitimately
+    # share one (batch, date, time_slot) because each student attends
+    # only the one they picked. Kept in sync by `create_slot`.
+    is_elective = models.BooleanField(default=False, editable=False)
+
     # Set when classroom-conflict warnings were overridden via force=True.
     classroom_conflict_overridden = models.BooleanField(default=False)
 
@@ -76,9 +83,11 @@ class ScheduleSlot(models.Model):
                 condition=models.Q(status="SCHEDULED"),
                 name="uniq_instructor_date_slot_active",
             ),
+            # Electives are exempt: a batch can have several elective
+            # slots in one period, since each student sits in only one.
             models.UniqueConstraint(
                 fields=["batch", "date", "time_slot"],
-                condition=models.Q(status="SCHEDULED"),
+                condition=models.Q(status="SCHEDULED", is_elective=False),
                 name="uniq_batch_date_slot_active",
             ),
         ]

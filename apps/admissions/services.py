@@ -11,6 +11,7 @@ from datetime import datetime
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Max
+from django.utils import timezone
 
 from apps.leads.models import Lead
 
@@ -58,11 +59,18 @@ def promote_lead_to_student(*, lead: Lead, actor=None) -> tuple[Student, dict]:
     if hasattr(lead, "promoted_student") and lead.promoted_student is not None:
         raise ValueError("This lead already has a promoted student.")
 
-    institute = getattr(lead.campus, "institute", None)
+    # Institute follows the PROGRAM, not the campus — a campus hosts
+    # programs from several institutes and so cannot name one.
+    if lead.program_id is None:
+        raise ValueError(
+            "This lead has no program set; the program determines the "
+            "institute, so it is required before promoting."
+        )
+    institute = lead.program.institute
     if institute is None:
         raise ValueError(
-            f"Campus '{lead.campus.code}' has no parent Institute set; "
-            "fix the campus master before promoting leads."
+            f"Program '{lead.program.code}' has no Institute set; "
+            "fix the program master before promoting leads."
         )
 
     # Pick a default current academic year (one row marked is_current=True).
@@ -134,6 +142,22 @@ _STUDENT_TEXT_FIELDS = (
 )
 
 
+def _stamp_consent(student: Student, payload: dict) -> None:
+    """Record when the student agreed to the declaration / the rules.
+
+    Write-once in each direction: a later submit that arrives without the
+    flag must not un-agree what was already agreed, and a second yes must
+    not move the original timestamp. Consent is only ever *added*, which
+    is what lets the form come back pre-ticked on a re-visit instead of
+    demanding the student agree all over again.
+    """
+    stamped = timezone.now()
+    if payload.get("declaration_accepted") and student.declaration_accepted_at is None:
+        student.declaration_accepted_at = stamped
+    if payload.get("rules_accepted") and student.rules_accepted_at is None:
+        student.rules_accepted_at = stamped
+
+
 def _apply_payload_to_student(student: Student, payload: dict,
                               *, institute, campus, program,
                               acad_year, lead: Lead) -> None:
@@ -186,6 +210,8 @@ def _apply_payload_to_student(student: Student, payload: dict,
         if user.email != payload["student_email"]:
             user.email = payload["student_email"]
             user.save(update_fields=["email"])
+
+    _stamp_consent(student, payload)
 
     student.lead_origin = lead
     student.save()
@@ -274,11 +300,16 @@ def submit_application_from_lead(*, lead: Lead, payload: dict) -> tuple[Student,
                 f"campus '{campus.name}'.",
             )
 
-    institute = getattr(campus, "institute", None)
+    # The program carries the institute (legacy `program_master.inst_id`).
+    if program is None:
+        raise ValueError(
+            "No program selected; the program determines the institute.",
+        )
+    institute = program.institute
     if institute is None:
         raise ValueError(
-            f"Campus '{campus.code}' has no parent Institute set; "
-            "fix the campus master before accepting applications.",
+            f"Program '{program.code}' has no Institute set; "
+            "fix the program master before accepting applications.",
         )
 
     acad_year = AcademicYear.objects.filter(is_current=True).first()
@@ -346,6 +377,11 @@ def submit_application_from_lead(*, lead: Lead, payload: dict) -> tuple[Student,
         mother_occupation=payload.get("mother_occupation", ""),
         lead_origin=lead,
     )
+
+    _stamp_consent(student, payload)
+    student.save(update_fields=[
+        "declaration_accepted_at", "rules_accepted_at",
+    ])
 
     photo = payload.get("_photo_file")
     if photo is not None:
@@ -431,6 +467,19 @@ def promote_batch(
     if student_ids is not None:
         qs = qs.filter(student_id__in=student_ids)
 
+    # The PROGRAM YEAR follows the target semester, as in PHP: the
+    # promote screen resolves it with
+    #   SELECT * FROM course_master
+    #   WHERE FIND_IN_SET(<target sem>, sem_id) AND program_id = <program>
+    # (admissions/get.php:372). A student moving from Sem 2 to Sem 3
+    # moves from Year 1 to Year 2 — carrying the old year forward would
+    # leave them filed under the wrong one.
+    from apps.master.models import Course
+
+    target_course = Course.for_semester(
+        program=target_batch.program, semester=target_semester,
+    )
+
     promoted = []
     skipped = []
     today = _date.today()
@@ -456,7 +505,10 @@ def promote_batch(
         new = Enrollment.objects.create(
             student=old.student,
             program=target_batch.program,
-            course=old.course,
+            # Fall back to the student's existing year when the program
+            # has no year covering the target semester — better to keep
+            # the old value than to blank it.
+            course=target_course or old.course,
             semester=target_semester,
             campus=target_batch.campus,
             batch=target_batch,

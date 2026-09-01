@@ -54,7 +54,7 @@ Five models are referenced by nearly everything. Changing them is expensive.
  1. Lead created (intake API or staff)
       └─► leads.services.create_lead
             ├─► dedup against existing leads              [leads]
-            ├─► round-robin from CounsellorPool           [leads + accounts]
+            ├─► round-robin over Counsellor              [leads + employees]
             └─► signal: lead_welcome_email / _wa          [notifications]
 
  2. Follow-ups logged, each with an outcome

@@ -76,13 +76,12 @@ never overwritten.
 
 ### If it is a genuinely new person
 
-The lead is assigned automatically by rotation. Each program category —
-Regular, Short and Newly launched — has its own pool of counsellors, and leads
-are handed out in turn. Counsellors marked unavailable (for example, on leave)
-are skipped.
+The lead is assigned automatically by rotation. Everyone on the counsellor
+list takes it in turn, whatever the program. Counsellors marked unavailable
+(for example, on leave) are skipped.
 
-If no pool exists for that program's category, the lead arrives unassigned and
-someone must assign it by hand.
+If there are no counsellors available, the lead arrives unassigned and someone
+must assign it by hand.
 
 ## 2.4 Working the lead list
 
@@ -102,6 +101,16 @@ counsellor, and by the date the lead was created. There is also:
 
 > The list shows a maximum of 500 leads at a time. Use the filters to narrow it
 > rather than scrolling.
+
+### Assigning from the list
+
+The **Owner** column is a dropdown. Pick a counsellor to assign or reassign the
+lead on the spot — no need to open it. The change saves immediately.
+
+Only counsellors appear in the dropdown (see §2.10), and you need the *reassign*
+permission to use it; without it the column is plain text. If a lead's current
+owner has since been taken off the counsellor list, they still show in the cell
+so you can see who holds it, greyed out so nobody else can be parked there.
 
 ### Lead statuses
 
@@ -242,18 +251,24 @@ Some programs require a candidate to sit an entrance test before admission.
 
 You can **Close** an exam when the window has passed.
 
-## 2.10 Counsellor pools
+## 2.10 Counsellors
 
-**Leads → Counsellor Pools.** Usually managed by a team lead.
+**Leads → Counsellors.** Usually managed by a team lead.
 
-There is one pool per program category — Regular, Short and Newly launched.
-Add counsellors to a pool and set their order; new leads in that category are
-handed out in rotation.
+Pick an employee and add them as a counsellor. New leads are handed out to the
+list in rotation, and only counsellors appear in the **Assign to** dropdown on
+the Add Lead form and on a lead's Reassign box. The **Order** column decides
+who comes first.
 
-To take someone out of rotation temporarily (leave, training, workload),
-mark them **unavailable** rather than removing them from the pool — their
-existing leads stay with them and they resume their place when marked available
-again.
+Only employees who already have a portal account can be added — a lead has to
+belong to someone who can log in. If the person you want is missing from the
+list, provision their account from their employee record first.
+
+To take someone out of rotation temporarily (leave, training, workload), use
+**Pause**, or mark them **unavailable** on their user record. Either way their
+existing leads stay with them and they resume their place afterwards.
+**Remove** takes them off the list entirely; the leads they already hold still
+stay with them.
 
 ## 2.11 Reports
 

@@ -3,6 +3,7 @@ from django.urls import path
 from .bulk_message import LeadBulkMessageView
 from .exam_views import (
     ExamAttemptDetailView,
+    ExamAttemptSendLinkView,
     ExamAttemptsListView,
     ExamCloseView,
     ExamDetailView,
@@ -42,21 +43,22 @@ from .views import (
     LeadSendFeeLinkView,
     LeadSendWelcomeView,
     LeadStatusView,
-    PoolDetailView,
-    PoolListCreateView,
-    PoolMembershipDetailView,
-    PoolMembershipListCreateView,
+    CounsellorDetailView,
+    CounsellorEligibleEmployeesView,
+    CounsellorListCreateView,
+    CounsellorOptionsView,
 )
 
 urlpatterns = [
     path("intake/", LeadIntakeView.as_view(), name="lead-intake"),
     path("bulk-message/", LeadBulkMessageView.as_view(), name="lead-bulk-message"),
 
-    # F.3 — counsellor pools
-    path("pools/", PoolListCreateView.as_view(), name="pool-list-create"),
-    path("pools/<int:pk>/", PoolDetailView.as_view(), name="pool-detail"),
-    path("pool-members/", PoolMembershipListCreateView.as_view(), name="pool-member-list-create"),
-    path("pool-members/<int:pk>/", PoolMembershipDetailView.as_view(), name="pool-member-detail"),
+    # F.3 — counsellors (one flat list; employees promoted to counsellor)
+    path("counsellors/", CounsellorListCreateView.as_view(), name="counsellor-list-create"),
+    # Static segments before <int:pk> so they aren't shadowed.
+    path("counsellors/eligible/", CounsellorEligibleEmployeesView.as_view(), name="counsellor-eligible"),
+    path("counsellors/options/", CounsellorOptionsView.as_view(), name="counsellor-options"),
+    path("counsellors/<int:pk>/", CounsellorDetailView.as_view(), name="counsellor-detail"),
 
     # F.6 — reports
     path("reports/funnel/", ConversionFunnelView.as_view(), name="report-funnel"),
@@ -84,6 +86,8 @@ urlpatterns = [
          name="exam-question-detail"),
     path("exam-attempts/<int:pk>/", ExamAttemptDetailView.as_view(),
          name="exam-attempt-detail"),
+    path("exam-attempts/<int:pk>/send-link/",
+         ExamAttemptSendLinkView.as_view(), name="exam-attempt-send-link"),
     path("exam-responses/<int:pk>/review/", ExamResponseReviewView.as_view(),
          name="exam-response-review"),
 

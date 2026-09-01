@@ -142,60 +142,66 @@ class Lead(models.Model):
         return f"{self.name} <{self.email}>"
 
 
-class CounsellorPool(models.Model):
-    """One pool per Program.Category. Counsellors round-robin within their
-    pool. The `pointer` is the index of the next counsellor to assign."""
+class Counsellor(models.Model):
+    """An employee flagged as a counsellor.
 
-    class Category(models.TextChoices):
-        REGULAR = "REGULAR", "Regular Course"
-        SHORT = "SHORT", "Short Course"
-        NEW = "NEW", "Newly launched"
+    Replaces the per-category counsellor pools: there is now one flat
+    list. Every counsellor is an Employee, and the Employee must have a
+    portal `user_account` — `Lead.assign_to` points at a User, so an
+    employee with no login cannot hold a lead. New leads rotate through
+    the active counsellors, and the lead-assignment pickers show only
+    the people listed here.
+    """
 
-    name = models.CharField(max_length=80, unique=True)
-    category = models.CharField(
-        max_length=10, choices=Category.choices, unique=True,
-        help_text="One pool per program category.",
+    employee = models.OneToOneField(
+        "employees.Employee", on_delete=models.CASCADE,
+        related_name="counsellor",
     )
-    is_active = models.BooleanField(default=True)
-    pointer = models.PositiveIntegerField(
-        default=0,
-        help_text="Round-robin offset; advanced after each assignment.",
+    sort_order = models.PositiveSmallIntegerField(
+        default=100,
+        help_text="Stable rotation order — counsellors with a lower "
+                  "sort_order get leads first.",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Paused counsellors are skipped by the round-robin but "
+                  "keep the leads they already hold.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ("category",)
+        ordering = ("sort_order", "id")
 
     def __str__(self):
-        return self.name
+        return self.employee.full_name
+
+    @property
+    def user(self):
+        """The portal account leads get assigned to. None if HR has not
+        provisioned one (or cleared it after the fact)."""
+        return self.employee.user_account
 
 
-class CounsellorPoolMembership(models.Model):
-    """Through table: a User can be in multiple pools."""
+class CounsellorRotation(models.Model):
+    """Single-row table holding the round-robin pointer.
 
-    pool = models.ForeignKey(
-        CounsellorPool, on_delete=models.CASCADE, related_name="memberships",
+    The pool model carried its pointer on the pool row; with one flat
+    list there is no such row, so this stands in as the thing
+    `select_for_update` locks — that lock is what stops two concurrent
+    lead creates handing the same counsellor both leads.
+    """
+
+    SINGLETON_PK = 1
+
+    pointer = models.PositiveIntegerField(
+        default=0,
+        help_text="Round-robin offset; advanced after each assignment.",
     )
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
-        related_name="pool_memberships",
-    )
-    sort_order = models.PositiveSmallIntegerField(
-        default=100,
-        help_text="Stable order within the pool — counsellors with lower "
-                  "sort_order get leads first. Used for fairness when "
-                  "rotating.",
-    )
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ("pool", "sort_order")
-        unique_together = (("pool", "user"),)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.user} in {self.pool.name}"
+        return f"Counsellor rotation @ {self.pointer}"
 
 
 class LeadFollowup(models.Model):

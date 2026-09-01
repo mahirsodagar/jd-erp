@@ -44,7 +44,7 @@ Start here, then read in order — each chapter assumes the ones before it.
 | 1 | [Getting started & operations](01-getting-started.md) | Local setup, environment variables, seed commands, deployment, day-2 runbook |
 | 2 | [Platform foundations](02-platform-foundations.md) | `accounts`, `roles`, `audit`, `common` — auth, JWT, the permission system, throttling, file-upload validation |
 | 3 | [Master data](03-master-data.md) | `master` — institutes, campuses, programs, courses, batches, subjects, fee templates and every other reference list |
-| 4 | [Leads / CRM](04-leads-crm.md) | `leads` — intake, dedup, counsellor pools, follow-ups, application & fee links, entrance exams, reports |
+| 4 | [Leads / CRM](04-leads-crm.md) | `leads` — intake, dedup, counsellors, follow-ups, application & fee links, entrance exams, reports |
 | 5 | [Admissions](05-admissions.md) | `admissions` — students, the public application form, enrolments, promotion, portal provisioning |
 | 6 | [Fees](06-fees.md) | `fees` — installments, receipts, concessions, other fees, balances, PDFs, reminders |
 | 7 | [Academics](07-academics.md) | `academics`, `courseware` — timetable, attendance, assignments, marks, tests, lessons, certificates, alumni, batch & closing reports |
@@ -127,7 +127,7 @@ Deployment specifics live in [`../../deploy-VPS.md`](../../deploy-VPS.md).
 | `roles` | `/api/roles/`, `/api/permissions/` | Permission catalogue + roles |
 | `audit` | `/api/audit/` | Auth event log + django-auditlog data-change log |
 | `master` | `/api/master/` | All reference/master data |
-| `leads` | `/api/leads/` | CRM: leads, pools, follow-ups, entrance exams, reports |
+| `leads` | `/api/leads/` | CRM: leads, counsellors, follow-ups, entrance exams, reports |
 | `admissions` | `/api/admissions/` | Students, documents, enrolments, promotion |
 | `fees` | `/api/fees/` | Installments, receipts, concessions, balances |
 | `academics` | `/api/academics/` | Timetable, attendance, assignments, marks, tests, lessons, certificates, alumni |

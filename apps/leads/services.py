@@ -20,38 +20,62 @@ from .models import Lead, LeadStatusHistory
 
 # --- Round-robin counsellor assignment (F.3) --------------------------
 
-def assign_via_round_robin(*, program_category: str):
-    """Pick the next available counsellor from the pool for this
-    program category. Returns a User or None.
+def eligible_counsellors():
+    """Counsellors that can currently receive a lead, in rotation order.
 
-    Race-safe via select_for_update on the pool row. Skips counsellors
-    whose `is_available=False`.
+    A counsellor drops out if they are paused, their employee record is
+    inactive or soft-deleted, they have no portal account, or that
+    account is deactivated / marked unavailable.
     """
-    from django.db import transaction
-    from django.contrib.auth import get_user_model
-    from .models import CounsellorPool, CounsellorPoolMembership
+    from apps.employees.models import Employee
+    from .models import Counsellor
 
-    User = get_user_model()
-    with transaction.atomic():
-        try:
-            pool = CounsellorPool.objects.select_for_update().get(
-                category=program_category, is_active=True,
-            )
-        except CounsellorPool.DoesNotExist:
-            return None
-
-        memberships = list(
-            CounsellorPoolMembership.objects
-            .filter(pool=pool, is_active=True, user__is_active=True, user__is_available=True)
-            .order_by("sort_order", "id")
+    return (
+        Counsellor.objects
+        .filter(
+            is_active=True,
+            employee__is_deleted=False,
+            employee__status=Employee.Status.ACTIVE,
+            employee__user_account__isnull=False,
+            employee__user_account__is_active=True,
+            employee__user_account__is_available=True,
         )
-        if not memberships:
+        .select_related("employee", "employee__user_account")
+        .order_by("sort_order", "id")
+    )
+
+
+def assign_via_round_robin():
+    """Pick the next eligible counsellor. Returns a User or None.
+
+    Race-safe via select_for_update on the single rotation row. The
+    pointer is an offset into a list that is recomputed each call, so
+    pausing or adding a counsellor shifts where the next lead lands —
+    fair over time, but not a strict cycle.
+    """
+    from .models import CounsellorRotation
+
+    with transaction.atomic():
+        rotation = (
+            CounsellorRotation.objects
+            .select_for_update()
+            .filter(pk=CounsellorRotation.SINGLETON_PK)
+            .first()
+        )
+        if rotation is None:
+            # Seeded by migration; recreated here if it ever goes missing.
+            rotation = CounsellorRotation.objects.create(
+                pk=CounsellorRotation.SINGLETON_PK,
+            )
+
+        counsellors = list(eligible_counsellors())
+        if not counsellors:
             return None
 
-        idx = pool.pointer % len(memberships)
-        chosen = memberships[idx].user
-        pool.pointer = (pool.pointer + 1) % max(len(memberships), 1)
-        pool.save(update_fields=["pointer", "updated_at"])
+        idx = rotation.pointer % len(counsellors)
+        chosen = counsellors[idx].employee.user_account
+        rotation.pointer = (rotation.pointer + 1) % len(counsellors)
+        rotation.save(update_fields=["pointer", "updated_at"])
         return chosen
 
 
@@ -106,13 +130,10 @@ def create_lead(*, data: dict, created_by=None, utm: dict | None = None) -> Lead
     # No match → fresh lead. Auto-assign via round-robin if no
     # `assign_to` was supplied (matches the PDF's Phase 2 SLA).
     if not existing:
-        if not data.get("assign_to") and data.get("program") is not None:
-            from apps.master.models import Program
-            cat = getattr(data["program"], "category", None)
-            if cat:
-                rr = assign_via_round_robin(program_category=cat)
-                if rr is not None:
-                    data["assign_to"] = rr
+        if not data.get("assign_to"):
+            rr = assign_via_round_robin()
+            if rr is not None:
+                data["assign_to"] = rr
 
         lead = Lead.objects.create(
             created_by=created_by,

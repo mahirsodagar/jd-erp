@@ -38,7 +38,7 @@ Independent lists: `State` → `City`, `Degree`, `Semester`, `Subject`,
 |---|---|---|
 | `Institute` | `name`, `code` (unique), `logo`, `email_domain` | `Student.institute`, `Employee.institute`, certificate/ID-card headers, `application_form_id` prefix |
 | `Campus` | `name`, `code`, `institute` (nullable for legacy rows), `city`, `state` | **Campus scoping everywhere** via `User.campuses`; `emp_code` and `receipt_no` prefixes |
-| `Program` | `name`, `code`, `degree_type`, `category`, `certification`, `duration_months`, `campuses` M2M | Lead routing (category → counsellor pool), email sender domain (`degree_type` → diploma vs degree), fee templates, batches |
+| `Program` | `name`, `code`, `degree_type`, `category`, `certification`, `duration_months`, `campuses` M2M | Email sender domain (`degree_type` → diploma vs degree), fee templates, batches |
 | `Course` | `name`, `code`, `program`, `duration_months` | `Student.course`, `Enrollment.course`, optional `FeeTemplate.course` |
 | `AcademicYear` | `code` ("26-27"), `full_name`, `start_date`, `end_date`, `is_current` | Almost every report filter; `promote_lead_to_student` **fails** if no row has `is_current=True` |
 | `Semester` | `name`, `number` (unique) | `Enrollment.semester`, `MarksEntry.semester` |
@@ -58,8 +58,9 @@ Independent lists: `State` → `City`, `Degree`, `Semester`, `Subject`,
   discounts. Do not "fix" this.
 - **`Batch.mentor`** is what makes a person a batch mentor. It drives the
   student-leave mentor console, batch-mentor reports and 0-Hour reports.
-- **`Program.category`** decides which `CounsellorPool` a new lead is routed
-  to. A program in a category with no pool gets no auto-assignment.
+- **`Program.category`** is reporting/grouping only. It used to pick the
+  counsellor pool; lead assignment now uses one flat rotation of all
+  counsellors, so this field no longer affects routing.
 - **`Program.degree_type`** is free text matched by substring
   (`"diploma" in degree_type.lower()`) in
   `apps/notifications/sender.py::is_diploma`. Typos silently change which
@@ -137,7 +138,7 @@ intended safety net.
 | `Campus.code` | Historic `emp_code` (`{CAMPUS}-{YYYY}-{seq}`) and `receipt_no` (`RCP-{CAMPUS}-{YYYY}-{seq}`) already contain the old code. Sequence generators scan by prefix, so a code change restarts numbering |
 | `Institute.code` | Same for `application_form_id` (`{INSTITUTE}-{YYYY}-{seq}`), and it is the key into `settings.INSTITUTE_PAYMENT_DETAILS` / `FEE_LINK_URLS`. A mismatch makes "Send fee link" raise |
 | `AcademicYear.is_current` | Only one row should carry it. `promote_lead_to_student` picks the first `is_current=True` and errors if none exists |
-| `Program.category` | Re-routes new leads to a different counsellor pool |
+| `Program.category` | Reporting only — no longer affects lead assignment |
 | `Program.degree_type` | Changes the From domain on fee/admission emails |
 | Adding a `Batch` | Nothing else needed — schedule, attendance, assignments and reports all key off it |
 | Deactivating a `TimeSlot` | Existing `ScheduleSlot` rows keep working (FK is PROTECT); only new scheduling is affected |
