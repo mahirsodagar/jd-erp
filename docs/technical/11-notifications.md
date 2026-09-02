@@ -148,6 +148,13 @@ Currently registered MSG91 templates:
 receipt, admission-form-submitted, installment undertaking, installment-pending
 reminder. `PORTAL`: student credentials. `HR`: leave and relieving workflows.
 
+**Literal-domain trigger:** `lead.entrance_exam_link.email` is pinned to
+`jdinstitute.edu.in`, so it always goes out over the default Workspace backend
+as `admin.a@jdinstitute.edu.in`. It is the one lead-facing trigger with no
+MSG91 template, so `COURSE` routing put degree candidates on the `jdindia.com`
+Zoho connection with no fallback available if that connection was down. Keep it
+off `COURSE` unless an MSG91 template is registered for it.
+
 Diploma detection is a **substring match** on `Program.degree_type`
 (`"diploma" in degree_type.lower()`). Callers pass it into the context as
 `degree_type`; anything not matching is treated as a degree course.

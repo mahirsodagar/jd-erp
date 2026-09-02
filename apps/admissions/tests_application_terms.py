@@ -28,17 +28,20 @@ from apps.master.models import (
 class TermsBundleTests(TestCase):
 
     def test_known_institute_gets_its_own_payee_and_disclaimer(self):
+        """JDSD is on the 2026 document; its payee still comes through in
+        the first fee rule, and it keeps its disclaimer."""
         jdsd = terms_for("JDSD")
         self.assertEqual(jdsd["fee_recipient"], "JD EDUCATIONAL TRUST")
-        self.assertIn("JD EDUCATIONAL TRUST", jdsd["rules"][0]["subs"][0])
-        self.assertIsNotNone(jdsd["disclaimer"])
-        # The institute-specific extra fee rule is spliced in before the
-        # closing "failing to pay" line, not appended after it.
-        subs = jdsd["rules"][0]["subs"]
         self.assertIn(
-            "Examination fees for each semester are payable by the students.",
-            subs,
+            "JD EDUCATIONAL TRUST", jdsd["rules"][0]["subs"][0]["text"],
         )
+        self.assertIsNotNone(jdsd["disclaimer"])
+
+    def test_legacy_fee_block_still_builds_for_unknown_institutes(self):
+        """Both named institutes are on their own 2026 document, so the
+        pre-2026 bundle is now only the fallback: a "Fees:" heading whose
+        last sub-rule is the closing penalty line."""
+        subs = [s["text"] for s in terms_for("BRAND-NEW")["rules"][0]["subs"]]
         self.assertTrue(subs[-1].startswith("Students failing to pay fees"))
 
     def test_jdift_has_no_disclaimer_and_its_own_payee(self):
@@ -46,6 +49,11 @@ class TermsBundleTests(TestCase):
         self.assertIsNone(jdift["disclaimer"])
         self.assertEqual(
             jdift["fee_recipient"], "JD INSTITUTE OF FASHION TECHNOLOGY",
+        )
+        # The payee also appears in rule A.1 of its 2026 document.
+        self.assertIn(
+            "JD INSTITUTE OF FASHION TECHNOLOGY",
+            jdift["rules"][0]["subs"][0]["text"],
         )
 
     def test_an_unknown_institute_still_gets_usable_terms(self):
@@ -57,15 +65,27 @@ class TermsBundleTests(TestCase):
         self.assertIsNone(terms["disclaimer"])
 
     def test_every_rule_has_the_same_shape(self):
-        for rule in terms_for("JDSD")["rules"]:
-            self.assertEqual(set(rule), {"text", "subs", "emphasis"})
-            self.assertIsInstance(rule["subs"], list)
+        for code in ("JDSD", "JDIFT", "BRAND-NEW"):
+            for rule in terms_for(code)["rules"]:
+                self.assertEqual(
+                    set(rule),
+                    {"text", "intro", "subs", "emphasis", "ordered"},
+                )
+                self.assertIsInstance(rule["subs"], list)
 
-    def test_only_the_fees_rule_is_emphasised(self):
-        rules = terms_for("JDSD")["rules"]
+    def test_only_the_fees_rule_is_emphasised_pre_2026(self):
+        """The older bundle bolds just its "Fees:" heading."""
+        rules = terms_for("BRAND-NEW")["rules"]
         self.assertTrue(rules[0]["emphasis"])
         self.assertEqual(rules[0]["text"], "Fees:")
         self.assertFalse(any(r["emphasis"] for r in rules[1:]))
+
+    def test_every_2026_section_is_emphasised(self):
+        """The 2026 rules are all titled sections, so each heading is
+        bold rather than only the first."""
+        for code in ("JDSD", "JDIFT"):
+            rules = terms_for(code)["rules"]
+            self.assertTrue(all(r["emphasis"] for r in rules), code)
 
 
 class _LeadFixture(TestCase):
@@ -197,7 +217,14 @@ class PublicPrefillTermsTests(_LeadFixture):
         body = self.client.get(
             reverse("public-application", args=[self.lead.application_token]),
         ).json()
-        self.assertEqual(body["terms"]["declaration"], DECLARATION_TEXT)
+        # The fixture institute is JDSD, which signs the 2026
+        # undertaking rather than the older declaration.
+        self.assertNotEqual(body["terms"]["declaration"], DECLARATION_TEXT)
+        self.assertEqual(
+            body["terms"]["declaration_title"], "Undertaking by the Student",
+        )
+        self.assertIn("true, complete, and correct",
+                      body["terms"]["declaration"])
         self.assertEqual(body["terms"]["fee_recipient"], "JD EDUCATIONAL TRUST")
         self.assertIsNotNone(body["terms"]["disclaimer"])
 
@@ -264,7 +291,14 @@ class ApplicationPdfTests(_LeadFixture):
 
     def test_portal_payload_carries_terms_and_consent(self):
         body = self.api.get(reverse("portal-application")).json()
-        self.assertEqual(body["terms"]["declaration"], DECLARATION_TEXT)
+        # The fixture institute is JDSD, which signs the 2026
+        # undertaking rather than the older declaration.
+        self.assertNotEqual(body["terms"]["declaration"], DECLARATION_TEXT)
+        self.assertEqual(
+            body["terms"]["declaration_title"], "Undertaking by the Student",
+        )
+        self.assertIn("true, complete, and correct",
+                      body["terms"]["declaration"])
         self.assertIsNotNone(body["consent"]["declaration_accepted_at"])
         self.assertIsNotNone(body["consent"]["rules_accepted_at"])
 

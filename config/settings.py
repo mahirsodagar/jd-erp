@@ -637,12 +637,17 @@ EMAIL_SENDER_DOMAIN_POLICY = {
     # Fees + admission, to students/parents — domain by course type.
     "lead.fee_link.email":                "COURSE",
     "lead.application_link.email":         "COURSE",
-    "lead.entrance_exam_link.email":       "COURSE",
     "fees.receipt.email":                 "COURSE",
     "fees.application_fee_receipt.email":  "COURSE",
     "admissions.form_submitted.email":     "COURSE",  # "admission form filled"
     "fees.installment_undertaking.email":  "COURSE",  # installment pattern / undertaking
     "fees.installment_pending.email":      "COURSE",  # installment-pending reminder
+    # Entrance-exam link → always jdinstitute.edu.in (the default
+    # Workspace mailbox, admin.a@jdinstitute.edu.in), never the course
+    # domains. It is the one lead-facing trigger with no MSG91 template,
+    # so course routing sent degree candidates through the jdindia.com
+    # Zoho connection with nothing to fall back to.
+    "lead.entrance_exam_link.email":       "jdinstitute.edu.in",
     # Student credentials / password reset → mail.jdinstitute.com.
     "student.portal_credentials.email":    "PORTAL",
     # HR / leave / relieving workflows → jdinstitute.edu.in.

@@ -147,25 +147,52 @@ def _photo(pdf: FPDF, student: Student) -> None:
 def _terms(pdf: FPDF, student: Student) -> None:
     terms = terms_for(getattr(student.institute, "code", "") or "")
 
-    _section(pdf, "Declaration")
+    # The bundle carries its own heading — JDSD's 2026 document calls
+    # this section "Undertaking by the student", the earlier wording a
+    # declaration.
+    heading = terms.get("declaration_title") or "Declaration"
+    _section(pdf, heading)
     pdf.set_x(_MARGIN)
     pdf.set_font("Helvetica", "", 8.5)
+    # `multi_cell` honours the blank lines between the undertaking's
+    # paragraphs, so no per-paragraph loop is needed.
     pdf.multi_cell(_BODY_W, 4.5, _safe(terms["declaration"]))
-    _accepted_line(pdf, "Declaration accepted", student.declaration_accepted_at)
+    _accepted_line(pdf, f"{heading} accepted", student.declaration_accepted_at)
 
     _section(pdf, "Terms & Conditions - Rules and Regulations")
     pdf.set_font("Helvetica", "", 8.5)
+    alpha = terms.get("list_style") == "upper-alpha"
     for n, rule in enumerate(terms["rules"], start=1):
+        # JDIFT's document letters its sections A-I; JDSD's numbers them.
+        marker = chr(ord("A") + n - 1) if alpha else str(n)
         pdf.set_x(_MARGIN)
         pdf.set_font("Helvetica", "B" if rule["emphasis"] else "", 8.5)
-        pdf.multi_cell(_BODY_W, 4.5, _safe(f"{n}. {rule['text']}"))
+        pdf.multi_cell(_BODY_W, 4.5, _safe(f"{marker}. {rule['text']}"))
         pdf.set_font("Helvetica", "", 8.5)
-        for j, sub in enumerate(rule["subs"]):
+        if rule.get("intro"):
+            pdf.set_x(_MARGIN + 3)
+            pdf.multi_cell(_BODY_W - 3, 4.5, _safe(rule["intro"]))
+        for j, sub in enumerate(rule["subs"], start=1):
+            # An unordered section (JDIFT's C) is bulleted, not numbered.
+            label = f"{marker}.{j}" if rule.get("ordered", True) else "-"
             pdf.set_x(_MARGIN + 6)
-            # A, B, C … mirroring the list-[upper-alpha] the form uses.
-            pdf.multi_cell(_BODY_W - 6, 4.5,
-                           _safe(f"{chr(ord('A') + j)}. {sub}"))
+            pdf.multi_cell(_BODY_W - 6, 4.5, _safe(f"{label} {sub['text']}"))
+            for bullet in sub["bullets"]:
+                pdf.set_x(_MARGIN + 12)
+                pdf.multi_cell(_BODY_W - 12, 4.5, _safe(f"- {bullet}"))
+            if sub.get("after"):
+                pdf.set_x(_MARGIN + 6)
+                pdf.multi_cell(_BODY_W - 6, 4.5, _safe(sub["after"]))
         pdf.ln(0.8)
+
+    fee_note = terms.get("fee_note") or []
+    if fee_note:
+        pdf.ln(0.8)
+        pdf.set_font("Helvetica", "I", 8)
+        for line in fee_note:
+            pdf.set_x(_MARGIN)
+            pdf.multi_cell(_BODY_W, 4.5, _safe(line))
+        pdf.set_font("Helvetica", "", 8.5)
 
     _accepted_line(pdf, "Rules & Regulations accepted", student.rules_accepted_at)
 
