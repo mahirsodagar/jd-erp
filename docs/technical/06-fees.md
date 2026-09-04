@@ -109,6 +109,8 @@ APPROVED / REJECTED with `approver`, `approver_remarks`, `decided_on`.
 ```python
 enrollment_balance(enrollment) -> {
   total_fee,            # FeeTemplate.total_fee for (academic_year, campus, program), active
+                        #   — else the enrolment's own schedule (see below)
+  total_fee_source,     # "template" or "schedule" — which of the two it came from
   registration_fee,     # FeeTemplate.registration_fee — INSIDE total_fee, not added to it
   concession_total,     # Σ APPROVED concessions (raw)
   concession_applied,   # concession_total capped at total_fee − registration_fee
@@ -125,14 +127,25 @@ enrollment_balance(enrollment) -> {
 A non-zero `registration_fee` alongside a zero `registration_due` means this
 year's schedule has not been built yet.
 
-Two behaviours to be aware of:
+Three behaviours to be aware of:
 
-1. **The template is resolved at read time, not snapshotted.** Editing a
+1. **A missed template lookup falls back to the schedule**
+   (`resolve_fee_figures()`). The template can legitimately fail to resolve —
+   it was deactivated, the fee was revised into a new row, or the enrolment
+   moved to a campus/program it doesn't cover. A zero `total_fee` then made
+   `payable` zero and drove `balance` NEGATIVE as soon as any money came in,
+   which is what put a 0 total against a minus due on the fee report. So when
+   no template resolves, the total comes from what the enrolment actually
+   carries — Σ installments + Σ approved concessions, the same identity the
+   undertaking PDF prints — with the REGISTRATION row standing in for
+   `registration_fee`. `total_fee_source` says which path was taken. With
+   neither a template nor a schedule, the total stays 0: nothing to infer from.
+2. **The template is resolved at read time, not snapshotted.** Editing a
    `FeeTemplate` retroactively changes the balance of every enrolment matching
    that (year, campus, program). If a year's fee is revised mid-session,
    create a new template rather than editing the old one — or accept that
    history shifts.
-2. The lookup ignores `FeeTemplate.course`. If several templates match the same
+3. The lookup ignores `FeeTemplate.course`. If several templates match the same
    (year, campus, program) tuple with different courses, `.first()` wins
    arbitrarily.
 

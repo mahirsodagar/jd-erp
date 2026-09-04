@@ -3,15 +3,17 @@ from django.contrib import admin
 from .models import (
     AcademicYear, Batch, Campus, City, Classroom, Course, CurriculumMapping,
     Degree, FeeTemplate, Institute, LeadSource, Program, Semester,
-    State, Subject, TimeSlot,
+    State, Subject, TimeSlot, University,
 )
 
 
 @admin.register(Subject)
 class SubjectAdmin(admin.ModelAdmin):
-    list_display = ("name", "code", "credits", "is_elective", "is_active")
-    list_filter = ("is_active", "is_elective")
+    list_display = ("name", "code", "program", "semester", "credits",
+                    "is_elective", "is_active")
+    list_filter = ("is_active", "is_elective", "program", "semester")
     search_fields = ("name", "code")
+    autocomplete_fields = ("program", "semester")
 
 
 @admin.register(Classroom)
@@ -62,10 +64,18 @@ class SemesterAdmin(admin.ModelAdmin):
 
 @admin.register(Batch)
 class BatchAdmin(admin.ModelAdmin):
-    list_display = ("name", "program", "campus", "academic_year", "mentor", "is_active")
+    list_display = ("name", "program", "campus", "academic_year",
+                    "start_semester", "mentor", "is_active")
     list_filter = ("is_active", "program", "campus", "academic_year")
     search_fields = ("name", "short_name")
-    autocomplete_fields = ("program", "campus", "academic_year", "mentor")
+    autocomplete_fields = ("program", "campus", "academic_year",
+                           "start_semester", "mentor")
+
+
+@admin.register(University)
+class UniversityAdmin(admin.ModelAdmin):
+    list_display = ("name", "code", "is_active")
+    search_fields = ("name", "code")
 
 
 @admin.register(Institute)
@@ -105,12 +115,13 @@ class CampusAdmin(admin.ModelAdmin):
 
 @admin.register(Program)
 class ProgramAdmin(admin.ModelAdmin):
-    list_display = ("name", "code", "institute", "degree", "degree_type",
-                    "duration_months", "is_active")
-    list_filter = ("is_active", "institute", "degree", "degree_type")
+    list_display = ("name", "code", "institute", "university", "degree",
+                    "degree_type", "duration_months", "is_active")
+    list_filter = ("is_active", "institute", "university", "degree",
+                   "degree_type")
     search_fields = ("name", "code")
     filter_horizontal = ("campuses",)
-    autocomplete_fields = ("institute", "degree")
+    autocomplete_fields = ("institute", "university", "degree")
 
 
 @admin.register(Course)

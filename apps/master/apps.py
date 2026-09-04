@@ -11,7 +11,7 @@ class MasterConfig(AppConfig):
         from .models import (
             AcademicYear, Batch, Campus, City, Classroom, CurriculumMapping,
             Degree, FeeTemplate, Institute, LeadSource, Program, Semester,
-            State, Subject, TimeSlot,
+            State, Subject, TimeSlot, University,
         )
         auditlog.register(Subject)
         auditlog.register(Classroom)
@@ -21,6 +21,7 @@ class MasterConfig(AppConfig):
         auditlog.register(Program)
         auditlog.register(LeadSource)
         auditlog.register(Institute)
+        auditlog.register(University)
         auditlog.register(State)
         auditlog.register(City)
         auditlog.register(AcademicYear)

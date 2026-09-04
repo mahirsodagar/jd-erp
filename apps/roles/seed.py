@@ -101,6 +101,7 @@ CATALOGUE = [
 
     # Module C — Employee Management / HR
     *_crud("master", "master.institute", "institutes"),
+    *_writes("master", "master.university", "universities"),
     *_writes("master", "master.state", "states"),
     *_writes("master", "master.city", "cities"),
     # Module 7 — HR

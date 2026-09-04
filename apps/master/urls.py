@@ -34,6 +34,8 @@ from .views import (
     StateManageView,
     SubjectDetailView,
     SubjectListCreateView,
+    UniversityDetailView,
+    UniversityListCreateView,
     TimeSlotDetailView,
     TimeSlotListCreateView,
 )
@@ -86,6 +88,9 @@ urlpatterns = [
 
     path("fee-templates/", FeeTemplateListCreateView.as_view(), name="fee-template-list-create"),
     path("fee-templates/<int:pk>/", FeeTemplateDetailView.as_view(), name="fee-template-detail"),
+
+    path("universities/", UniversityListCreateView.as_view(), name="university-list-create"),
+    path("universities/<int:pk>/", UniversityDetailView.as_view(), name="university-detail"),
 
     path("subjects/", SubjectListCreateView.as_view(), name="subject-list-create"),
     path("subjects/<int:pk>/", SubjectDetailView.as_view(), name="subject-detail"),

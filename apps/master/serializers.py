@@ -3,7 +3,7 @@ from rest_framework import serializers
 from .models import (
     AcademicYear, Batch, Campus, City, Classroom, Course, CurriculumMapping,
     Degree, FeeTemplate, Institute, LeadSource, Program, Semester,
-    State, Subject, TimeSlot,
+    State, Subject, TimeSlot, University,
 )
 
 
@@ -66,12 +66,20 @@ class ProgramSerializer(serializers.ModelSerializer):
     degree_name = serializers.CharField(
         source="degree.name", read_only=True, default="",
     )
+    university_name = serializers.CharField(
+        source="university.name", read_only=True, default="",
+    )
+    university_code = serializers.CharField(
+        source="university.code", read_only=True, default="",
+    )
 
     class Meta:
         model = Program
         fields = [
             "id", "name", "code",
             "institute", "institute_name", "institute_code",
+            "university", "university_name", "university_code",
+            "certification",
             "degree", "degree_name", "degree_type",
             "duration_months",
             "description", "is_active",
@@ -80,8 +88,22 @@ class ProgramSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id", "campuses", "institute_name", "institute_code",
+            "university_name", "university_code",
             "degree_name", "created_at", "updated_at",
         ]
+
+
+class UniversitySerializer(serializers.ModelSerializer):
+    program_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = University
+        fields = ["id", "name", "code", "is_active", "program_count",
+                  "created_at", "updated_at"]
+        read_only_fields = ["id", "program_count", "created_at", "updated_at"]
+
+    def get_program_count(self, obj):
+        return obj.programs.count()
 
 
 class InstituteSerializer(serializers.ModelSerializer):
@@ -123,10 +145,18 @@ class DegreeSerializer(serializers.ModelSerializer):
 
 
 class SemesterSerializer(serializers.ModelSerializer):
+    program_name = serializers.CharField(
+        source="program.name", read_only=True, default="",
+    )
+
     class Meta:
         model = Semester
-        fields = ["id", "name", "number", "is_active"]
-        read_only_fields = ["id"]
+        fields = ["id", "program", "program_name", "name", "number",
+                  "is_active"]
+        read_only_fields = ["id", "program_name"]
+        # DRF derives a UniqueTogetherValidator from the model's
+        # (program, number) and (program, name) constraints, so a clash
+        # already comes back as a 400 rather than a database error.
 
 
 class CourseSerializer(serializers.ModelSerializer):
@@ -206,6 +236,9 @@ class BatchSerializer(serializers.ModelSerializer):
     campus_name = serializers.CharField(source="campus.name", read_only=True)
     academic_year_code = serializers.CharField(source="academic_year.code", read_only=True)
     mentor_name = serializers.CharField(source="mentor.full_name", read_only=True, default="")
+    start_semester_name = serializers.CharField(
+        source="start_semester.name", read_only=True, default="",
+    )
 
     class Meta:
         model = Batch
@@ -213,20 +246,31 @@ class BatchSerializer(serializers.ModelSerializer):
                   "program", "program_name",
                   "campus", "campus_name",
                   "academic_year", "academic_year_code",
+                  "start_semester", "start_semester_name",
                   "mentor", "mentor_name",
                   "is_active", "created_at", "updated_at"]
         read_only_fields = ["id", "program_name", "campus_name",
-                            "academic_year_code", "mentor_name",
-                            "created_at", "updated_at"]
+                            "academic_year_code", "start_semester_name",
+                            "mentor_name", "created_at", "updated_at"]
 
 
 class SubjectSerializer(serializers.ModelSerializer):
+    program_name = serializers.CharField(
+        source="program.name", read_only=True, default="",
+    )
+    semester_name = serializers.CharField(
+        source="semester.name", read_only=True, default="",
+    )
+
     class Meta:
         model = Subject
-        fields = ["id", "name", "code", "credits",
-                  "is_elective", "is_active",
+        fields = ["id", "name", "code",
+                  "program", "program_name",
+                  "semester", "semester_name",
+                  "credits", "is_elective", "is_active",
                   "created_at", "updated_at"]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = ["id", "program_name", "semester_name",
+                            "created_at", "updated_at"]
 
 
 class ClassroomSerializer(serializers.ModelSerializer):

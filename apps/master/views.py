@@ -8,7 +8,7 @@ from apps.accounts.permissions import HasPerm
 from .models import (
     AcademicYear, Batch, Campus, City, Classroom, Course, CurriculumMapping,
     Degree, FeeTemplate, Institute, LeadSource, Program, Semester,
-    State, Subject, TimeSlot,
+    State, Subject, TimeSlot, University,
 )
 from .serializers import (
     AcademicYearSerializer,
@@ -27,6 +27,7 @@ from .serializers import (
     StateSerializer,
     SubjectSerializer,
     TimeSlotSerializer,
+    UniversitySerializer,
 )
 
 
@@ -392,9 +393,23 @@ class CurriculumMappingDetailView(_DetailBase):
 
 
 class SemesterListCreateView(_ListCreateBase):
+    """Semesters, filterable by `program`.
+
+    A semester belongs to one program, so every picker that offers
+    semesters must first know which program it is picking within.
+    """
+
     model = Semester
     serializer = SemesterSerializer
     perm_base = "master.semester"
+
+    def get(self, request):
+        qs = Semester.objects.select_related("program")
+        if request.query_params.get("active") == "1":
+            qs = qs.filter(is_active=True)
+        if program := request.query_params.get("program"):
+            qs = qs.filter(program_id=program)
+        return Response(self.serializer(qs, many=True).data)
 
 
 class SemesterDetailView(_DetailBase):
@@ -427,10 +442,43 @@ class BatchDetailView(_DetailBase):
     perm_base = "master.batch"
 
 
+class UniversityListCreateView(_ListCreateBase):
+    """Degree-awarding bodies. Reads open like the other pickers."""
+
+    model = University
+    serializer = UniversitySerializer
+    perm_base = "master.university"
+
+
+class UniversityDetailView(_DetailBase):
+    model = University
+    serializer = UniversitySerializer
+    perm_base = "master.university"
+
+
 class SubjectListCreateView(_ListCreateBase):
+    """Subjects, filterable by `program` and `semester`.
+
+    That pair is what the timetable's subject dropdown narrows on, the
+    same way the PHP schedule screen did:
+
+        select * from subject_master
+        where program_id = <program> and sem_id = <sem>
+    """
+
     model = Subject
     serializer = SubjectSerializer
     perm_base = "master.subject"
+
+    def get(self, request):
+        qs = Subject.objects.select_related("program", "semester")
+        if request.query_params.get("active") == "1":
+            qs = qs.filter(is_active=True)
+        for param in ("program", "semester"):
+            value = request.query_params.get(param)
+            if value:
+                qs = qs.filter(**{f"{param}_id": value})
+        return Response(self.serializer(qs, many=True).data)
 
 
 class SubjectDetailView(_DetailBase):

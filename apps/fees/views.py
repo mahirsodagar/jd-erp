@@ -29,7 +29,7 @@ from .serializers import (
     OtherFeeSerializer,
 )
 from .services.balance import (
-    active_fee_template, concession_ceiling, enrollment_balance,
+    concession_ceiling, enrollment_balance, resolve_fee_figures,
 )
 from .services.pdf import render_receipt_pdf
 from .services.registration import ensure_registration_installment
@@ -494,10 +494,9 @@ class ConcessionDecisionView(APIView):
         # Checked at approval time — a PENDING request can be raised for
         # any amount, it just cannot be granted past the ceiling.
         if s.validated_data["status"] == Concession.Status.APPROVED:
-            tmpl = active_fee_template(c.enrollment)
+            figures = resolve_fee_figures(c.enrollment)
             ceiling = concession_ceiling(
-                Decimal(getattr(tmpl, "total_fee", None) or 0),
-                Decimal(getattr(tmpl, "registration_fee", None) or 0),
+                figures["total_fee"], figures["registration_fee"],
             )
             already = Decimal(
                 Concession.objects.filter(

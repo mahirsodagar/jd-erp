@@ -39,6 +39,33 @@ class Institute(models.Model):
         return self.name
 
 
+class University(models.Model):
+    """The degree-awarding body a Program is affiliated to.
+
+    Normalises the free-text `Program.certification` column, whose help
+    text was literally "e.g. BESTIU, BCU, JD." Note that JD is NOT a
+    university — JD-certified programs have no university, which is the
+    same thing both institutes' 2026 terms say in writing ("our
+    institution ... does not award or confer academic degrees").
+    """
+
+    name = models.CharField(max_length=200, unique=True)
+    code = models.CharField(
+        max_length=20, unique=True,
+        help_text="Short code as used on programs, e.g. MSBCU, BESTIU.",
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("name",)
+        verbose_name_plural = "Universities"
+
+    def __str__(self):
+        return f"{self.name} ({self.code})"
+
+
 class State(models.Model):
     name = models.CharField(max_length=80, unique=True)
     code = models.CharField(
@@ -152,9 +179,17 @@ class Program(models.Model):
         help_text="Reporting / grouping only. Lead assignment rotates over "
                   "all counsellors regardless of category.",
     )
+    university = models.ForeignKey(
+        "master.University", on_delete=models.PROTECT,
+        related_name="programs", null=True, blank=True,
+        help_text="Degree-awarding body. Null for JD-certified programs, "
+                  "which no university confers.",
+    )
     certification = models.CharField(
         max_length=20, blank=True,
-        help_text="e.g. BESTIU, BCU, JD.",
+        help_text="Legacy free-text affiliation code (BESTIU, BCU, JD). "
+                  "Superseded by `university`; kept because existing rows "
+                  "and reports still read it.",
     )
     duration_months = models.PositiveSmallIntegerField(null=True, blank=True)
     description = models.TextField(blank=True)
@@ -265,16 +300,41 @@ class Degree(models.Model):
 
 
 class Semester(models.Model):
-    """Sem 1..N. Numbered for sorting."""
+    """Sem 1..N *of one Program*.
 
-    name = models.CharField(max_length=40, unique=True, help_text="e.g. Semester 1")
-    number = models.PositiveSmallIntegerField(unique=True)
+    Semesters used to be global — a single "Semester 1" row shared by
+    every program — which is why `Course.semesters` and
+    `CurriculumMapping` both had to re-state the program alongside it.
+    Each program now owns its own numbered set, so a semester implies
+    its program.
+    """
+
+    program = models.ForeignKey(
+        "master.Program", on_delete=models.CASCADE,
+        related_name="semesters", null=True, blank=True,
+        help_text="Owning program. Nullable only for rows that predate "
+                  "this field — set it on every new semester.",
+    )
+    name = models.CharField(max_length=40, help_text="e.g. Semester 1")
+    number = models.PositiveSmallIntegerField()
     is_active = models.BooleanField(default=True)
 
     class Meta:
-        ordering = ("number",)
+        ordering = ("program", "number")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["program", "number"],
+                name="uniq_semester_program_number",
+            ),
+            models.UniqueConstraint(
+                fields=["program", "name"],
+                name="uniq_semester_program_name",
+            ),
+        ]
 
     def __str__(self):
+        if self.program_id:
+            return f"{self.name} ({self.program.code})"
         return self.name
 
 
@@ -291,6 +351,14 @@ class Batch(models.Model):
     )
     academic_year = models.ForeignKey(
         AcademicYear, on_delete=models.PROTECT, related_name="batches",
+    )
+    start_semester = models.ForeignKey(
+        "master.Semester", on_delete=models.PROTECT,
+        related_name="batches_starting", null=True, blank=True,
+        help_text="Semester this cohort ENTERS at. Informational only — "
+                  "a batch persists across semesters, and a student's "
+                  "current semester lives on their Enrollment, which is "
+                  "what promotion advances.",
     )
     mentor = models.ForeignKey(
         "employees.Employee", null=True, blank=True,
@@ -312,12 +380,35 @@ class Batch(models.Model):
 
 
 class Subject(models.Model):
-    """Taught entity. The curriculum linkage — which subjects belong to
-    which Program, at which Semester, and who teaches them — is explicit
-    via `CurriculumMapping` (legacy `instur_program_sem_sub`)."""
+    """Taught entity, belonging to one (Program, Semester).
+
+    Ports legacy `subject_master`, whose columns are
+    `subject_name, subject_code, credits, program_id, sem_id, iselective`.
+    The timetable's subject dropdown filters on exactly this pair, as
+    the PHP schedule screen did:
+
+        select * from subject_master
+        where program_id = <program> and sem_id = <sem>
+
+    `CurriculumMapping` (legacy `instur_program_sem_sub`) is the separate,
+    additional table that adds the INSTRUCTOR dimension — who teaches a
+    subject. It does not replace these two fields; PHP carried both.
+    """
 
     name = models.CharField(max_length=160)
     code = models.CharField(max_length=30, unique=True)
+    program = models.ForeignKey(
+        "master.Program", on_delete=models.PROTECT,
+        related_name="subjects", null=True, blank=True,
+        help_text="Legacy `subject_master.program_id`. Nullable only for "
+                  "rows created before this field existed — set it on "
+                  "every new subject.",
+    )
+    semester = models.ForeignKey(
+        "master.Semester", on_delete=models.PROTECT,
+        related_name="subjects", null=True, blank=True,
+        help_text="Legacy `subject_master.sem_id`.",
+    )
     credits = models.PositiveSmallIntegerField(null=True, blank=True)
     is_elective = models.BooleanField(
         default=False,

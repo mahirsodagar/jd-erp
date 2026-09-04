@@ -36,11 +36,75 @@ def concession_ceiling(total_fee: Decimal, registration_fee: Decimal) -> Decimal
     return max(_zero(), total_fee - registration_fee)
 
 
+def resolve_fee_figures(enrollment) -> dict:
+    """The headline fee for an enrollment, with a fallback.
+
+    Preferred source is the active FeeTemplate for (academic_year,
+    campus, program). That lookup can legitimately come up empty — the
+    template was deactivated, the fee was revised into a new row, or the
+    enrollment was moved to a campus/program the template doesn't cover.
+
+    When it does, a zero total made `payable` zero too, so `balance`
+    (payable − paid) went NEGATIVE the moment any money was received, and
+    the fee report showed a 0 total against a minus due. So fall back to
+    the schedule the enrollment actually carries: Σ installments +
+    Σ approved concessions, which is the same identity the fee
+    undertaking PDF prints (installments + concession = total fee), with
+    the REGISTRATION row standing in for the template's registration_fee.
+
+    Returns total_fee, registration_fee, the concession total that went
+    into the fallback, and `source` — "template" or "schedule" — so
+    callers can tell a real zero from an unresolved one.
+    """
+    tmpl = active_fee_template(enrollment)
+    total_fee = _decimal(getattr(tmpl, "total_fee", None))
+    registration_fee = _decimal(getattr(tmpl, "registration_fee", None))
+
+    concession_total = _decimal(
+        Concession.objects.filter(
+            enrollment=enrollment, status=Concession.Status.APPROVED,
+        ).aggregate(s=Sum("amount"))["s"]
+    )
+    reg_rows = Installment.objects.filter(
+        enrollment=enrollment, kind=Installment.Kind.REGISTRATION,
+    )
+    registration_due = _decimal(reg_rows.aggregate(s=Sum("amount"))["s"])
+
+    source = "template"
+    if total_fee <= _zero():
+        scheduled = _decimal(
+            Installment.objects.filter(enrollment=enrollment)
+            .aggregate(s=Sum("amount"))["s"]
+        )
+        if scheduled > _zero():
+            source = "schedule"
+            total_fee = scheduled + concession_total
+            # The template is what normally carries registration_fee; with
+            # no template, the row on the schedule is the only record of it.
+            if registration_fee <= _zero():
+                registration_fee = registration_due
+
+    return {
+        "template": tmpl,
+        "total_fee": total_fee,
+        "registration_fee": registration_fee,
+        "concession_total": concession_total,
+        "registration_due": registration_due,
+        "reg_rows": reg_rows,
+        "source": source,
+    }
+
+
 def enrollment_balance(enrollment) -> dict:
     """Headline numbers for an enrollment:
 
       total_fee            — from the active FeeTemplate matching
-                              (academic_year, campus, program).
+                              (academic_year, campus, program), falling
+                              back to the enrollment's own schedule when
+                              no template resolves. See
+                              resolve_fee_figures().
+      total_fee_source     — "template" or "schedule": which of the two
+                              the total came from.
       registration_fee     — the template's mandatory yearly charge. It is
                               carved OUT of total_fee, never added to it.
       concession_total     — sum of approved concessions (raw).
@@ -58,15 +122,12 @@ def enrollment_balance(enrollment) -> dict:
                               registration_due means the schedule has not
                               been built yet.
     """
-    tmpl = active_fee_template(enrollment)
-    total_fee = _decimal(getattr(tmpl, "total_fee", None))
-    registration_fee = _decimal(getattr(tmpl, "registration_fee", None))
+    figures = resolve_fee_figures(enrollment)
+    tmpl = figures["template"]
+    total_fee = figures["total_fee"]
+    registration_fee = figures["registration_fee"]
+    concession_total = figures["concession_total"]
 
-    concession_total = _decimal(
-        Concession.objects.filter(
-            enrollment=enrollment, status=Concession.Status.APPROVED,
-        ).aggregate(s=Sum("amount"))["s"]
-    )
     concession_applied = min(
         concession_total, concession_ceiling(total_fee, registration_fee),
     )
@@ -78,10 +139,8 @@ def enrollment_balance(enrollment) -> dict:
     )
     payable = total_fee - concession_applied
 
-    reg_rows = Installment.objects.filter(
-        enrollment=enrollment, kind=Installment.Kind.REGISTRATION,
-    )
-    registration_due = _decimal(reg_rows.aggregate(s=Sum("amount"))["s"])
+    reg_rows = figures["reg_rows"]
+    registration_due = figures["registration_due"]
     registration_paid = _decimal(
         FeeReceipt.objects.filter(
             installment__in=reg_rows, status=FeeReceipt.Status.ACTIVE,
@@ -92,6 +151,7 @@ def enrollment_balance(enrollment) -> dict:
         "fee_template_id": getattr(tmpl, "id", None),
         "fee_template_name": getattr(tmpl, "name", None),
         "total_fee": str(total_fee),
+        "total_fee_source": figures["source"],
         "registration_fee": str(registration_fee),
         "concession_total": str(concession_total),
         "concession_applied": str(concession_applied),
