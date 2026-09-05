@@ -254,6 +254,109 @@ def _upsert_documents(
             obj.file.save(getattr(f, "name", "certificate"), f, save=True)
 
 
+def _sync_lead_placement(*, lead: Lead, campus, program) -> bool:
+    """Move the Lead onto the placement the application form asked for.
+
+    The lead list and detail page read `Lead.program` / `Lead.campus`
+    directly, so overwriting them is what makes a counsellor see the
+    student's actual choice rather than the one they keyed in weeks ago.
+    The previous values are not lost — they are written into the lead
+    timeline as a note. Returns True when something moved.
+    """
+    changed = []
+    if program is not None and lead.program_id != program.pk:
+        changed.append(
+            f"Program {lead.program.name if lead.program_id else '—'} "
+            f"→ {program.name}"
+        )
+        lead.program = program
+    if campus is not None and lead.campus_id != campus.pk:
+        changed.append(
+            f"Campus {lead.campus.name if lead.campus_id else '—'} "
+            f"→ {campus.name}"
+        )
+        lead.campus = campus
+    if not changed:
+        return False
+
+    lead.save(update_fields=["program", "campus", "updated_at"])
+    from apps.leads.services import record_note
+    record_note(
+        lead=lead,
+        note=f"{'; '.join(changed)} (changed by the student on the application form).",
+        changed_by=None,
+    )
+    return True
+
+
+def current_enrollment(student: Student):
+    """The Enrollment that says where the student actually is today.
+
+    Batch promotion leaves the old row behind with status PROMOTED, so a
+    student accumulates rows over time. The live one is the newest
+    ACTIVE/PENDING enrollment; when none is live (dropped out, graduated)
+    we fall back to the newest row of any status so the profile still
+    shows where they were rather than falling back to the application.
+    """
+    qs = Enrollment.objects.filter(student=student).select_related(
+        "program", "program__institute", "campus",
+    )
+    return (
+        qs.filter(status__in=(
+            Enrollment.Status.ACTIVE, Enrollment.Status.PENDING,
+        )).order_by("-created_on").first()
+        or qs.order_by("-created_on").first()
+    )
+
+
+def sync_student_placement_from_enrollment(student: Student, *, actor=None) -> bool:
+    """Pull the Student's program/campus/institute up from their current
+    Enrollment.
+
+    Enrollment is where the student really is — fees, attendance, exams
+    and certificates all resolve against it. `Student.program` is what
+    the profile, the student list and the application PDF print, so it
+    has to follow, or HR reads one program on the profile and another on
+    every document. Returns True when something moved.
+    """
+    enrollment = current_enrollment(student)
+    if enrollment is None:
+        return False
+
+    changed = []
+    if student.program_id != enrollment.program_id:
+        changed.append(
+            f"Program {student.program.name if student.program_id else '—'} "
+            f"→ {enrollment.program.name}"
+        )
+        student.program = enrollment.program
+        # Institute is derived from the program everywhere else, so it
+        # has to move with it or the student ends up filed under an
+        # institute that doesn't run their course.
+        if enrollment.program.institute_id:
+            student.institute = enrollment.program.institute
+    if student.campus_id != enrollment.campus_id:
+        changed.append(
+            f"Campus {student.campus.name if student.campus_id else '—'} "
+            f"→ {enrollment.campus.name}"
+        )
+        student.campus = enrollment.campus
+    if not changed:
+        return False
+
+    student.updated_by = actor or student.updated_by
+    student.save(update_fields=[
+        "program", "campus", "institute", "updated_by", "updated_on",
+    ])
+    from .models import StudentRemark
+    StudentRemark.objects.create(
+        student=student,
+        note=f"{'; '.join(changed)} (synced from enrolment #{enrollment.id}).",
+        created_by=actor,
+    )
+    return True
+
+
 @transaction.atomic
 def submit_application_from_lead(*, lead: Lead, payload: dict) -> tuple[Student, dict]:
     """Create or update the Student tied to this Lead from the self-fill
@@ -281,29 +384,39 @@ def submit_application_from_lead(*, lead: Lead, payload: dict) -> tuple[Student,
         raise ValueError("This application link is no longer valid.")
 
     # --- Resolve placement -------------------------------------------------
+    # Defaults come from the Student when one already exists, and only
+    # fall back to the Lead on a first submit. A partial re-submit that
+    # omits campus/program must leave the placement alone, not silently
+    # rewind it to whatever the counsellor originally picked.
     from apps.master.models import AcademicYear, Campus, Program
-    campus = lead.campus
+    existing_student = getattr(lead, "promoted_student", None)
+    campus = (existing_student.campus if existing_student else None) or lead.campus
     if payload.get("campus"):
         try:
             campus = Campus.objects.get(pk=payload["campus"])
         except Campus.DoesNotExist:
             raise ValueError("Selected campus does not exist.")
-    program = lead.program
+    program = (existing_student.program if existing_student else None) or lead.program
     if payload.get("program"):
         try:
             program = Program.objects.get(pk=payload["program"])
         except Program.DoesNotExist:
             raise ValueError("Selected program does not exist.")
-        if not program.campuses.filter(pk=campus.pk).exists():
-            raise ValueError(
-                f"Program '{program.name}' is not offered at "
-                f"campus '{campus.name}'.",
-            )
 
     # The program carries the institute (legacy `program_master.inst_id`).
     if program is None:
         raise ValueError(
             "No program selected; the program determines the institute.",
+        )
+
+    # Validate the pair whenever the form touched either half — changing
+    # only the campus can strand an otherwise-valid program just as
+    # easily as changing only the program.
+    if (payload.get("program") or payload.get("campus")) \
+            and not program.campuses.filter(pk=campus.pk).exists():
+        raise ValueError(
+            f"Program '{program.name}' is not offered at "
+            f"campus '{campus.name}'.",
         )
     institute = program.institute
     if institute is None:
@@ -316,8 +429,13 @@ def submit_application_from_lead(*, lead: Lead, payload: dict) -> tuple[Student,
     if acad_year is None:
         raise ValueError("No current AcademicYear is set; create one first.")
 
+    # The application form is the student's own word on what they are
+    # applying for, so it supersedes the counsellor's pick and the lead
+    # moves with it. The original stays readable in the lead timeline.
+    _sync_lead_placement(lead=lead, campus=campus, program=program)
+
     # --- Update path: Student already exists for this lead -----------------
-    existing = getattr(lead, "promoted_student", None)
+    existing = existing_student
     if existing is not None:
         _apply_payload_to_student(
             existing, payload,
@@ -525,6 +643,10 @@ def promote_batch(
         # inside the same year a no-op rather than a double charge. The
         # rest of the year's schedule is still built by HR.
         registration = ensure_registration_installment(new, actor=actor)
+
+        # A promotion can move the student across programs/campuses when
+        # the target batch belongs to a different one — carry it up.
+        sync_student_placement_from_enrollment(old.student, actor=actor)
 
         promoted.append({
             "student_id": old.student_id,

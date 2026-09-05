@@ -241,6 +241,21 @@ def change_status(*, lead: Lead, new_status: str, changed_by, note: str = "") ->
     return lead
 
 
+def record_note(*, lead: Lead, note: str, changed_by=None) -> LeadStatusHistory:
+    """Append a note to the lead timeline without moving the status.
+
+    `LeadStatusHistory` is the only append-only log the lead detail page
+    renders, so events that change the lead but not its stage — a program
+    swap made on the application form, say — land here too. `old_status`
+    stays blank, which is what tells the UI to draw a single pill instead
+    of an `A → B` transition.
+    """
+    return LeadStatusHistory.objects.create(
+        lead=lead, old_status="", new_status=lead.status,
+        changed_by=changed_by, note=note[:400],
+    )
+
+
 def has_recent_outcome(lead: Lead) -> bool:
     """True if a follow-up with an outcome_category has been logged AFTER
     the most recent status-history entry. Used by the status-progression

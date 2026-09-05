@@ -188,6 +188,42 @@ def _fee_structures() -> list[dict]:
     return list(rows.values())
 
 
+# The bucket that holds every program no university confers. It is not a
+# University row and must never become one — both institutes' 2026 terms
+# say in writing that JD "does not award or confer academic degrees". It
+# exists so the 40-odd JD-certified programs remain reachable from a
+# form whose first question is "which university?".
+JD_UNIVERSITY = {
+    "id": None,
+    "code": "JD",
+    "name": "JD Certified (no university affiliation)",
+}
+
+
+def _university_options(programs: list[dict]) -> list[dict]:
+    """The university dropdown, derived from the programs actually on
+    offer so no option can be picked into an empty program list.
+
+    Ordered alphabetically with the JD bucket pinned last — it is the
+    catch-all, not a peer of the degree-awarding bodies.
+    """
+    seen: dict[int, dict] = {}
+    has_jd = False
+    for p in programs:
+        if p["university"] is None:
+            has_jd = True
+            continue
+        seen.setdefault(p["university"], {
+            "id": p["university"],
+            "code": p["university_code"],
+            "name": p["university_name"],
+        })
+    options = sorted(seen.values(), key=lambda u: u["name"])
+    if has_jd:
+        options.append(dict(JD_UNIVERSITY))
+    return options
+
+
 def _prefill(lead: Lead) -> dict:
     """Minimal payload the public form needs — never leaks lead status,
     history, internal ids beyond what the student already typed."""
@@ -197,10 +233,14 @@ def _prefill(lead: Lead) -> dict:
     # Program dropdown by selected Campus.
     # `institute` rides on the program because that is where it lives —
     # the form reads it off the selected program for branding/terms.
+    # `university` is the degree-awarding body the student picks first;
+    # it is NULL for JD-certified programs, which is a real answer
+    # ("JD does not award or confer academic degrees") rather than
+    # missing data — see the `University` model docstring.
     programs = []
     for p in (
         Program.objects.filter(is_active=True)
-        .select_related("institute")
+        .select_related("institute", "university")
         .prefetch_related("campuses")
         .order_by("name")
     ):
@@ -210,7 +250,12 @@ def _prefill(lead: Lead) -> dict:
             "institute": p.institute_id,
             "institute_code": p.institute.code if p.institute_id else "",
             "institute_name": p.institute.name if p.institute_id else "",
+            "university": p.university_id,
+            "university_code": p.university.code if p.university_id else JD_UNIVERSITY["code"],
+            "university_name": p.university.name if p.university_id else JD_UNIVERSITY["name"],
         })
+
+    universities = _university_options(programs)
 
     # If the student already submitted once, send their saved values
     # so the form can prefill for editing.
@@ -304,6 +349,9 @@ def _prefill(lead: Lead) -> dict:
             .values("id", "name", "code").order_by("name")
         ),
         "programs": programs,
+        # Asked before Program — a student knows which university's
+        # degree they want long before they know our program codes.
+        "universities": universities,
         # Headline fee numbers per (campus, program) — the form shows the
         # one matching the student's current selection.
         "fee_structures": _fee_structures(),

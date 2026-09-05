@@ -23,6 +23,7 @@ from .serializers import (
 from .services import (
     can_enroll, graduate_batch, promote_batch,
     provision_student_portal_credentials,
+    sync_student_placement_from_enrollment,
 )
 from .services_handbook import send_handbook_email
 from .services_portal_email import send_portal_credentials_email
@@ -306,7 +307,11 @@ class EnrollmentListCreateView(APIView):
         ok, msg = can_enroll(student)
         if not ok:
             return Response({"detail": msg}, status=http.HTTP_400_BAD_REQUEST)
-        s.save(entry_user=request.user)
+        with transaction.atomic():
+            s.save(entry_user=request.user)
+            # Enrolling into a different program than the one applied for
+            # is allowed and common; the student profile has to follow it.
+            sync_student_placement_from_enrollment(student, actor=request.user)
         return Response(s.data, status=http.HTTP_201_CREATED)
 
 
@@ -334,7 +339,9 @@ class EnrollmentDetailView(APIView):
         obj = self._obj(pk)
         s = EnrollmentSerializer(obj, data=request.data, partial=True)
         s.is_valid(raise_exception=True)
-        s.save()
+        with transaction.atomic():
+            s.save()
+            sync_student_placement_from_enrollment(obj.student, actor=request.user)
         return Response(s.data)
 
 
