@@ -253,7 +253,7 @@ class PortalFeeTests(TestCase):
         self.assertEqual(receipt.enrollment, self.enrollment)
         self.assertEqual(receipt.payment_mode, FeeReceipt.PaymentMode.ONLINE)
         self.assertEqual(receipt.instrument_ref, order.order_id)
-        self.assertTrue(receipt.receipt_no.startswith("RCP-MAIN-"))
+        self.assertTrue(receipt.receipt_no.startswith("JDMAIN"))
         # No human received it.
         self.assertIsNone(receipt.received_by)
 

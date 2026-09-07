@@ -80,8 +80,15 @@ class UniversityAdmin(admin.ModelAdmin):
 
 @admin.register(Institute)
 class InstituteAdmin(admin.ModelAdmin):
-    list_display = ("name", "code", "is_active")
-    search_fields = ("name", "code")
+    list_display = ("name", "code", "gstin", "is_active")
+    search_fields = ("name", "code", "gstin")
+    fieldsets = (
+        (None, {"fields": ("name", "code", "logo", "email_domain", "is_active")}),
+        ("Letterhead (printed on fee receipts)", {
+            "fields": ("letterhead_title", "address", "phone", "email",
+                       "gstin", "payee_name"),
+        }),
+    )
 
 
 @admin.register(State)

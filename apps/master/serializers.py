@@ -109,8 +109,9 @@ class UniversitySerializer(serializers.ModelSerializer):
 class InstituteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Institute
-        fields = ["id", "name", "code", "logo", "email_domain", "is_active",
-                  "created_at", "updated_at"]
+        fields = ["id", "name", "code", "logo", "email_domain",
+                  "letterhead_title", "address", "phone", "email", "gstin",
+                  "payee_name", "is_active", "created_at", "updated_at"]
         read_only_fields = ["id", "created_at", "updated_at"]
 
 

@@ -28,6 +28,32 @@ class Institute(models.Model):
             "lowercased."
         ),
     )
+    # --- Letterhead ----------------------------------------------------
+    # Printed at the top of the fee receipt (and any future invoice). Kept
+    # on the institute rather than in settings because the two entities
+    # bill from different addresses under different GSTINs, and finance
+    # changes these without a deploy.
+    letterhead_title = models.CharField(
+        max_length=80, blank=True,
+        help_text="Line above the address block, e.g. 'Corporate Center'.",
+    )
+    address = models.TextField(
+        blank=True,
+        help_text="Billing address, one line per line. Printed as-is.",
+    )
+    phone = models.CharField(max_length=40, blank=True)
+    email = models.EmailField(blank=True)
+    gstin = models.CharField(
+        max_length=20, blank=True,
+        help_text="Printed on receipts. Blank = the GSTIN line is omitted.",
+    )
+    payee_name = models.CharField(
+        max_length=160, blank=True,
+        help_text="Legal entity cheques/DDs are drawn in favour of — e.g. "
+                  "'JD Educational Trust'. Blank falls back to the "
+                  "institute name.",
+    )
+
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -37,6 +63,10 @@ class Institute(models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def cheque_payee(self) -> str:
+        return self.payee_name.strip() or self.name
 
 
 class University(models.Model):
