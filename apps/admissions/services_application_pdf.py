@@ -44,6 +44,15 @@ def _safe(text) -> str:
     return s.encode("latin-1", "replace").decode("latin-1")
 
 
+def _fmt_aadhaar(value: str) -> str:
+    """Print Aadhaar in the 4-4-4 grouping people expect. Anything that
+    isn't a full 12 digits is printed as-is rather than mis-grouped."""
+    digits = "".join(c for c in (value or "") if c.isdigit())
+    if len(digits) != 12:
+        return value or ""
+    return f"{digits[:4]} {digits[4:8]} {digits[8:]}"
+
+
 def _fmt_date(value, fmt: str = "%d-%b-%Y") -> str:
     """Format a date/datetime, tolerating one that is still a string.
 
@@ -328,6 +337,7 @@ def render_application_pdf(student: Student) -> bytes:
         ("Category", student.get_category_display()),
         ("Study medium", student.get_study_medium_display()),
         ("Nationality", student.get_nationality_display()),
+        ("Aadhaar", _fmt_aadhaar(student.aadhaar_number)),
         ("Blood group", student.blood_group),
     ])
 

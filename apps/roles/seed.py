@@ -512,6 +512,10 @@ CATALOGUE = [
     ("dashboard", "dashboard.sessions.view", "See my sessions for today"),
     ("dashboard", "dashboard.sessions.view_all", "See everyone's sessions for today"),
     ("dashboard", "dashboard.leads.view", "See lead stats and the priority review list"),
+    # Own-data counterpart to the tile above: counts only leads whose
+    # `assign_to` is the caller, so a counsellor can be given their own
+    # figure without the institute-wide one.
+    ("dashboard", "dashboard.my_leads.view", "See the count of active leads assigned to me"),
     ("dashboard", "dashboard.enrollments.view", "See the active enrolments count"),
     ("dashboard", "dashboard.students.view", "See the total students count"),
     ("dashboard", "dashboard.engagement.view", "See the engagement metrics chart"),

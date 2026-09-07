@@ -100,6 +100,7 @@ class ApplicationFormView(APIView):
                 "study_medium_display": _MEDIUM.get(s.study_medium, s.study_medium),
                 "nationality": s.nationality,
                 "nationality_display": _NATIONALITY.get(s.nationality, s.nationality),
+                "aadhaar_number": s.aadhaar_number,
                 "blood_group": s.blood_group,
             },
             "family": {

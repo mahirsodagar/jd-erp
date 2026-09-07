@@ -8,6 +8,14 @@ PHONE = RegexValidator(
     message="Phone must be in international format (e.g. +919900112233).",
 )
 
+# UIDAI numbers are 12 digits and never start with 0 or 1. Stored without
+# spaces so a search matches however the student typed it; the UI adds the
+# 4-4-4 grouping back for display.
+AADHAAR = RegexValidator(
+    regex=r"^[2-9]\d{11}$",
+    message="Aadhaar must be 12 digits and cannot start with 0 or 1.",
+)
+
 
 class Student(models.Model):
     """Personal data + parents + addresses + program/campus context.
@@ -78,6 +86,14 @@ class Student(models.Model):
         max_length=1, choices=StudyMedium.choices, default=StudyMedium.ENGLISH,
     )
     nationality = models.CharField(max_length=10, choices=Nationality.choices)
+    # Government ID. Optional: overseas applicants have none, and the
+    # number often arrives later than the rest of the form. Not unique —
+    # a duplicate means two rows for one person, which is a data-quality
+    # question for staff rather than something to block a submit on.
+    aadhaar_number = models.CharField(
+        max_length=12, blank=True, db_index=True, validators=[AADHAAR],
+        help_text="12-digit UIDAI number, stored unformatted.",
+    )
     blood_group = models.CharField(max_length=5, choices=BloodGroup.choices, blank=True)
 
     # Academic placement (program/campus chosen at application)

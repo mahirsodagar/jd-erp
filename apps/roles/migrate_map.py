@@ -303,6 +303,11 @@ EVERY_ROLE: tuple[str, ...] = (
 #: profile. What the Batch Report pass fixed was the roster handing them
 #: out on `academics.batch_report.view` ALONE.
 INTENTIONALLY_NOT_BACKFILLED: dict[str, str] = {
+    # New tile with no pre-split equivalent. Backfilling it from
+    # `leads.lead.view` would put an "Assigned Leads" card on the
+    # dashboard of every role that can read leads, which nobody asked
+    # for — it is granted per-role from the Roles page instead.
+    "dashboard.my_leads.view": "new tile; no pre-split equivalent",
     # Editing / deleting someone else's 0-Hour report was superuser-only,
     # so no pre-split permission implied it.
     "academics.zero_hour.edit_any": "was superuser-only",

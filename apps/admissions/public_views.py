@@ -11,6 +11,7 @@ apps/leads/views.py — once closed, POSTs here return 403.
 """
 
 import json
+import re
 
 from django.http import Http404
 from rest_framework import status as http
@@ -95,6 +96,12 @@ class PublicApplicationView(APIView):
             "category": request.data.get("category"),
             "study_medium": request.data.get("study_medium"),
             "nationality": request.data.get("nationality"),
+            # Students type Aadhaar as "1234 5678 9012" or with dashes;
+            # store the digits so the stored value is searchable however
+            # it was keyed in.
+            "aadhaar_number": re.sub(
+                r"\D", "", request.data.get("aadhaar_number", "") or "",
+            ),
             "blood_group": request.data.get("blood_group", ""),
             "current_address": request.data.get("current_address", ""),
             "current_city": _int_or_none("current_city"),
@@ -273,6 +280,7 @@ def _prefill(lead: Lead) -> dict:
             "category": existing.category,
             "study_medium": existing.study_medium,
             "nationality": existing.nationality,
+            "aadhaar_number": existing.aadhaar_number,
             "blood_group": existing.blood_group,
             "current_address": existing.current_address,
             "current_city": existing.current_city_id,

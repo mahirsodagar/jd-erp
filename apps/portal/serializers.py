@@ -29,7 +29,8 @@ class PortalProfileSerializer(serializers.ModelSerializer):
         model = Student
         fields = [
             "id", "application_form_id", "student_name",
-            "gender", "dob", "nationality", "blood_group", "category",
+            "gender", "dob", "nationality", "aadhaar_number", "blood_group",
+            "category",
             "father_name", "mother_name",
             "father_mobile", "mother_mobile",
             "father_email", "mother_email",

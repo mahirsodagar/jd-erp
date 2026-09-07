@@ -133,7 +133,7 @@ def promote_lead_to_student(*, lead: Lead, actor=None) -> tuple[Student, dict]:
 
 _STUDENT_TEXT_FIELDS = (
     "student_name", "father_name", "mother_name",
-    "blood_group",
+    "aadhaar_number", "blood_group",
     "current_address", "current_pincode",
     "permanent_address", "permanent_pincode",
     "father_mobile", "mother_mobile",
@@ -472,6 +472,7 @@ def submit_application_from_lead(*, lead: Lead, payload: dict) -> tuple[Student,
         category=payload.get("category") or Student.Category.GENERAL,
         study_medium=payload.get("study_medium") or Student.StudyMedium.ENGLISH,
         nationality=payload.get("nationality") or Student.Nationality.INDIAN,
+        aadhaar_number=payload.get("aadhaar_number", ""),
         blood_group=payload.get("blood_group", ""),
         institute=institute,
         campus=campus,
