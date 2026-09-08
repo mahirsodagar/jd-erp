@@ -84,8 +84,9 @@ class InstituteAdmin(admin.ModelAdmin):
     search_fields = ("name", "code", "gstin")
     fieldsets = (
         (None, {"fields": ("name", "code", "logo", "email_domain", "is_active")}),
-        ("Letterhead (printed on fee receipts)", {
-            "fields": ("letterhead_title", "address", "phone", "email",
+        ("Letterhead (printed on fee receipts + undertakings)", {
+            "fields": ("letterhead_placement", "signature",
+                       "letterhead_title", "address", "phone", "email",
                        "gstin", "payee_name"),
         }),
     )

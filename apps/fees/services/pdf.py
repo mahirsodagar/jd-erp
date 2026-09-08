@@ -24,10 +24,12 @@ from apps.common.pdf_theme import (
     BODY_W as _BODY_W,
     MARGIN as _MARGIN,
     PAGE_W as _PAGE_W,
+    SERIF,
     draw_letterhead_block,
     draw_logo,
     draw_policy_page,
     fit as _fit,
+    prints_right,
     rule as _rule,
     safe as _safe,
 )
@@ -98,36 +100,57 @@ def amount_in_words(value) -> str:
 # --- Small drawing helpers ---------------------------------------------
 
 def _label_value(pdf: FPDF, label: str, value: str, *,
-                 bullet: bool = True, line_h: float = 5.0) -> None:
+                 line_h: float = 5.0, right: bool = False) -> None:
     """`• Label : value` with the label bold, wrapping the value across
     lines at the body width (addresses run long).
 
     The bullet is drawn as a filled dot rather than typed: Helvetica's
     built-in encoding is Latin-1 and has no U+2022.
+
+    `right` sets the row hard against the right margin — the name rows
+    and "Issued By" sit there on the right-placement stationery.
     """
-    indent = 6.0 if bullet else 0.0
-    if bullet:
-        pdf.set_fill_color(0, 0, 0)
-        pdf.ellipse(_MARGIN + 2, pdf.get_y() + line_h / 2 - 0.6, 1.2, 1.2,
-                    style="F")
-    pdf.set_x(_MARGIN + indent)
+    bullet_w = 6.0
     pdf.set_font("Helvetica", "B", 9)
-    lead_w = pdf.get_string_width(label) + 1
-    pdf.cell(lead_w, line_h, _safe(label))
+    label_w = pdf.get_string_width(_safe(label)) + 1
     pdf.set_font("Helvetica", "", 9)
-    pdf.multi_cell(_BODY_W - indent - lead_w, line_h, _safe(value),
-                   new_x="LMARGIN", new_y="NEXT")
+
+    if right:
+        # Bullet, label and value form one right-aligned unit ending at
+        # the margin. The value column gets a hair more than the string
+        # needs, or multi_cell wraps a name that in fact fits.
+        wrap_w = pdf.get_string_width(_safe(value)) + 2
+        start = max(_MARGIN, _PAGE_W - _MARGIN - bullet_w - label_w - wrap_w)
+        wrap_w = _PAGE_W - _MARGIN - start - bullet_w - label_w
+    else:
+        start = _MARGIN
+        wrap_w = _BODY_W - bullet_w - label_w
+
+    pdf.set_fill_color(0, 0, 0)
+    pdf.ellipse(start + 2, pdf.get_y() + line_h / 2 - 0.6, 1.2, 1.2, style="F")
+    pdf.set_x(start + bullet_w)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(label_w, line_h, _safe(label))
+    pdf.set_font("Helvetica", "", 9)
+    pdf.multi_cell(wrap_w, line_h, _safe(value), new_x="LMARGIN", new_y="NEXT")
 
 
 # --- Header ------------------------------------------------------------
 
 def _draw_letterhead(pdf: FPDF, institute) -> None:
-    """Logo top-left, billing block top-right."""
+    """Logo top-left, with the billing block either underneath it or
+    opposite it, per the institute's stationery."""
     top = 12.0
     logo_bottom = draw_logo(pdf, institute, x=_MARGIN, y=top, height=16)
-    text_bottom = draw_letterhead_block(
-        pdf, institute, x=_PAGE_W - _MARGIN - 90, y=top,
-    )
+    if prints_right(institute):
+        text_bottom = draw_letterhead_block(
+            pdf, institute, x=_PAGE_W - _MARGIN - 90, y=top, align="R",
+        )
+    else:
+        text_bottom = draw_letterhead_block(
+            pdf, institute, x=_MARGIN, y=logo_bottom + 1, width=_BODY_W,
+            align="L",
+        )
     pdf.set_y(max(logo_bottom, text_bottom) + 4)
 
 
@@ -231,7 +254,7 @@ def _draw_receipt_page(pdf: FPDF, receipt) -> None:
 
     _draw_letterhead(pdf, institute)
 
-    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_font(SERIF, "B", 12)
     pdf.cell(0, 8, "INVOICE", align="C", new_x="LMARGIN", new_y="NEXT")
     _rule(pdf)
 
@@ -269,18 +292,21 @@ def _draw_receipt_page(pdf: FPDF, receipt) -> None:
     if student.current_pincode:
         address = f"{address} -{student.current_pincode}".strip()
 
+    # On the right-placement stationery the two name rows and "Issued By"
+    # sit against the right margin while everything else stays left.
+    names_right = prints_right(institute)
     rows = [
-        ("Student ID : ", student.registration_number or student.application_form_id),
-        ("Academic Year : ", (year.full_name or year.code) if year else ""),
-        ("Address : ", address),
-        ("Phone : ", student.student_mobile),
-        ("Course Name : ", course),
-        ("Student Name : ", student.student_name),
-        ("Father's Name : ", student.father_name),
+        ("Student ID : ", student.registration_number or student.application_form_id, False),
+        ("Academic Year : ", (year.full_name or year.code) if year else "", False),
+        ("Address : ", address, False),
+        ("Phone : ", student.student_mobile, False),
+        ("Course Name : ", course, False),
+        ("Student Name : ", student.student_name, names_right),
+        ("Father's Name : ", student.father_name, names_right),
     ]
-    for label, value in rows:
+    for label, value, right in rows:
         if value:
-            _label_value(pdf, label, value)
+            _label_value(pdf, label, value, right=right)
 
     pdf.ln(3)
     _draw_payment_table(pdf, receipt)
@@ -291,7 +317,7 @@ def _draw_receipt_page(pdf: FPDF, receipt) -> None:
     if receipt.received_by_id:
         issued_by = receipt.received_by.full_name or receipt.received_by.username
     if issued_by:
-        _label_value(pdf, "Issued By : ", issued_by)
+        _label_value(pdf, "Issued By : ", issued_by, right=names_right)
 
     if receipt.status == receipt.Status.CANCELLED:
         pdf.ln(3)

@@ -29,10 +29,33 @@ class Institute(models.Model):
         ),
     )
     # --- Letterhead ----------------------------------------------------
-    # Printed at the top of the fee receipt (and any future invoice). Kept
-    # on the institute rather than in settings because the two entities
-    # bill from different addresses under different GSTINs, and finance
+    # Printed on the fee receipt and the fee undertaking. Kept on the
+    # institute rather than in settings because the two entities bill
+    # from different addresses under different GSTINs, and finance
     # changes these without a deploy.
+
+    class LetterheadPlacement(models.TextChoices):
+        LEFT = "LEFT", "Under the logo, left-aligned"
+        RIGHT = "RIGHT", "Opposite the logo, right-aligned"
+
+    letterhead_placement = models.CharField(
+        max_length=5, choices=LetterheadPlacement.choices,
+        default=LetterheadPlacement.LEFT,
+        help_text=(
+            "Which of the two printed stationery layouts this institute "
+            "uses. LEFT puts the address block under the logo and the "
+            "undertaking footer at the left margin. RIGHT sets the "
+            "address opposite the logo, the undertaking footer at the "
+            "right margin, and — matching the printed JD School of "
+            "Design receipt — right-aligns the student/father name rows "
+            "and 'Issued By'."
+        ),
+    )
+    signature = models.ImageField(
+        upload_to="institute/signatures/", blank=True, null=True,
+        help_text="Authorised signatory's signature. Printed in that box "
+                  "on the undertaking; receipts are always left unsigned.",
+    )
     letterhead_title = models.CharField(
         max_length=80, blank=True,
         help_text="Line above the address block, e.g. 'Corporate Center'.",

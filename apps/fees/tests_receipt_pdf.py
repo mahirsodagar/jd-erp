@@ -125,6 +125,16 @@ class RenderTests(TestCase):
         self.assertTrue(out.startswith(b"%PDF"))
         self.assertNotIn(b"/Subtype /Image", out)
 
+    def test_both_stationery_variants_render(self):
+        """Placement changes where the letterhead and the name rows sit;
+        both layouts must come out of the same renderer."""
+        for placement in (Institute.LetterheadPlacement.LEFT,
+                          Institute.LetterheadPlacement.RIGHT):
+            with self.subTest(placement=placement):
+                base = _fixture(placement=placement)
+                r = _receipt(base, amount=Decimal("75000"))
+                self.assertTrue(render_receipt_pdf(r).startswith(b"%PDF"))
+
     def test_renders_cancelled(self):
         base = _fixture()
         r = _receipt(base, status=FeeReceipt.Status.CANCELLED,
@@ -143,9 +153,14 @@ def _png_bytes() -> bytes:
     return buf.getvalue()
 
 
-def _fixture(*, gstin="", payee_name="", letterhead=True, degree_type="Diploma"):
+def _fixture(*, gstin="", payee_name="", letterhead=True, degree_type="Diploma",
+             placement=Institute.LetterheadPlacement.LEFT):
+    # Suffixed so a test can build two institutes (the placement
+    # variants) without tripping the unique codes.
+    n = Institute.objects.count() or ""
     institute = Institute.objects.create(
-        name="JD Institute of Fashion Technology", code="JDI",
+        name=f"JD Institute of Fashion Technology{n}", code=f"JDI{n}",
+        letterhead_placement=placement,
         letterhead_title="Corporate Center" if letterhead else "",
         address="#40, Swan house, 4th cross,\nResidency Road, Bangalore-560025"
                 if letterhead else "",
@@ -153,26 +168,32 @@ def _fixture(*, gstin="", payee_name="", letterhead=True, degree_type="Diploma")
         email="jdfashion@jdindia.com" if letterhead else "",
         gstin=gstin, payee_name=payee_name,
     )
-    campus = Campus.objects.create(name="Bangalore", code="BNG")
+    campus, _ = Campus.objects.get_or_create(
+        code="BNG", defaults={"name": "Bangalore"},
+    )
     program = Program.objects.create(
-        name="Diploma in Fashion Business Management", code="DFBM",
+        name=f"Diploma in Fashion Business Management{n}", code=f"DFBM{n}",
         institute=institute, degree_type=degree_type,
     )
-    year = AcademicYear.objects.create(
-        code="2026-27", full_name="2026-27", start_date=date(2026, 6, 1),
-        end_date=date(2027, 5, 31),
+    year, _ = AcademicYear.objects.get_or_create(
+        code="2026-27", defaults={
+            "full_name": "2026-27", "start_date": date(2026, 6, 1),
+            "end_date": date(2027, 5, 31),
+        },
     )
     student = Student.objects.create(
+        application_form_id=f"JDI-2026-{Student.objects.count():04d}",
         student_name="Anjalishree BK", father_name="BK Prasanna Kumar",
         gender="F", dob=date(2006, 1, 1), nationality="Indian",
         institute=institute, campus=campus, program=program,
         academic_year=year, current_address="#123, Snehal Residence",
-        student_mobile="6366280706", student_email="a@example.com",
+        student_mobile="6366280706",
+        student_email=f"a{Student.objects.count()}@example.com",
     )
     semester = Semester.objects.create(number=1, name="Semester 1",
                                        program=program)
     batch = Batch.objects.create(
-        name="DFBM Aug 2026", campus=campus, program=program,
+        name=f"DFBM Aug 2026{n}", campus=campus, program=program,
         academic_year=year, start_semester=semester,
     )
     enrollment = Enrollment.objects.create(

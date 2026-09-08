@@ -53,7 +53,9 @@ from apps.common.pdf_theme import (
     draw_letterhead_block,
     draw_logo,
     draw_policy_page,
+    prints_right,
     safe as _safe,
+    signature_path,
 )
 from apps.common.program_policies import policy_for
 from apps.fees.models import Concession, FeeReceipt, Installment
@@ -310,12 +312,18 @@ def render_undertaking_pdf(
 
     _row(pdf, "SUBMITTED BY", submitted_by)
 
-    # Letterhead sits at the foot of this document, not the head.
+    # Letterhead sits at the foot of this document, not the head — at
+    # the left or right margin per the institute's stationery.
     pdf.ln(4)
-    draw_letterhead_block(pdf, institute, x=MARGIN, y=pdf.get_y(),
-                          width=BODY_W, align="L", size=9)
+    draw_letterhead_block(
+        pdf, institute, x=MARGIN, y=pdf.get_y(), width=BODY_W,
+        align="R" if prints_right(institute) else "L", size=9,
+    )
 
-    draw_policy_page(pdf, policy_for(getattr(program, "degree_type", "")))
+    draw_policy_page(
+        pdf, policy_for(getattr(program, "degree_type", "")),
+        signature=signature_path(institute),
+    )
 
     out = pdf.output(dest="S")
     return bytes(out)

@@ -107,24 +107,37 @@ class UniversitySerializer(serializers.ModelSerializer):
 
 
 class InstituteSerializer(serializers.ModelSerializer):
-    # `logo` is write-only (a file upload); `logo_url` is what the UI
-    # renders. Same split as CampusSerializer.image/image_url.
+    # `logo`/`signature` are write-only (file uploads); the `*_url`
+    # fields are what the UI renders. Same split as
+    # CampusSerializer.image/image_url.
     logo_url = serializers.SerializerMethodField()
+    signature_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Institute
-        fields = ["id", "name", "code", "logo", "logo_url", "email_domain",
-                  "letterhead_title", "address", "phone", "email", "gstin",
-                  "payee_name", "is_active", "created_at", "updated_at"]
-        read_only_fields = ["id", "logo_url", "created_at", "updated_at"]
-        extra_kwargs = {"logo": {"write_only": True, "required": False}}
+        fields = ["id", "name", "code", "logo", "logo_url",
+                  "signature", "signature_url", "email_domain",
+                  "letterhead_placement", "letterhead_title", "address",
+                  "phone", "email", "gstin", "payee_name",
+                  "is_active", "created_at", "updated_at"]
+        read_only_fields = ["id", "logo_url", "signature_url",
+                            "created_at", "updated_at"]
+        extra_kwargs = {
+            "logo": {"write_only": True, "required": False},
+            "signature": {"write_only": True, "required": False},
+        }
 
-    def get_logo_url(self, obj):
-        if not obj.logo:
+    def _abs(self, field):
+        if not field:
             return None
         request = self.context.get("request")
-        url = obj.logo.url
-        return request.build_absolute_uri(url) if request else url
+        return request.build_absolute_uri(field.url) if request else field.url
+
+    def get_logo_url(self, obj):
+        return self._abs(obj.logo)
+
+    def get_signature_url(self, obj):
+        return self._abs(obj.signature)
 
 
 class StateSerializer(serializers.ModelSerializer):

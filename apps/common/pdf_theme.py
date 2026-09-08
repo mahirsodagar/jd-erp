@@ -17,6 +17,12 @@ from fpdf import FPDF
 
 from .program_policies import SIGNATORIES
 
+#: The policy page and document titles are set in a serif face, the body
+#: in sans — the browser defaults the printed stationery was rendered
+#: with. Times is built into fpdf2, so this costs no embedded font.
+SERIF = "Times"
+SANS = "Helvetica"
+
 MARGIN = 15.0
 PAGE_W = 210.0
 BODY_W = PAGE_W - 2 * MARGIN  # 180mm
@@ -74,21 +80,40 @@ def rule(pdf: FPDF, gap_before: float = 2.0, gap_after: float = 2.0) -> None:
 
 # --- Letterhead --------------------------------------------------------
 
-def logo_path(institute) -> str | None:
-    """Institute logo as a local path, or None when unset/missing.
+def image_path(field) -> str | None:
+    """A FileField's local path, or None when unset/missing.
 
     Guarded because the file can be absent on a fresh environment (media
     isn't in the repo) and a storage backend need not expose `.path` at
-    all — a document must still render without its logo.
+    all — a document must still render without its artwork.
     """
-    logo = getattr(institute, "logo", None)
-    if not logo:
+    if not field:
         return None
     try:
-        path = Path(logo.path)
+        path = Path(field.path)
     except (NotImplementedError, ValueError):
         return None
     return str(path) if path.is_file() else None
+
+
+def logo_path(institute) -> str | None:
+    return image_path(getattr(institute, "logo", None))
+
+
+def signature_path(institute) -> str | None:
+    return image_path(getattr(institute, "signature", None))
+
+
+def prints_right(institute) -> bool:
+    """True for the stationery variant that sets the address opposite the
+    logo. It also drives the right-aligned name rows on the receipt —
+    the two travel together on the printed JD School of Design forms."""
+    from apps.master.models import Institute
+
+    return (
+        getattr(institute, "letterhead_placement", "")
+        == Institute.LetterheadPlacement.RIGHT
+    )
 
 
 def letterhead_lines(institute) -> list[str]:
@@ -145,9 +170,14 @@ def draw_logo(pdf: FPDF, institute, *, x: float, y: float,
 
 # --- Policy page (page 2 of both documents) ----------------------------
 
-def draw_policy_page(pdf: FPDF, blocks: list[tuple]) -> None:
+def draw_policy_page(pdf: FPDF, blocks: list[tuple], *,
+                     signature: str | None = None) -> None:
     """Render a `program_policies` document on a fresh page, followed by
     the three signature boxes.
+
+    `signature` is a path to the authorised signatory's image, drawn in
+    the first box. The student and parent boxes are always left empty to
+    be signed by hand.
 
     Block kinds are documented in `apps.common.program_policies`.
     """
@@ -155,14 +185,14 @@ def draw_policy_page(pdf: FPDF, blocks: list[tuple]) -> None:
     for block in blocks:
         kind, args = block[0], block[1:]
         if kind == "h1":
-            pdf.set_font("Helvetica", "B", 12)
+            pdf.set_font(SERIF, "B", 13)
             pdf.cell(0, 8, safe(args[0]), align="C", new_x="LMARGIN", new_y="NEXT")
         elif kind == "h2":
             pdf.ln(2)
-            pdf.set_font("Helvetica", "B", 10)
+            pdf.set_font(SERIF, "B", 10.5)
             pdf.cell(0, 6, safe(args[0]), new_x="LMARGIN", new_y="NEXT")
         elif kind == "h3":
-            pdf.set_font("Helvetica", "B", 9)
+            pdf.set_font(SERIF, "B", 9)
             pdf.cell(0, 5, safe(args[0]), new_x="LMARGIN", new_y="NEXT")
         elif kind == "p":
             pdf.set_font("Helvetica", "", 8.5)
@@ -192,6 +222,17 @@ def draw_policy_page(pdf: FPDF, blocks: list[tuple]) -> None:
     for name in SIGNATORIES:
         pdf.cell(w, 8, safe(name), border=1, align="C")
     pdf.ln(8)
+    box_h = 16.0
+    box_top = pdf.get_y()
     for _ in SIGNATORIES:
-        pdf.cell(w, 16, "", border=1)
-    pdf.ln(16)
+        pdf.cell(w, box_h, "", border=1)
+    pdf.ln(box_h)
+
+    if signature:
+        try:
+            # Inset so the ink never touches the box rule, and capped by
+            # width as well as height so a wide scan cannot bleed out.
+            pdf.image(signature, x=MARGIN + 4, y=box_top + 2,
+                      w=min(w - 8, 40), h=box_h - 4, keep_aspect_ratio=True)
+        except Exception:  # noqa: BLE001 — a bad signature file must not 500 the document
+            pass

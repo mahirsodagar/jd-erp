@@ -6,9 +6,11 @@ a paid row says when and how it was paid while an unpaid one says when
 it is due, and that the balance excludes what was already taken.
 """
 
+import io
 from datetime import date
 from decimal import Decimal
 
+from django.core.files.base import ContentFile
 from django.test import TestCase
 
 from apps.admissions.models import Enrollment, Student
@@ -100,6 +102,25 @@ class UndertakingTests(TestCase):
         self.assertTrue(out.startswith(b"%PDF"))
         self.assertGreater(len(out), 2000)
 
+    def test_signature_is_embedded_when_one_is_on_file(self):
+        """The authorised signatory's signature prints on the policy page
+        of the undertaking — nowhere else."""
+        institute = self.enrollment.student.institute
+        institute.signature.save("sig.png", ContentFile(_png_bytes()),
+                                 save=True)
+        self.addCleanup(institute.signature.delete, save=False)
+
+        out = render_undertaking_pdf(self.enrollment)
+        self.assertIn(b"/Subtype /Image", out)
+
+    def test_right_placement_stationery_renders(self):
+        institute = self.enrollment.student.institute
+        institute.letterhead_placement = Institute.LetterheadPlacement.RIGHT
+        institute.save(update_fields=["letterhead_placement"])
+        self.assertTrue(
+            render_undertaking_pdf(self.enrollment).startswith(b"%PDF"),
+        )
+
     def test_renders_degree_program_with_no_schedule_at_all(self):
         """An enrollment with no installments yet must still print — the
         counsellor generates the undertaking while setting the fee up."""
@@ -108,6 +129,15 @@ class UndertakingTests(TestCase):
 
 
 # --- fixtures ----------------------------------------------------------
+
+def _png_bytes() -> bytes:
+    """A tiny real PNG — fpdf2 decodes the image, so a stub won't do."""
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), (0, 0, 90)).save(buf, format="PNG")
+    return buf.getvalue()
+
 
 def _fixture(*, degree_type="Diploma", code_suffix=""):
     institute, _ = Institute.objects.get_or_create(
