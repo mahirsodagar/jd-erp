@@ -1,9 +1,12 @@
 """Undertaking generation + delivery.
 
 The undertaking is a signed declaration the student agrees to: course,
-duration, fee, down-payment + installment schedule, plus any free-text
+duration, fee, registration + installment schedule, plus any free-text
 remarks. PHP source of truth is `JD_ERP/admissions/save.php` lines
-2336-2864 (the `feeapplicableunder` POST branch).
+2336-2864 (the `feeapplicableunder` POST branch); the printed layout
+matches the stationery finance issues today — logo and magenta
+UNDERTAKING banner, the fixed label/value table, the letterhead footer,
+and the program policies on page 2.
 
 Concretely:
 
@@ -13,17 +16,23 @@ Concretely:
 - Down payment = the remaining installment whose description starts
   "Down payment" — that's how the React enrollment-create form lays it
   down via `/api/fees/installments/bulk/`.
-- Installments = the remaining course rows ordered by `sequence`.
+- Installments = the remaining course rows ordered by `sequence`, one
+  per BALANCE PAYMENT line.
 - Concession = sum of APPROVED concessions on the enrollment.
 - Total fee = sum of ALL installments (registration included — it is
   carved out of the total, not added to it) + concession, matching the
   rule `registration + down_payment + Σ installments + concession =
   total_fee` enforced by the enrollment-create page client-side.
 
-We render to PDF with fpdf2 (same dependency the receipts service uses)
-and dispatch via the notifications email helper. The PDF is NOT
-persisted — re-rendering is idempotent because the source data is in
-the DB.
+Every money row states what was actually paid and when: receipts are
+matched to their installment so a paid row reads "Paid on 04/09/2025 -
+Online" while an outstanding one reads "to be paid on 18/11/2026". The
+application fee comes from the lead's SmartGateway payment request,
+which is where that money is recorded.
+
+We render with fpdf2 (same dependency the receipts service uses) and
+dispatch via the notifications email helper. The PDF is NOT persisted —
+re-rendering is idempotent because the source data is in the DB.
 """
 
 from __future__ import annotations
@@ -36,183 +45,277 @@ from django.db.models import Sum
 from django.utils import timezone
 from fpdf import FPDF
 
-from apps.fees.models import Concession, Installment
+from apps.common.pdf_theme import (
+    BODY_W,
+    BRAND_MAGENTA,
+    MARGIN,
+    PAGE_W,
+    draw_letterhead_block,
+    draw_logo,
+    draw_policy_page,
+    safe as _safe,
+)
+from apps.common.program_policies import policy_for
+from apps.fees.models import Concession, FeeReceipt, Installment
 
 from .models import Enrollment
 
+#: BALANCE PAYMENT rows always printed, even when the schedule is
+#: shorter — the paper form has five and staff expect the blanks.
+_MIN_BALANCE_ROWS = 5
 
-# --- PDF rendering -----------------------------------------------------
-
-_UNICODE_FALLBACKS = {
-    "–": "-",
-    "—": "-",
-    "‘": "'",
-    "’": "'",
-    "“": '"',
-    "”": '"',
-    "…": "...",
-    "₹": "INR ",
-}
+#: Label column width; the value column takes the rest of the body.
+_LABEL_W = 78.0
+_ROW_H = 7.0
 
 
-def _safe(text) -> str:
-    if text is None:
+def _amount(v) -> str:
+    """Bare rupee figures, as on the printed form: `175000`, `72500.50`."""
+    d = Decimal(v or 0)
+    return f"{int(d)}" if d == d.to_integral_value() else f"{d:.2f}"
+
+
+def _date(value) -> str:
+    return value.strftime("%d/%m/%Y") if value else ""
+
+
+# --- Fee overview ------------------------------------------------------
+
+def _paid_note(receipts) -> str:
+    """"Paid on 04/09/2025 - Online" for the receipts against a row.
+
+    Multiple part-payments against one installment are summarised on one
+    line — the date and mode of the latest, since that is the one the
+    student is being asked to recognise.
+    """
+    active = [r for r in receipts if r.status != FeeReceipt.Status.CANCELLED]
+    if not active:
         return ""
-    s = str(text)
-    for k, v in _UNICODE_FALLBACKS.items():
-        s = s.replace(k, v)
-    return s.encode("latin-1", "replace").decode("latin-1")
+    last = max(active, key=lambda r: (r.received_date, r.id))
+    mode = last.get_payment_mode_display().split(" (")[0]
+    return f"Paid on {_date(last.received_date)} - {mode}"
 
 
-def _money(v) -> str:
-    return f"INR {Decimal(v or 0):,.2f}"
+def _row_value(installment, receipts_by_installment) -> str:
+    """`30000 Paid on 04/09/2025 - Online`, or `72500 to be paid on
+    18/11/2026` when the row is still outstanding."""
+    amount = _amount(installment.amount)
+    note = _paid_note(receipts_by_installment.get(installment.id, []))
+    if note:
+        return f"{amount} {note}"
+    if installment.due_date:
+        return f"{amount} to be paid on {_date(installment.due_date)}"
+    return amount
 
 
-def _row(pdf: FPDF, label: str, value: str) -> None:
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(60, 7, _safe(label), border=1)
-    pdf.set_font("Helvetica", "", 10)
-    pdf.cell(0, 7, _safe(value), border=1, new_x="LMARGIN", new_y="NEXT")
+def _application_fee_line(student) -> str:
+    """The application fee as paid on the lead the student came from.
+
+    Application money is taken through SmartGateway against the *lead*,
+    before a Student exists, so it is never a FeeReceipt — see
+    `apps.payments`. No lead (a walk-in keyed straight into admissions)
+    means no line to print.
+    """
+    lead = getattr(student, "lead_origin", None)
+    if lead is None:
+        return ""
+    from apps.payments.models import PaymentRequest
+
+    pr = (
+        PaymentRequest.objects.filter(
+            lead=lead,
+            purpose=PaymentRequest.Purpose.APPLICATION_FEE,
+            status=PaymentRequest.Status.PAID,
+        )
+        .select_related("paid_order")
+        .order_by("-paid_at")
+        .first()
+    )
+    if pr is None:
+        return ""
+    line = f"{_amount(pr.amount)} Paid on {_date(timezone.localtime(pr.paid_at)) if pr.paid_at else ''}".strip()
+    method = getattr(pr.paid_order, "payment_method", "") if pr.paid_order_id else ""
+    return f"{line} - {method}" if method else line
 
 
-def render_undertaking_pdf(
-    enrollment: Enrollment,
-    *,
-    remarks: str = "",
-    application_form: str = "",
-    submitted_by: str = "",
-) -> bytes:
+def fee_overview(enrollment: Enrollment) -> dict:
+    """Everything the undertaking prints about money, in one dict.
+
+    Split out from the renderer so the numbers can be asserted directly
+    in tests and reused by any future preview UI.
+    """
     student = enrollment.student
-    campus = enrollment.campus
-    program = enrollment.program
-    course = enrollment.course
-    institute = student.institute
-
     installments = list(
         Installment.objects.filter(enrollment=enrollment).order_by("sequence")
     )
-    # The mandatory registration fee is its own line on the undertaking —
-    # it is carved out of the same total, so it stays in `installments`
-    # for the arithmetic below but is kept out of the down-payment and
-    # balance-payment lists.
+
+    receipts_by_installment: dict[int, list] = {}
+    for r in FeeReceipt.objects.filter(enrollment=enrollment).exclude(
+        installment__isnull=True,
+    ):
+        receipts_by_installment.setdefault(r.installment_id, []).append(r)
+
     registration = next(
         (i for i in installments if i.kind == Installment.Kind.REGISTRATION),
         None,
     )
     course_installments = [i for i in installments if i is not registration]
 
-    # Down payment = the row the React enrollment-create form labels as
-    # such. Registration rows are excluded first, so a schedule that puts
-    # registration at sequence 1 can't be mistaken for the down payment.
-    # If absent, leave blank — PDF still renders.
-    down_payment = next(
-        (i for i in course_installments
-         if i.description.lower().startswith("down payment")),
-        None,
-    )
-    if down_payment is None and course_installments:
-        # Fall back to lowest-sequence course row as the down payment.
-        down_payment = course_installments[0]
-
-    other_installments = [i for i in course_installments if i is not down_payment]
+    # "REGISTRATION AMOUNT PAID" on the paper form is the money taken up
+    # front. That is the mandatory registration row whenever there is
+    # one; only when there isn't does the down payment stand in for it —
+    # the row the React enrollment-create form labels as such, falling
+    # back to the earliest course row.
+    #
+    # When both exist, the down payment stays in the BALANCE PAYMENT
+    # list: it is a scheduled payment like any other, and printing it
+    # there keeps `upfront + Σ balance rows = total fee` true.
+    if registration is not None:
+        upfront = registration
+        balance_rows = course_installments
+    else:
+        upfront = next(
+            (i for i in course_installments
+             if i.description.lower().startswith("down payment")),
+            course_installments[0] if course_installments else None,
+        )
+        balance_rows = [i for i in course_installments if i is not upfront]
 
     concession_total = Decimal(
         Concession.objects.filter(
             enrollment=enrollment, status=Concession.Status.APPROVED,
         ).aggregate(s=Sum("amount"))["s"] or 0
     )
-
     installments_total = sum(
         (Decimal(i.amount) for i in installments), Decimal("0")
     )
     total_fee = installments_total + concession_total
 
+    upfront_amount = Decimal(upfront.amount) if upfront is not None else Decimal("0")
+
+    return {
+        "total_fee": total_fee,
+        "concession": concession_total,
+        "upfront": upfront,
+        "upfront_line": (
+            _row_value(upfront, receipts_by_installment) if upfront else ""
+        ),
+        "balance_due": total_fee - upfront_amount,
+        "balance_lines": [
+            _row_value(i, receipts_by_installment) for i in balance_rows
+        ],
+        "application_fee_line": _application_fee_line(student),
+    }
+
+
+# --- PDF rendering -----------------------------------------------------
+
+def _row(pdf: FPDF, label: str, value: str) -> None:
+    pdf.set_x(MARGIN)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(_LABEL_W, _ROW_H, f" {_safe(label)}", border=1)
+    pdf.cell(BODY_W - _LABEL_W, _ROW_H, f" {_safe(value)}", border=1,
+             new_x="LMARGIN", new_y="NEXT")
+
+
+def _draw_header(pdf: FPDF, institute) -> None:
+    """Logo left, magenta UNDERTAKING banner right — the printed form's
+    masthead."""
+    top = 12.0
+    logo_bottom = draw_logo(pdf, institute, x=MARGIN, y=top, height=22,
+                            fallback_width=95)
+
+    band_w, band_h = 70.0, 26.0
+    band_x = PAGE_W - MARGIN - band_w
+    pdf.set_fill_color(*BRAND_MAGENTA)
+    pdf.rect(band_x, top, band_w, band_h, style="F")
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.set_xy(band_x, top + band_h / 2 - 5)
+    pdf.cell(band_w, 10, "UNDERTAKING", align="C")
+    pdf.set_text_color(0, 0, 0)
+
+    pdf.set_y(max(logo_bottom, top + band_h) + 8)
+
+
+def _duration(program, course) -> str:
+    """Whole years read better than months on this form ("1 year",
+    "2 years"); anything that isn't a clean multiple stays in months."""
+    months = getattr(course, "duration_months", None) or getattr(
+        program, "duration_months", None,
+    )
+    if not months:
+        return ""
+    if months % 12 == 0:
+        years = months // 12
+        return f"{years} year" if years == 1 else f"{years} years"
+    return f"{months} months"
+
+
+def render_undertaking_pdf(
+    enrollment: Enrollment,
+    *,
+    remarks: str = "",
+    submitted_by: str = "",
+) -> bytes:
+    student = enrollment.student
+    program = enrollment.program
+    course = enrollment.course
+    institute = student.institute
+    fees = fee_overview(enrollment)
+
     pdf = FPDF(orientation="P", unit="mm", format="A4")
-    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_margins(MARGIN, 12, MARGIN)
+    pdf.set_auto_page_break(auto=True, margin=12)
     pdf.add_page()
 
-    # Header band
-    pdf.set_fill_color(20, 60, 120)
-    pdf.set_draw_color(20, 60, 120)
-    pdf.rect(0, 0, 210, 22, style="F")
-    pdf.set_y(6)
-    pdf.set_font("Helvetica", "B", 16)
-    pdf.set_text_color(255, 255, 255)
-    pdf.cell(0, 10, _safe(getattr(institute, "name", "") or "Undertaking"),
-             align="C")
+    _draw_header(pdf, institute)
 
-    # Title
-    pdf.set_y(28)
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_font("Helvetica", "B", 14)
-    pdf.cell(0, 8, "Fee Undertaking", align="C")
-
-    # Top meta
-    pdf.set_xy(15, 42)
-    pdf.set_font("Helvetica", "", 10)
-    pdf.cell(0, 6,
-             _safe(f"Date: {timezone.now().strftime('%d-%b-%Y %H:%M')}"),
+    pdf.set_font("Helvetica", "B", 9)
+    date_w = pdf.get_string_width("Date: ") + 1
+    pdf.cell(date_w, 5, "Date: ")
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 5, timezone.localtime().strftime("%d-%m-%Y %H:%M:%S"),
              new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, _safe(f"Campus: {campus.name}"),
-             new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(3)
 
-    # Body — single 2-col table modelled on the PHP layout.
+    _row(pdf, "COURSE TITLE", course.name if course else program.name)
+    _row(pdf, "DURATION", _duration(program, course))
+    _row(pdf, "NAME OF THE STUDENT", student.student_name)
+    _row(pdf, "CONTACT NUMBER", student.student_mobile)
+    # "TUTION" is the label on the printed form; kept verbatim so the
+    # generated document matches the one staff already hand out.
+    _row(pdf, "TUTION FEE APPLICABLE", _amount(fees["total_fee"]))
+    _row(pdf, "REGISTRATION AMOUNT PAID", fees["upfront_line"])
+    _row(pdf, "TOTAL BALANCE DUE", _amount(fees["balance_due"]))
+
+    lines = fees["balance_lines"]
+    for idx in range(max(_MIN_BALANCE_ROWS, len(lines))):
+        _row(pdf, f"BALANCE PAYMENT {idx + 1}",
+             lines[idx] if idx < len(lines) else "")
+
+    if fees["concession"] > 0:
+        _row(pdf, "CONCESSION", _amount(fees["concession"]))
+
+    _row(pdf, "Application Form", fees["application_fee_line"])
+    _row(pdf, "REMARKS:", remarks)
+
+    # Full-width acknowledgement row — verbatim from the printed form.
+    pdf.set_x(MARGIN)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(BODY_W, _ROW_H,
+             " I hereby follow the above-mentioned payment schedule and "
+             "falling which, I am liable for penalty charges.",
+             border=1, new_x="LMARGIN", new_y="NEXT")
+
+    _row(pdf, "SUBMITTED BY", submitted_by)
+
+    # Letterhead sits at the foot of this document, not the head.
     pdf.ln(4)
-    pdf.set_x(15)
-    _row(pdf, "Course title", course.name if course else program.name)
-    duration_months = getattr(program, "duration_months", None)
-    _row(pdf, "Duration",
-         f"{duration_months} months" if duration_months else "-")
-    _row(pdf, "Student name", student.student_name)
-    _row(pdf, "Contact number", student.student_mobile or "-")
-    _row(pdf, "Tuition fee applicable", _money(total_fee))
+    draw_letterhead_block(pdf, institute, x=MARGIN, y=pdf.get_y(),
+                          width=BODY_W, align="L", size=9)
 
-    # NB: this row used to be labelled "Registration amount paid" while
-    # actually carrying the down payment (a PHP-era misnomer). Now that a
-    # real registration fee exists and prints on its own line below, the
-    # label has to say what it is.
-    if down_payment is not None:
-        _row(pdf, "Down payment", _money(down_payment.amount))
-    else:
-        _row(pdf, "Down payment", "-")
-
-    if registration is not None:
-        date_str = (
-            registration.due_date.strftime("%d-%b-%Y")
-            if registration.due_date else "-"
-        )
-        _row(pdf, "Registration fee (mandatory, payable yearly)",
-             f"{_money(registration.amount)} · due {date_str}")
-
-    balance_due = total_fee - Decimal(
-        down_payment.amount if down_payment is not None else 0
-    )
-    _row(pdf, "Total balance due", _money(balance_due))
-
-    for idx, inst in enumerate(other_installments, start=1):
-        date_str = inst.due_date.strftime("%d-%b-%Y") if inst.due_date else "-"
-        _row(pdf, f"Balance payment {idx}",
-             f"{_money(inst.amount)} · due {date_str}")
-
-    if concession_total > 0:
-        _row(pdf, "Concession", _money(concession_total))
-
-    _row(pdf, "Application form",
-         application_form or student.application_form_id or "-")
-    _row(pdf, "Remarks", remarks or "-")
-    _row(pdf, "Submitted by", submitted_by or "-")
-
-    # Acknowledgement line — verbatim from the PHP template.
-    pdf.ln(4)
-    pdf.set_font("Helvetica", "I", 9)
-    pdf.set_text_color(60, 60, 60)
-    pdf.multi_cell(
-        0, 5,
-        _safe(
-            "I hereby agree to follow the above-mentioned payment schedule. "
-            "Failing which, I am liable for penalty charges."
-        ),
-    )
+    draw_policy_page(pdf, policy_for(getattr(program, "degree_type", "")))
 
     out = pdf.output(dest="S")
     return bytes(out)
@@ -225,7 +328,6 @@ def send_undertaking(
     *,
     requested_by,
     remarks: str = "",
-    application_form: str = "",
     extra_cc: list[str] | None = None,
 ) -> dict:
     """Render the PDF and email it to the student with CC to staff.
@@ -241,7 +343,6 @@ def send_undertaking(
     pdf_bytes = render_undertaking_pdf(
         enrollment,
         remarks=remarks,
-        application_form=application_form,
         submitted_by=(
             getattr(requested_by, "full_name", "")
             or getattr(requested_by, "username", "")

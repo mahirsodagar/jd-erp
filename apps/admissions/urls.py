@@ -7,6 +7,7 @@ from .views import (
     BatchPromoteView,
     EnrollmentDetailView,
     EnrollmentListCreateView,
+    EnrollmentUndertakingPdfView,
     EnrollmentUndertakingView,
     StudentDetailView,
     StudentDocumentDetailView,
@@ -42,6 +43,11 @@ urlpatterns = [
         "enrollments/<int:pk>/undertaking/",
         EnrollmentUndertakingView.as_view(),
         name="enrollment-undertaking",
+    ),
+    path(
+        "enrollments/<int:pk>/undertaking/pdf/",
+        EnrollmentUndertakingPdfView.as_view(),
+        name="enrollment-undertaking-pdf",
     ),
 
     path("batch-promote/", BatchPromoteView.as_view(),

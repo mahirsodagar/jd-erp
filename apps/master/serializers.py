@@ -107,12 +107,24 @@ class UniversitySerializer(serializers.ModelSerializer):
 
 
 class InstituteSerializer(serializers.ModelSerializer):
+    # `logo` is write-only (a file upload); `logo_url` is what the UI
+    # renders. Same split as CampusSerializer.image/image_url.
+    logo_url = serializers.SerializerMethodField()
+
     class Meta:
         model = Institute
-        fields = ["id", "name", "code", "logo", "email_domain",
+        fields = ["id", "name", "code", "logo", "logo_url", "email_domain",
                   "letterhead_title", "address", "phone", "email", "gstin",
                   "payee_name", "is_active", "created_at", "updated_at"]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = ["id", "logo_url", "created_at", "updated_at"]
+        extra_kwargs = {"logo": {"write_only": True, "required": False}}
+
+    def get_logo_url(self, obj):
+        if not obj.logo:
+            return None
+        request = self.context.get("request")
+        url = obj.logo.url
+        return request.build_absolute_uri(url) if request else url
 
 
 class StateSerializer(serializers.ModelSerializer):

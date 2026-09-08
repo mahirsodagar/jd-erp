@@ -153,20 +153,45 @@ class InstituteListCreateView(APIView):
         qs = Institute.objects.all()
         if request.query_params.get("active") == "1":
             qs = qs.filter(is_active=True)
-        return Response(InstituteSerializer(qs, many=True).data)
+        return Response(
+            InstituteSerializer(qs, many=True,
+                                context={"request": request}).data,
+        )
 
     def post(self, request):
-        s = InstituteSerializer(data=request.data)
+        s = InstituteSerializer(data=request.data,
+                                context={"request": request})
         s.is_valid(raise_exception=True)
         s.save()
         return Response(s.data, status=status.HTTP_201_CREATED)
 
 
 class InstituteDetailView(_MasterDetailMixin, APIView):
+    """Overrides the mixin's read/write so `logo_url` can be built —
+    the serializer needs `request` in context to absolutise it."""
+
     permission_classes = [IsAuthenticated, HasPerm]
     perm_base = "master.institute"
     model = Institute
     serializer = InstituteSerializer
+
+    def get(self, request, pk):
+        return Response(
+            InstituteSerializer(self._obj(pk),
+                                context={"request": request}).data,
+        )
+
+    def patch(self, request, pk):
+        obj = self._obj(pk)
+        s = InstituteSerializer(
+            obj, data=request.data, partial=True,
+            context={"request": request},
+        )
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(
+            InstituteSerializer(obj, context={"request": request}).data,
+        )
 
 
 # --- State --------------------------------------------------------------

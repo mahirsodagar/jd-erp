@@ -7,16 +7,18 @@ the number sequence keeps counting per campus-year without tripping over
 legacy `RCP-` numbers.
 """
 
+import io
 from datetime import date
 from decimal import Decimal
 
+from django.core.files.base import ContentFile
 from django.test import TestCase
 
 from apps.admissions.models import Enrollment, Student
+from apps.common.program_policies import policy_for
 from apps.fees.models import FeeReceipt
 from apps.fees.services.pdf import amount_in_words, render_receipt_pdf
 from apps.fees.services.receipt_no import generate_receipt_no
-from apps.fees.services.receipt_policies import policy_for
 from apps.master.models import (
     AcademicYear, Batch, Campus, Institute, Program, Semester,
 )
@@ -95,6 +97,34 @@ class RenderTests(TestCase):
         r = _receipt(base, amount=Decimal("1000"))
         self.assertTrue(render_receipt_pdf(r).startswith(b"%PDF"))
 
+    def test_uploaded_logo_is_embedded(self):
+        """The logo prints once a file is actually on the institute.
+
+        Institutes ship with `logo` empty, which is why receipts came out
+        with the name in text — so assert the image reaches the PDF, not
+        just that rendering survives.
+        """
+        base = _fixture()
+        institute = base.student.institute
+        institute.logo.save("logo.png", ContentFile(_png_bytes()), save=True)
+        self.addCleanup(institute.logo.delete, save=False)
+
+        out = render_receipt_pdf(_receipt(base, amount=Decimal("1000")))
+        # fpdf2 writes embedded raster images as /Image XObjects.
+        self.assertIn(b"/Subtype /Image", out)
+
+    def test_a_logo_row_whose_file_went_missing_still_renders(self):
+        """Media can be wiped independently of the database — a dangling
+        path must fall back to the name, not 500 the download."""
+        base = _fixture()
+        institute = base.student.institute
+        institute.logo.name = "institute/logos/gone.png"
+        institute.save(update_fields=["logo"])
+
+        out = render_receipt_pdf(_receipt(base, amount=Decimal("1000")))
+        self.assertTrue(out.startswith(b"%PDF"))
+        self.assertNotIn(b"/Subtype /Image", out)
+
     def test_renders_cancelled(self):
         base = _fixture()
         r = _receipt(base, status=FeeReceipt.Status.CANCELLED,
@@ -103,6 +133,15 @@ class RenderTests(TestCase):
 
 
 # --- fixtures ----------------------------------------------------------
+
+def _png_bytes() -> bytes:
+    """A tiny real PNG — fpdf2 decodes the image, so a stub won't do."""
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), (255, 0, 128)).save(buf, format="PNG")
+    return buf.getvalue()
+
 
 def _fixture(*, gstin="", payee_name="", letterhead=True, degree_type="Diploma"):
     institute = Institute.objects.create(

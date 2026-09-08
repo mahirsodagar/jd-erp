@@ -1,4 +1,5 @@
-"""Program-policy page printed as page 2 of every fee receipt.
+"""Program-policy page printed as page 2 of the fee receipt and the fee
+undertaking.
 
 Two variants, matching the paper receipts finance issues today:
 
@@ -14,7 +15,8 @@ Which one prints is decided by the program's `degree_type` via
 routes outgoing mail, so a program never gets diploma email and degree
 policies.
 
-Blocks are `(kind, *args)` tuples the renderer lays out:
+Blocks are `(kind, *args)` tuples `apps.common.pdf_theme.draw_policy_page`
+lays out:
 
     ("h1", text)          document title, centred
     ("h2", text)          numbered section heading

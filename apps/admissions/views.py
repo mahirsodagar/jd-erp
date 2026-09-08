@@ -1,6 +1,7 @@
 from django.db import transaction
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from rest_framework import status as http
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -27,7 +28,7 @@ from .services import (
 )
 from .services_handbook import send_handbook_email
 from .services_portal_email import send_portal_credentials_email
-from .services_undertaking import send_undertaking
+from .services_undertaking import render_undertaking_pdf, send_undertaking
 
 
 # --- HR-facing student endpoints ---------------------------------------
@@ -345,22 +346,17 @@ class EnrollmentDetailView(APIView):
         return Response(s.data)
 
 
-class EnrollmentUndertakingView(APIView):
-    """POST /api/admissions/enrollments/{pk}/undertaking/
+class _UndertakingMixin:
+    """Shared lookup for the two undertaking endpoints.
 
-    Renders the fee undertaking PDF from the enrollment + installments
-    + approved concession, emails it to the student with the requesting
-    user CC'd. The PDF is not persisted.
-
-    Body (all optional):
-        remarks: str
-        application_form: str   # defaults to student.application_form_id
-        extra_cc: [str]         # additional CC addresses
+    Downloading and emailing are the same document under the same
+    permission — a counsellor who may send it to the student may
+    certainly print it — so both go through this.
     """
 
     permission_classes = [IsAuthenticated]
 
-    def post(self, request, pk):
+    def _enrollment(self, request, pk) -> Enrollment:
         try:
             enrollment = Enrollment.objects.select_related(
                 "student", "campus", "program", "course",
@@ -371,15 +367,57 @@ class EnrollmentUndertakingView(APIView):
 
         u = request.user
         if not has_perm(u, "admissions.enrollment.send_undertaking"):
-            return Response({"detail": "Permission denied."},
-                            status=http.HTTP_403_FORBIDDEN)
+            raise PermissionDenied("Permission denied.")
         if not can_view_all_campuses(u) and not u.campuses.filter(
             pk=enrollment.campus_id,
         ).exists():
             raise Http404
+        return enrollment
+
+
+class EnrollmentUndertakingPdfView(_UndertakingMixin, APIView):
+    """GET /api/admissions/enrollments/{pk}/undertaking/pdf/
+
+    The undertaking as a file, for printing or handing over in person.
+    `remarks` rides in as a query parameter so what the counsellor typed
+    on screen prints in the REMARKS row, exactly as it would in the
+    emailed copy.
+    """
+
+    def get(self, request, pk):
+        enrollment = self._enrollment(request, pk)
+        pdf = render_undertaking_pdf(
+            enrollment,
+            remarks=(request.query_params.get("remarks") or "").strip(),
+            submitted_by=(
+                getattr(request.user, "full_name", "")
+                or getattr(request.user, "username", "")
+                or ""
+            ),
+        )
+        resp = HttpResponse(pdf, content_type="application/pdf")
+        name = enrollment.student.application_form_id or enrollment.id
+        resp["Content-Disposition"] = f'inline; filename="undertaking-{name}.pdf"'
+        return resp
+
+
+class EnrollmentUndertakingView(_UndertakingMixin, APIView):
+    """POST /api/admissions/enrollments/{pk}/undertaking/
+
+    Renders the fee undertaking PDF from the enrollment + installments
+    + approved concession, emails it to the student with the requesting
+    user CC'd. The PDF is not persisted.
+
+    Body (all optional):
+        remarks: str
+        extra_cc: [str]         # additional CC addresses
+    """
+
+    def post(self, request, pk):
+        enrollment = self._enrollment(request, pk)
+        u = request.user
 
         remarks = (request.data.get("remarks") or "").strip()
-        application_form = (request.data.get("application_form") or "").strip()
         extra_cc = request.data.get("extra_cc") or []
         if isinstance(extra_cc, str):
             extra_cc = [s.strip() for s in extra_cc.split(",") if s.strip()]
@@ -389,7 +427,6 @@ class EnrollmentUndertakingView(APIView):
                 enrollment,
                 requested_by=u,
                 remarks=remarks,
-                application_form=application_form,
                 extra_cc=extra_cc,
             )
         except ValueError as e:
