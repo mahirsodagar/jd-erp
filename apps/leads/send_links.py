@@ -105,21 +105,11 @@ def _application_fee_for_lead(lead: Lead, payment: dict) -> str:
       3. Empty string — UPI URI then drops the amount and the student
          types it in their app.
     """
-    from apps.master.models import FeeTemplate
+    from apps.leads.fee_lookup import application_fee_for
 
-    if lead.campus_id and lead.program_id:
-        tmpl = (
-            FeeTemplate.objects
-            .filter(
-                campus_id=lead.campus_id,
-                program_id=lead.program_id,
-                is_active=True,
-            )
-            .order_by("-academic_year__id", "-id")
-            .first()
-        )
-        if tmpl and tmpl.application_fee:
-            return str(tmpl.application_fee)
+    fee = application_fee_for(lead)
+    if fee is not None:
+        return str(fee)
     return str(payment.get("default_amount") or "")
 
 
@@ -367,21 +357,29 @@ def _fee_link_url(*, lead: Lead, institute_key: str, payment: dict, actor=None):
 
     Returns `(url, payment_request_or_None)`.
     """
-    from apps.payments.gateway import (
-        SmartGatewayError, is_enabled, missing_settings,
+    from apps.payments import routing
+    from apps.payments.errors import PaymentGatewayError
+    from apps.payments.services import (
+        NoOnlineRoute, application_fee_request_for, pay_url_for,
+        payable_route,
     )
-    from apps.payments.services import application_fee_request_for, pay_url_for
 
-    if not is_enabled():
-        # Distinguish "deliberately off" from "switched on but broken".
-        # Both fall back safely, but the second is a misconfiguration
-        # someone needs to see rather than a silent no-op.
-        if getattr(settings, "SMARTGATEWAY_ENABLED", False):
-            logger.error(
-                "leads: SMARTGATEWAY_ENABLED is True but these settings "
-                "are unset: %s. Sending the manual fee link instead.",
-                ", ".join(missing_settings()),
-            )
+    # Which bank account this fee settles into decides which merchant
+    # credentials apply — see apps.payments.routing.
+    try:
+        payable_route(
+            routing.route_for_lead(lead, institute_key),
+            f"the application fee of lead {lead.id}",
+        )
+    except NoOnlineRoute as e:
+        # By design (no rule for this fee, or its gateway is switched off
+        # here), not a fault — the manual link is the intended outcome.
+        logger.info("leads: %s Sending the manual fee link.", e)
+        return _static_fee_link_url(institute_key), None
+    except PaymentGatewayError as e:
+        # Switched on but broken for this account. Falls back safely, but
+        # is a misconfiguration someone needs to see.
+        logger.error("leads: %s Sending the manual fee link instead.", e)
         return _static_fee_link_url(institute_key), None
 
     amount = _application_fee_for_lead(lead, payment)
@@ -391,8 +389,9 @@ def _fee_link_url(*, lead: Lead, institute_key: str, payment: dict, actor=None):
             amount=amount or None,
             description=f"Application fee — {payment['payee_name']}",
             actor=actor,
+            institute_key=institute_key,
         )
-    except SmartGatewayError as e:
+    except PaymentGatewayError as e:
         logger.warning(
             "leads: SmartGateway request failed for lead %s (%s) — "
             "falling back to the static fee link.", lead.id, e,
@@ -505,7 +504,7 @@ def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
         # "awaiting payment" badge off this.
         "payment_request_id": getattr(payment_request, "id", None),
         "payment_token": str(getattr(payment_request, "token", "") or ""),
-        "gateway": "smartgateway" if payment_request else "manual",
+        "gateway": payment_request.gateway if payment_request else "manual",
         "amount": str(getattr(payment_request, "amount", "") or ""),
     }
 

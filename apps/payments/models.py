@@ -1,4 +1,9 @@
-"""HDFC SmartGateway payment requests, orders and webhook events.
+"""Online payment requests, orders and webhook events.
+
+Built for HDFC SmartGateway; Razorpay Payment Links (JDSD's application
+fee) ride the same tables — `PaymentRequest.gateway` says which, and
+`routing.py` decides. Everything below about sessions expiring applies
+to both.
 
 Three tables, and the split between the first two is forced by how
 SmartGateway works.
@@ -80,6 +85,19 @@ class PaymentRequest(models.Model):
     currency = models.CharField(max_length=3, default="INR")
     description = models.CharField(max_length=200, blank=True)
 
+    #: Frozen from `routing.resolve()` when the request is raised, so a
+    #: later change to the route table can't point an in-flight order's
+    #: status check at a different merchant.
+    gateway = models.CharField(
+        max_length=20, default="smartgateway", db_index=True,
+    )
+    account = models.CharField(
+        max_length=30, blank=True, db_index=True,
+        help_text="Settlement account key from payments.routing.ACCOUNTS "
+                  "(JDSD_TRUST / JDIFT_MAIN / JDIFT_ROYALTY). Blank = the "
+                  "single shared merchant used before routing existed.",
+    )
+
     status = models.CharField(
         max_length=12, choices=Status.choices, default=Status.PENDING,
         db_index=True,
@@ -147,6 +165,9 @@ class PaymentOrder(models.Model):
         VOID_FAILED = "VOID_FAILED", "Void failed"
         VOIDED = "VOIDED", "Voided"
         AUTO_REFUNDED = "AUTO_REFUNDED", "Auto-refunded"
+        # Razorpay payment links only.
+        EXPIRED = "EXPIRED", "Link expired unpaid"
+        CANCELLED = "CANCELLED", "Link cancelled"
 
     #: The one status that means money actually moved and stayed moved.
     #: AUTHORIZED is deliberately NOT here: it is a hold, not a capture,
@@ -158,7 +179,7 @@ class PaymentOrder(models.Model):
         Status.CHARGED, Status.AUTHENTICATION_FAILED,
         Status.AUTHORIZATION_FAILED, Status.JUSPAY_DECLINED,
         Status.CAPTURE_FAILED, Status.VOID_FAILED, Status.VOIDED,
-        Status.AUTO_REFUNDED,
+        Status.AUTO_REFUNDED, Status.EXPIRED, Status.CANCELLED,
     })
 
     request = models.ForeignKey(
@@ -172,12 +193,13 @@ class PaymentOrder(models.Model):
     )
     sg_order_ref = models.CharField(
         max_length=64, blank=True, db_index=True,
-        help_text="SmartGateway's own 'ordeh_xxx' id from the session "
-                  "response.",
+        help_text="The gateway's own id: SmartGateway's 'ordeh_xxx' from "
+                  "the session response, or Razorpay's 'plink_xxx'.",
     )
     payment_page_url = models.URLField(
         max_length=500, blank=True,
-        help_text="payment_links.web — the hosted page we redirect to.",
+        help_text="The hosted page we redirect to — SmartGateway's "
+                  "payment_links.web or a Razorpay link's short_url.",
     )
     session_expires_at = models.DateTimeField(
         null=True, blank=True,
@@ -227,9 +249,11 @@ class PaymentOrder(models.Model):
 
 
 class SmartGatewayWebhookEvent(models.Model):
-    """Append-only log of every webhook SmartGateway delivered.
+    """Append-only log of every gateway webhook delivered.
 
-    SmartGateway retries until it gets a 200 and warns that a webhook may
+    Named for SmartGateway, which it was built for; Razorpay deliveries
+    land here too, with `event_id` prefixed `rzp:` so the two id spaces
+    can't collide. SmartGateway retries until it gets a 200 and warns that a webhook may
     arrive more than once, so `event_id` (the payload's own `id`) is
     unique and replay is a no-op.
     """

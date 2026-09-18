@@ -33,6 +33,9 @@ SG_ON = dict(
     SMARTGATEWAY_MERCHANT_ID="testhdfc1",
     SMARTGATEWAY_CLIENT_ID="hdfcmaster",
     SMARTGATEWAY_PUBLIC_BASE_URL="https://api.jd.test",
+    SMARTGATEWAY_ACCOUNTS={
+        a: {"live": True} for a in ("JDSD_TRUST", "JDIFT_MAIN", "JDIFT_ROYALTY")
+    },
 )
 
 
@@ -41,9 +44,9 @@ class PortalFeeTests(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        cls.institute = Institute.objects.create(name="JD", code="JD")
+        cls.institute = Institute.objects.create(name="JD", code="JDIFT")
         cls.campus = Campus.objects.create(
-            name="Main", code="MAIN",
+            name="Main", code="BLR",
         )
         cls.program = Program.objects.create(
             name="B.Des", code="BDES", institute=cls.institute,
@@ -253,7 +256,7 @@ class PortalFeeTests(TestCase):
         self.assertEqual(receipt.enrollment, self.enrollment)
         self.assertEqual(receipt.payment_mode, FeeReceipt.PaymentMode.ONLINE)
         self.assertEqual(receipt.instrument_ref, order.order_id)
-        self.assertTrue(receipt.receipt_no.startswith("JDMAIN"))
+        self.assertTrue(receipt.receipt_no.startswith("JDBLR"))
         # No human received it.
         self.assertIsNone(receipt.received_by)
 

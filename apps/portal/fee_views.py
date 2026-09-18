@@ -28,8 +28,11 @@ from rest_framework.views import APIView
 
 from apps.fees.models import FeeReceipt, Installment, OtherFee
 from apps.fees.services.balance import enrollment_balance
-from apps.payments.gateway import SmartGatewayError, is_enabled
-from apps.payments.services import installment_request_for, pay_url_for
+from apps.payments.errors import PaymentGatewayError
+from apps.payments.routing import route_for_installment
+from apps.payments.services import (
+    installment_request_for, pay_url_for, payable_route,
+)
 
 from .permissions import IsStudentOrParent
 
@@ -188,10 +191,21 @@ class FeeSummaryView(APIView):
                 }
                 for f in other_fees
             ],
-            # Drives whether the UI offers "Pay now" at all — the gateway
-            # can be switched off per environment.
-            "online_payment_enabled": is_enabled(),
+            # Drives whether the UI offers "Pay now" at all. Asked of the
+            # row the student can pay next, because each fee settles into
+            # its own account and not every account is online (or routed).
+            "online_payment_enabled": _payable_online(next_payable),
         })
+
+
+def _payable_online(installment) -> bool:
+    if installment is None:
+        return False
+    try:
+        payable_route(route_for_installment(installment), "")
+    except PaymentGatewayError:
+        return False
+    return True
 
 
 class InstallmentPayView(APIView):
@@ -257,7 +271,7 @@ class InstallmentPayView(APIView):
                 actor=request.user,
             )
             url = pay_url_for(payment_request)
-        except SmartGatewayError as e:
+        except PaymentGatewayError as e:
             return Response(
                 {"detail": str(e)}, status=http.HTTP_503_SERVICE_UNAVAILABLE,
             )

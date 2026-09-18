@@ -76,6 +76,10 @@ SG_ON = dict(
     SMARTGATEWAY_PUBLIC_BASE_URL="https://api.jd.test",
     SMARTGATEWAY_AUTOSEND_APPLICATION_LINK=False,
     SMARTGATEWAY_TRUST_WEBHOOK_PAYLOAD=False,
+    # Every account live on the shared credentials above.
+    SMARTGATEWAY_ACCOUNTS={
+        a: {"live": True} for a in ("JDSD_TRUST", "JDIFT_MAIN", "JDIFT_ROYALTY")
+    },
 )
 
 
@@ -324,7 +328,9 @@ class RequestCreationTests(_LeadFixture):
 
     @override_settings(SMARTGATEWAY_ENABLED=False)
     def test_disabled_gateway_refuses_to_raise(self):
-        with self.assertRaises(SmartGatewayError):
+        from apps.payments.errors import PaymentGatewayError
+
+        with self.assertRaises(PaymentGatewayError):
             services.application_fee_request_for(
                 lead=self.lead, amount=Decimal("1000.00"),
             )

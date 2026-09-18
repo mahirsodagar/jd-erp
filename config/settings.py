@@ -339,6 +339,54 @@ SMARTGATEWAY_AUTOSEND_APPLICATION_LINK = env.bool(
     "SMARTGATEWAY_AUTOSEND_APPLICATION_LINK", default=False,
 )
 
+# Settlement accounts (see apps/payments/routing.py for which fee goes
+# where). Each account reads SMARTGATEWAY_<ACCOUNT>_<FIELD>; any blank
+# field falls back to the shared SMARTGATEWAY_<FIELD> above. So:
+#
+#   * HDFC issues separate merchants → set each account's API_KEY,
+#     MERCHANT_ID, CLIENT_ID, RESPONSE_KEY, WEBHOOK_USERNAME/PASSWORD.
+#   * HDFC keeps one merchant with extra TIDs → set only each account's
+#     GATEWAY_REFERENCE_ID, exactly as mapped in PG Control Centre.
+#
+# An account takes no payments until SMARTGATEWAY_<ACCOUNT>_LIVE=True —
+# set it only once HDFC has confirmed that config settles into that bank
+# account. Otherwise the shared fallback would quietly pay (say) Trust
+# fees into the JDIFT account.
+SMARTGATEWAY_ACCOUNTS = {
+    account: {
+        "live": env.bool(f"SMARTGATEWAY_{account}_LIVE", default=False),
+        **{
+            field: env(f"SMARTGATEWAY_{account}_{field.upper()}", default="")
+            for field in (
+                "api_key", "merchant_id", "client_id", "reseller_id",
+                "response_key", "webhook_username", "webhook_password",
+                "gateway_reference_id",
+            )
+        },
+    }
+    for account in ("JDSD_TRUST", "JDIFT_MAIN", "JDIFT_ROYALTY")
+}
+
+
+# --- Razorpay (Payment Links) -------------------------------------------
+# Routed to by apps/payments/routing.py — today only JDSD's application
+# fee, which settles to the JD Educational Trust's Razorpay account. Reuses
+# SMARTGATEWAY_PUBLIC_BASE_URL (the public origin of this API) for the pay
+# link and callback_url. Keys from Dashboard → Account & Settings → API
+# keys; rzp_test_… keys run the whole flow in test mode.
+RAZORPAY_ENABLED = env.bool("RAZORPAY_ENABLED", default=False)
+RAZORPAY_KEY_ID = env("RAZORPAY_KEY_ID", default="")
+RAZORPAY_KEY_SECRET = env("RAZORPAY_KEY_SECRET", default="")
+# The secret typed when creating the webhook in the dashboard (URL
+# <public base>/api/public/razorpay/webhook/, events payment_link.*).
+# Distinct from the key secret. Blank = every webhook is rejected, and
+# payments settle only via the callback redirect or the reconcile command.
+RAZORPAY_WEBHOOK_SECRET = env("RAZORPAY_WEBHOOK_SECRET", default="")
+# How long a minted link stays payable. A fresh one is minted (and the old
+# one cancelled) when the lead opens our pay link after this.
+RAZORPAY_LINK_EXPIRY_MINUTES = env.int("RAZORPAY_LINK_EXPIRY_MINUTES", default=1440)
+RAZORPAY_TIMEOUT = env.int("RAZORPAY_TIMEOUT", default=20)
+
 
 # --- SMS provider selection --------------------------------------------
 

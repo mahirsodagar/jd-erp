@@ -36,9 +36,12 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from django.conf import settings
+
+from .errors import PaymentGatewayError
 
 #: SmartGateway caps order_id at 21 characters and rejects anything with
 #: special characters in it.
@@ -62,21 +65,12 @@ _BROWSER_UA = (
 )
 
 
-class SmartGatewayError(Exception):
+class SmartGatewayError(PaymentGatewayError):
     """Any non-2xx from SmartGateway, or a transport failure.
 
     Carries the gateway's own `error_code` / `error_message` when present
     so logs show the bank's reason rather than a bare status code.
     """
-
-    def __init__(
-        self, message: str, *, status: int | None = None,
-        body: str = "", error_code: str = "",
-    ):
-        super().__init__(message)
-        self.status = status
-        self.body = body
-        self.error_code = error_code
 
 
 # ---------------------------------------------------------------------
@@ -97,31 +91,102 @@ REQUIRED_SETTINGS = {
     ),
 }
 
+#: Per-merchant fields. Each settlement account (see `routing.ACCOUNTS`)
+#: may set its own in settings.SMARTGATEWAY_ACCOUNTS[key]; a blank one
+#: falls back to the shared SMARTGATEWAY_<FIELD>. That covers both ways
+#: HDFC may issue the additional TIDs: as separate merchant logins (own
+#: credentials) or as one merchant routed by `gateway_reference_id`.
+MERCHANT_FIELDS = (
+    "api_key", "merchant_id", "client_id", "reseller_id", "response_key",
+    "webhook_username", "webhook_password", "gateway_reference_id",
+)
 
-def missing_settings() -> list[str]:
+
+@dataclass(frozen=True)
+class MerchantConfig:
+    """The effective credentials for one settlement account.
+
+    `account == ""` is the legacy single-merchant config, which requests
+    raised before routing existed still use.
+    """
+
+    account: str
+    live: bool
+    api_key: str = ""
+    merchant_id: str = ""
+    client_id: str = ""
+    reseller_id: str = ""
+    response_key: str = ""
+    webhook_username: str = ""
+    webhook_password: str = ""
+    gateway_reference_id: str = ""
+
+
+def _account_overrides(account: str) -> dict:
+    return (getattr(settings, "SMARTGATEWAY_ACCOUNTS", {}) or {}).get(account) or {}
+
+
+def merchant_config(account: str = "") -> MerchantConfig:
+    overrides = _account_overrides(account) if account else {}
+    values = {
+        field: (
+            overrides.get(field)
+            or getattr(settings, f"SMARTGATEWAY_{field.upper()}", "")
+            or ""
+        )
+        for field in MERCHANT_FIELDS
+    }
+    if not account:
+        # The legacy config never routes by reference id.
+        values["gateway_reference_id"] = ""
+    # An account is only live when explicitly marked so. Falling back to
+    # the shared credentials must never, by itself, start settling (say)
+    # Trust fees into whatever account the shared merchant pays out to.
+    live = True if not account else bool(overrides.get("live"))
+    return MerchantConfig(account=account, live=live, **values)
+
+
+def configured_accounts() -> list[str]:
+    """Account keys that have a SMARTGATEWAY_ACCOUNTS entry."""
+    return list((getattr(settings, "SMARTGATEWAY_ACCOUNTS", {}) or {}).keys())
+
+
+def missing_settings(account: str = "") -> list[str]:
     """Required settings that are unset. Empty means good to go.
 
     Separate from `is_enabled()` so callers can *report* why the gateway
     is inert rather than just falling back in silence — a half-filled
     .env is otherwise indistinguishable from a deliberate opt-out.
     """
-    return [
-        name for name in REQUIRED_SETTINGS
-        if not getattr(settings, name, "")
-    ]
+    cfg = merchant_config(account)
+    missing = []
+    for name in REQUIRED_SETTINGS:
+        if name == "SMARTGATEWAY_PUBLIC_BASE_URL":
+            if not getattr(settings, name, ""):
+                missing.append(name)
+            continue
+        field = name.removeprefix("SMARTGATEWAY_").lower()
+        if not getattr(cfg, field):
+            missing.append(
+                f"SMARTGATEWAY_{account}_{field.upper()}" if account else name,
+            )
+    if account and not cfg.live:
+        missing.append(f"SMARTGATEWAY_{account}_LIVE")
+    return missing
 
 
-def is_enabled() -> bool:
+def is_enabled(account: str = "") -> bool:
     """True when SmartGateway is switched on AND actually usable.
 
     Both halves matter: `SMARTGATEWAY_ENABLED` is the per-environment
     kill switch, but a half-filled .env must not send leads a broken
     link. Callers treat False as "fall back to UPI/bank instructions",
-    which is always safe.
+    which is always safe. With an `account`, that account must also be
+    marked live.
     """
     if not getattr(settings, "SMARTGATEWAY_ENABLED", False):
         return False
-    return not missing_settings()
+    return not missing_settings(account)
 
 
 def is_sandbox() -> bool:
@@ -136,23 +201,21 @@ def base_url() -> str:
     return SANDBOX_BASE_URL if is_sandbox() else PRODUCTION_BASE_URL
 
 
-def _auth_header() -> str:
+def _auth_header(cfg: MerchantConfig) -> str:
     """`Basic base64(api_key:)` — the API key as username, no password."""
-    api_key = getattr(settings, "SMARTGATEWAY_API_KEY", "")
-    raw = f"{api_key}:".encode("utf-8")
+    raw = f"{cfg.api_key}:".encode("utf-8")
     return "Basic " + base64.b64encode(raw).decode("ascii")
 
 
-def _base_headers(customer_id: str = "") -> dict:
+def _base_headers(cfg: MerchantConfig, customer_id: str = "") -> dict:
     headers = {
-        "Authorization": _auth_header(),
-        "x-merchantid": getattr(settings, "SMARTGATEWAY_MERCHANT_ID", ""),
+        "Authorization": _auth_header(cfg),
+        "x-merchantid": cfg.merchant_id,
         "Accept": "application/json",
         "User-Agent": _BROWSER_UA,
     }
-    reseller = getattr(settings, "SMARTGATEWAY_RESELLER_ID", "") or ""
-    if reseller:
-        headers["x-resellerid"] = reseller
+    if cfg.reseller_id:
+        headers["x-resellerid"] = cfg.reseller_id
     if customer_id:
         headers["x-customerid"] = customer_id
     return headers
@@ -213,11 +276,12 @@ def normalise_phone(phone: str) -> str:
 # ---------------------------------------------------------------------
 
 def _request(
-    method: str, path: str, *, payload: dict | None = None,
+    method: str, path: str, *, cfg: MerchantConfig,
+    payload: dict | None = None,
     customer_id: str = "", extra_headers: dict | None = None,
 ) -> dict:
     url = f"{base_url()}/{path.lstrip('/')}"
-    headers = _base_headers(customer_id)
+    headers = _base_headers(cfg, customer_id)
     headers.update(extra_headers or {})
 
     data = None
@@ -275,6 +339,7 @@ def create_session(
     description: str = "",
     currency: str = "INR",
     udf: dict | None = None,
+    account: str = "",
 ) -> dict:
     """Create a payment-page session; returns SmartGateway's response.
 
@@ -285,14 +350,13 @@ def create_session(
     Raises `SmartGatewayError` on anything other than success.
     """
     validate_order_id(order_id)
+    cfg = merchant_config(account)
 
     payload = {
         "order_id": order_id,
         "amount": format_amount(amount),
         "customer_id": customer_id,
-        "payment_page_client_id": getattr(
-            settings, "SMARTGATEWAY_CLIENT_ID", "",
-        ),
+        "payment_page_client_id": cfg.client_id,
         "action": "paymentPage",
         "return_url": return_url,
         "currency": currency,
@@ -310,13 +374,22 @@ def create_session(
         payload["description"] = description[:200]
     for key, value in (udf or {}).items():
         payload[key] = str(value)
+    if cfg.gateway_reference_id:
+        # Juspay's flat key for "route this order to the PG account mapped
+        # to this reference id in PG Control Centre". Case-sensitive, and a
+        # value the dashboard doesn't know leaves the order stuck STARTED.
+        payload["metadata.JUSPAY:gateway_reference_id"] = (
+            cfg.gateway_reference_id
+        )
 
     return _request(
-        "POST", "/session", payload=payload, customer_id=customer_id,
+        "POST", "/session", cfg=cfg, payload=payload, customer_id=customer_id,
     )
 
 
-def fetch_order(order_id: str, *, customer_id: str = "") -> dict:
+def fetch_order(
+    order_id: str, *, customer_id: str = "", account: str = "",
+) -> dict:
     """GET /orders/{order_id} — the authoritative status.
 
     Used both to reconcile a missing webhook and to re-check an order
@@ -326,6 +399,7 @@ def fetch_order(order_id: str, *, customer_id: str = "") -> dict:
     validate_order_id(order_id)
     return _request(
         "GET", f"/orders/{urllib.parse.quote(order_id)}",
+        cfg=merchant_config(account),
         customer_id=customer_id,
         extra_headers={"version": API_VERSION},
     )
@@ -364,7 +438,7 @@ def signature_payload(params: dict) -> str:
     return _php_urlencode(joined)
 
 
-def verify_return_signature(params: dict) -> bool:
+def verify_return_signature(params: dict, account: str = "") -> bool:
     """Validate the HMAC signature on SmartGateway's return_url params.
 
     SmartGateway redirects the payer back with something like
@@ -379,7 +453,7 @@ def verify_return_signature(params: dict) -> bool:
     Returns False when the key isn't configured — fail closed, same as
     the webhook credentials.
     """
-    response_key = getattr(settings, "SMARTGATEWAY_RESPONSE_KEY", "")
+    response_key = merchant_config(account).response_key
     if not response_key:
         return False
 
@@ -423,10 +497,21 @@ def check_webhook_auth(authorization_header: str) -> bool:
     and sent as an ordinary `Authorization: Basic` header. Compared with
     `hmac.compare_digest` so a wrong guess can't be timed out character by
     character. Fails closed when either side is unset.
+
+    With separate merchants each dashboard may hold its own pair, so any
+    configured account's credentials are accepted. That is safe because
+    the webhook only ever triggers a re-read of the order, and that
+    re-read uses the order's own account.
     """
-    expected_user = getattr(settings, "SMARTGATEWAY_WEBHOOK_USERNAME", "")
-    expected_pass = getattr(settings, "SMARTGATEWAY_WEBHOOK_PASSWORD", "")
-    if not expected_user or not expected_pass:
+    pairs = {
+        (cfg.webhook_username, cfg.webhook_password)
+        for cfg in (
+            merchant_config(""),
+            *(merchant_config(a) for a in configured_accounts()),
+        )
+        if cfg.webhook_username and cfg.webhook_password
+    }
+    if not pairs:
         return False
 
     header = (authorization_header or "").strip()
@@ -441,8 +526,11 @@ def check_webhook_auth(authorization_header: str) -> bool:
     username, sep, password = decoded.partition(":")
     if not sep:
         return False
-    # Both compared, and always both, so the timing doesn't leak which
-    # half was wrong.
-    user_ok = hmac.compare_digest(username, expected_user)
-    pass_ok = hmac.compare_digest(password, expected_pass)
-    return user_ok and pass_ok
+    ok = False
+    for expected_user, expected_pass in pairs:
+        # Both compared, and always both, so the timing doesn't leak which
+        # half was wrong.
+        user_ok = hmac.compare_digest(username, expected_user)
+        pass_ok = hmac.compare_digest(password, expected_pass)
+        ok = ok or (user_ok and pass_ok)
+    return ok

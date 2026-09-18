@@ -1,4 +1,4 @@
-"""Business logic around SmartGateway payment requests.
+"""Business logic around online payment requests (SmartGateway + Razorpay).
 
 Entry points that matter:
 
@@ -26,12 +26,15 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from . import razorpay, routing
+from .errors import PaymentGatewayError
 from .gateway import (
     ORDER_ID_MAX_LENGTH,
     SmartGatewayError,
     create_session,
     fetch_order,
     is_enabled,
+    missing_settings,
 )
 from .models import PaymentOrder, PaymentRequest, SmartGatewayWebhookEvent
 
@@ -149,8 +152,61 @@ def pay_url_for(payment_request: PaymentRequest) -> str:
     return f"{_public_api_base()}/api/public/pay/{payment_request.token}/"
 
 
+class NoOnlineRoute(PaymentGatewayError):
+    """No online payment for this fee, by design: nothing in the route
+    table, an unknown gateway, or that gateway's master switch is off.
+    Callers fall back to manual payment without raising an alarm."""
+
+
+def gateway_usable(gateway: str, account: str = "") -> bool:
+    """Whether a request on this gateway/account can be paid right now."""
+    if gateway == routing.GATEWAY_RAZORPAY:
+        return razorpay.is_enabled()
+    if gateway == routing.GATEWAY_SMARTGATEWAY:
+        return is_enabled(account)
+    return False
+
+
+def gateway_missing_settings(gateway: str, account: str = "") -> list[str]:
+    if gateway == routing.GATEWAY_RAZORPAY:
+        return razorpay.missing_settings()
+    return missing_settings(account)
+
+
+_MASTER_SWITCH = {
+    routing.GATEWAY_SMARTGATEWAY: "SMARTGATEWAY_ENABLED",
+    routing.GATEWAY_RAZORPAY: "RAZORPAY_ENABLED",
+}
+
+
+def payable_route(route: routing.Route | None, what: str) -> routing.Route:
+    """Check a resolved route can take a payment right now.
+
+    Raises `NoOnlineRoute` when that is deliberate (no rule, or the
+    gateway switched off for this environment), and `PaymentGatewayError`
+    naming the missing settings when the gateway is switched on but
+    broken for this account — a misconfiguration someone must see.
+    """
+    if route is None:
+        raise NoOnlineRoute(f"No online payment route is configured for {what}.")
+    switch = _MASTER_SWITCH.get(route.gateway)
+    if switch is None or not getattr(settings, switch, False):
+        raise NoOnlineRoute(
+            f"{what} is routed to {route.gateway} ({route.label}), which is "
+            f"not enabled in this environment.",
+        )
+    if not gateway_usable(route.gateway, route.account):
+        raise PaymentGatewayError(
+            f"{route.gateway} is not usable for {route.label}. Missing: "
+            + ", ".join(gateway_missing_settings(route.gateway, route.account))
+            + ".",
+        )
+    return route
+
+
 def application_fee_request_for(
     lead, *, amount, description: str = "", actor=None, reuse: bool = True,
+    institute_key: str = "",
 ) -> PaymentRequest:
     """Get (or raise) a payable request for this lead's application fee.
 
@@ -158,18 +214,21 @@ def application_fee_request_for(
     doesn't invalidate the URL already sitting in the student's SMS. Pass
     `reuse=False` when the amount has changed.
 
-    Raises `SmartGatewayError` when the gateway is off/misconfigured or
-    the amount can't be resolved; callers decide whether that's fatal or
-    a reason to fall back to manual instructions.
+    The settlement account comes from `routing.route_for_lead`; an open
+    request on a different account is not reused.
+
+    Raises `PaymentGatewayError` when the gateway is off/misconfigured, the
+    fee has no online route, or the amount can't be resolved;
+    callers decide whether that's fatal or a reason to fall back to
+    manual instructions.
 
     Note this makes NO network call — the bank is only contacted when the
     student actually opens the link.
     """
-    if not is_enabled():
-        raise SmartGatewayError(
-            "SmartGateway is not enabled. Set SMARTGATEWAY_ENABLED=True "
-            "and the API key / merchant id / client id in the environment.",
-        )
+    route = payable_route(
+        routing.route_for_lead(lead, institute_key),
+        f"the application fee of lead {lead.id}",
+    )
     if amount in (None, ""):
         raise SmartGatewayError(
             f"No application fee amount resolved for lead {lead.id}. Set "
@@ -180,12 +239,19 @@ def application_fee_request_for(
     amount = Decimal(str(amount))
     if reuse:
         existing = open_application_fee_request(lead)
-        if existing and existing.amount == amount:
+        if (
+            existing
+            and existing.amount == amount
+            and existing.gateway == route.gateway
+            and existing.account == route.account
+        ):
             return existing
 
     return PaymentRequest.objects.create(
         purpose=PaymentRequest.Purpose.APPLICATION_FEE,
         lead=lead,
+        gateway=route.gateway,
+        account=route.account,
         amount=amount,
         description=description or f"Application fee — {lead.name}",
         created_by=actor,
@@ -215,18 +281,25 @@ def installment_request_for(
     not its face value — a student who part-paid at the counter should
     only be asked online for what is left.
 
-    A pending request whose amount no longer matches is cancelled rather
-    than left lying around: its token would otherwise still redirect to a
-    live payment page for the stale figure.
+    A pending request whose amount or settlement account no longer
+    matches is cancelled rather than left lying around: its token would
+    otherwise still redirect to a live payment page for the stale figure.
 
-    Raises `SmartGatewayError` when the gateway is off or the amount is
-    not a positive number. Makes no network call.
+    Raises `PaymentGatewayError` when the gateway is off, the installment
+    has no online route, or the amount is not a positive number.
+    Makes no network call.
     """
-    if not is_enabled():
-        raise SmartGatewayError(
-            "Online payment is not available right now. Please contact the "
-            "accounts office.",
+    try:
+        route = payable_route(
+            routing.route_for_installment(installment),
+            f"installment {installment.pk}",
         )
+    except PaymentGatewayError as e:
+        logger.warning("payments: %s", e)
+        raise type(e)(
+            "Online payment is not available for this fee. Please contact "
+            "the accounts office.",
+        ) from e
 
     amount = Decimal(str(amount))
     if amount <= Decimal("0"):
@@ -234,7 +307,11 @@ def installment_request_for(
 
     existing = open_installment_request(installment)
     if existing is not None:
-        if existing.amount == amount:
+        if (
+            existing.amount == amount
+            and existing.gateway == route.gateway
+            and existing.account == route.account
+        ):
             return existing
         existing.status = PaymentRequest.Status.CANCELLED
         existing.save(update_fields=["status", "updated_on"])
@@ -243,6 +320,8 @@ def installment_request_for(
     return PaymentRequest.objects.create(
         purpose=PaymentRequest.Purpose.FEE_INSTALLMENT,
         installment=installment,
+        gateway=route.gateway,
+        account=route.account,
         amount=amount,
         description=description or (
             f"Installment #{installment.sequence} — {student.student_name}"
@@ -317,26 +396,42 @@ def start_or_resume_order(payment_request: PaymentRequest) -> PaymentOrder:
     mints a fresh order otherwise — which is the whole reason the public
     link points at us instead of at the bank.
 
-    Raises `SmartGatewayError` if the session can't be created.
+    Raises `PaymentGatewayError` if the page can't be created.
     """
     latest = payment_request.orders.order_by("-created_on").first()
     if latest is not None and _session_still_valid(latest):
         return latest
 
-    attempt = payment_request.attempt_count + 1
-    order_id = _build_order_id(payment_request, attempt)
-    payer = _payer(payment_request)
+    if payment_request.gateway == routing.GATEWAY_RAZORPAY:
+        if latest is not None and _retire_razorpay_link(latest):
+            # The old link turned out to be paid — nothing new to mint.
+            return latest
+        order = _new_order(payment_request)
+        return _mint_razorpay_link(payment_request, order)
 
+    order = _new_order(payment_request)
+    return _mint_smartgateway_session(payment_request, order)
+
+
+def _new_order(payment_request: PaymentRequest) -> PaymentOrder:
+    attempt = payment_request.attempt_count + 1
     order = PaymentOrder.objects.create(
         request=payment_request,
-        order_id=order_id,
+        order_id=_build_order_id(payment_request, attempt),
         amount=payment_request.amount,
     )
     # Bumped before the call, not after: a failed session still burns the
     # order_id as far as the bank is concerned, and reusing one is an error.
     payment_request.attempt_count = attempt
     payment_request.save(update_fields=["attempt_count", "updated_on"])
+    return order
 
+
+def _mint_smartgateway_session(
+    payment_request: PaymentRequest, order: PaymentOrder,
+) -> PaymentOrder:
+    order_id = order.order_id
+    payer = _payer(payment_request)
     first_name, _, last_name = payer["name"].strip().partition(" ")
 
     try:
@@ -351,7 +446,12 @@ def start_or_resume_order(payment_request: PaymentRequest) -> PaymentOrder:
             last_name=last_name,
             description=payment_request.description,
             currency=payment_request.currency,
-            udf={"udf1": payer["udf1"], "udf2": payment_request.purpose},
+            # udf3 names the settlement account in the bank's dashboard.
+            udf={
+                "udf1": payer["udf1"], "udf2": payment_request.purpose,
+                "udf3": payment_request.account,
+            },
+            account=payment_request.account,
         )
     except SmartGatewayError:
         order.status = PaymentOrder.Status.JUSPAY_DECLINED
@@ -379,6 +479,101 @@ def start_or_resume_order(payment_request: PaymentRequest) -> PaymentOrder:
     return order
 
 
+def _razorpay_link_ttl() -> timedelta:
+    minutes = int(getattr(settings, "RAZORPAY_LINK_EXPIRY_MINUTES", 1440) or 1440)
+    # Razorpay rejects an expire_by less than 15 minutes out.
+    return timedelta(minutes=max(minutes, 20))
+
+
+def _retire_razorpay_link(order: PaymentOrder) -> bool:
+    """Make sure an old link can't be paid once a new one exists.
+
+    Returns True when the old link was actually paid (settled here), in
+    which case no new link should be minted. Otherwise cancels it — best
+    effort: an already-expired link refuses cancellation, which is fine.
+    Without this, a lead holding the old link in an open tab could pay
+    twice.
+    """
+    if order.is_terminal or not order.sg_order_ref:
+        return order.is_paid
+    try:
+        reconcile_order(order)
+    except PaymentGatewayError as e:
+        logger.warning(
+            "payments: could not re-check Razorpay link %s before replacing "
+            "it: %s", order.sg_order_ref, e,
+        )
+    order.refresh_from_db()
+    if order.is_paid:
+        return True
+    if not order.is_terminal:
+        try:
+            body = razorpay.cancel_payment_link(order.sg_order_ref)
+            apply_order_body(order, razorpay.normalise_link(body))
+        except PaymentGatewayError as e:
+            logger.warning(
+                "payments: could not cancel Razorpay link %s: %s",
+                order.sg_order_ref, e,
+            )
+    return False
+
+
+def _mint_razorpay_link(
+    payment_request: PaymentRequest, order: PaymentOrder,
+) -> PaymentOrder:
+    payer = _payer(payment_request)
+    expires_at = timezone.now() + _razorpay_link_ttl()
+    try:
+        response = razorpay.create_payment_link(
+            reference_id=order.order_id,
+            amount=payment_request.amount,
+            currency=payment_request.currency,
+            callback_url=return_url_for(payment_request),
+            description=payment_request.description,
+            customer_name=payer["name"],
+            customer_email=payer["email"],
+            customer_phone=payer["phone"],
+            expire_by=expires_at,
+            notes={
+                "purpose": payment_request.purpose,
+                "account": payment_request.account,
+                "customer_id": payer["customer_id"],
+                "request": payment_request.pk,
+            },
+        )
+    except PaymentGatewayError as e:
+        order.status = PaymentOrder.Status.CANCELLED
+        order.bank_error_code = str(getattr(e, "error_code", "") or "")[:64]
+        order.bank_error_message = f"Link creation failed: {e}"[:300]
+        order.save(update_fields=[
+            "status", "bank_error_code", "bank_error_message", "updated_on",
+        ])
+        raise
+
+    order.sg_order_ref = response.get("id") or ""
+    order.payment_page_url = response.get("short_url") or ""
+    expire_by = response.get("expire_by")
+    order.session_expires_at = (
+        datetime.fromtimestamp(int(expire_by), tz=dt_timezone.utc)
+        if expire_by else expires_at
+    )
+    order.status = (
+        razorpay.LINK_STATUS_MAP.get(response.get("status") or "")
+        or PaymentOrder.Status.NEW
+    )
+    order.last_payload = response
+    order.save(update_fields=[
+        "sg_order_ref", "payment_page_url", "session_expires_at",
+        "status", "last_payload", "updated_on",
+    ])
+
+    if not order.payment_page_url:
+        raise razorpay.RazorpayError(
+            f"Razorpay returned no short_url for {order.order_id}.",
+        )
+    return order
+
+
 # ---------------------------------------------------------------------
 # Settling
 # ---------------------------------------------------------------------
@@ -392,6 +587,18 @@ def _payment_mode(order: PaymentOrder) -> str:
     finer detail survives on the order.
     """
     return "UPI" if (order.payment_method_type or "").upper() == "UPI" else "ONLINE"
+
+
+def _gateway_label(payment_request: PaymentRequest) -> str:
+    """"HDFC SmartGateway — JD Educational Trust", so accounts can tell
+    from a receipt which gateway and bank account the money came through."""
+    name = (
+        "Razorpay" if payment_request.gateway == routing.GATEWAY_RAZORPAY
+        else "HDFC SmartGateway"
+    )
+    if not payment_request.account:
+        return name
+    return f"{name} — {routing.account_label(payment_request.account)}"
 
 
 def _mark_lead_fee_paid(payment_request: PaymentRequest, order: PaymentOrder) -> None:
@@ -411,7 +618,8 @@ def _mark_lead_fee_paid(payment_request: PaymentRequest, order: PaymentOrder) ->
     lead.application_fee_mode = _payment_mode(order)
     lead.application_fee_ref = order.txn_id or order.order_id
     lead.application_fee_notes = (
-        f"Paid online via HDFC SmartGateway (order {order.order_id}"
+        f"Paid online via {_gateway_label(payment_request)} "
+        f"(order {order.order_id}"
         + (f", {order.payment_method}" if order.payment_method else "")
         + ")."
     )
@@ -461,10 +669,10 @@ def _record_installment_receipt(
         # The bank's order id, not the txn id: it is what makes this
         # write idempotent, and it is what support will quote back.
         instrument_ref=order.order_id,
-        bank="HDFC SmartGateway",
+        bank=_gateway_label(payment_request)[:120],
         received_date=timezone.localtime(charged_at).date(),
         notes=(
-            f"Paid online by the student via HDFC SmartGateway "
+            f"Paid online by the student via {_gateway_label(payment_request)} "
             f"(order {order.order_id}"
             + (f", txn {order.txn_id}" if order.txn_id else "")
             + (f", {order.payment_method}" if order.payment_method else "")
@@ -609,15 +817,27 @@ def apply_order_body(order: PaymentOrder, body: dict) -> PaymentOrder:
 
 
 def reconcile_order(order: PaymentOrder) -> PaymentOrder:
-    """Pull an order's current state from SmartGateway and apply it.
+    """Pull an order's current state from its gateway and apply it.
 
     Also the trust step after a webhook: SmartGateway authenticates
     webhooks with shared credentials rather than signing the body, so the
-    payload alone is not proof that money moved.
+    payload alone is not proof that money moved. (Razorpay does sign, but
+    settling from the API's answer keeps one path for both.)
     """
+    if order.request.gateway == routing.GATEWAY_RAZORPAY:
+        if not order.sg_order_ref:
+            raise razorpay.RazorpayError(
+                f"Order {order.order_id} never got a Razorpay link id.",
+            )
+        link = razorpay.fetch_payment_link(order.sg_order_ref)
+        return apply_order_body(order, razorpay.normalise_link(link))
+
     body = fetch_order(
         order.order_id,
         customer_id=_payer(order.request)["customer_id"],
+        # The merchant that created the order — another account's
+        # credentials would just 404 it.
+        account=order.request.account,
     )
     return apply_order_body(order, body)
 
@@ -703,4 +923,74 @@ def process_webhook_event(
     event.save(update_fields=[
         "order", "status", "error_message", "processed_at",
     ])
+    return event
+
+
+#: Razorpay events we act on. Every one of them only triggers a re-read
+#: of the link; the payload itself is never applied.
+RAZORPAY_HANDLED_EVENTS = {
+    "payment_link.paid",
+    "payment_link.partially_paid",
+    "payment_link.expired",
+    "payment_link.cancelled",
+}
+
+
+def process_razorpay_webhook(*, event_id: str, body: dict) -> SmartGatewayWebhookEvent:
+    """Record and act on one signature-verified Razorpay webhook.
+
+    Same contract as `process_webhook_event`: idempotent on `event_id`
+    (Razorpay's `x-razorpay-event-id`, stored as `rzp:<id>`), and always
+    safe to answer 200 once this returns.
+    """
+    event_id = f"rzp:{event_id}"
+    event_name = str(body.get("event") or "")
+
+    existing = SmartGatewayWebhookEvent.objects.filter(event_id=event_id).first()
+    if existing is not None:
+        return existing
+
+    event = SmartGatewayWebhookEvent.objects.create(
+        event_id=event_id[:120], event_name=event_name[:60], payload=body,
+    )
+
+    if event_name not in RAZORPAY_HANDLED_EVENTS:
+        event.status = SmartGatewayWebhookEvent.Status.SKIPPED
+        event.processed_at = timezone.now()
+        event.save(update_fields=["status", "processed_at"])
+        return event
+
+    link = ((body.get("payload") or {}).get("payment_link") or {}).get("entity") or {}
+    order = None
+    if link.get("id"):
+        order = PaymentOrder.objects.filter(
+            sg_order_ref=link["id"], request__gateway=routing.GATEWAY_RAZORPAY,
+        ).select_related("request").first()
+    if order is None and link.get("reference_id"):
+        order = PaymentOrder.objects.filter(
+            order_id=link["reference_id"],
+            request__gateway=routing.GATEWAY_RAZORPAY,
+        ).select_related("request").first()
+
+    if order is None:
+        event.status = SmartGatewayWebhookEvent.Status.ERROR
+        event.error_message = (
+            f"No Razorpay PaymentOrder matches link {link.get('id')!r} "
+            f"(reference {link.get('reference_id')!r})."
+        )
+        event.processed_at = timezone.now()
+        event.save(update_fields=["status", "error_message", "processed_at"])
+        return event
+
+    event.order = order
+    try:
+        reconcile_order(order)
+    except Exception as e:
+        logger.exception("payments: Razorpay webhook %s failed: %s", event_id, e)
+        event.status = SmartGatewayWebhookEvent.Status.ERROR
+        event.error_message = f"{type(e).__name__}: {e}"
+    else:
+        event.status = SmartGatewayWebhookEvent.Status.PROCESSED
+    event.processed_at = timezone.now()
+    event.save(update_fields=["order", "status", "error_message", "processed_at"])
     return event

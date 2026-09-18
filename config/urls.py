@@ -8,7 +8,8 @@ from apps.leads.exam_views import (
     PublicExamStartView, PublicExamSubmitView, PublicExamView,
 )
 from apps.payments.views import (
-    PayRedirectView, PayReturnView, SmartGatewayWebhookView,
+    PayRedirectView, PayReturnView, RazorpayWebhookView,
+    SmartGatewayWebhookView,
 )
 
 urlpatterns = [
@@ -35,6 +36,10 @@ urlpatterns = [
     # credentials configured in the SmartGateway dashboard.
     path("api/public/smartgateway/webhook/",
          SmartGatewayWebhookView.as_view(), name="smartgateway-webhook"),
+    # Razorpay webhook (JDSD application fee). No JWT — authenticated by
+    # the X-Razorpay-Signature HMAC over the body.
+    path("api/public/razorpay/webhook/",
+         RazorpayWebhookView.as_view(), name="razorpay-webhook"),
     path("api/", include("apps.accounts.urls")),
     path("api/", include("apps.roles.urls")),
     path("api/audit/", include("apps.audit.urls")),

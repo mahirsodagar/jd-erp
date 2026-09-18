@@ -21,16 +21,19 @@ class PaymentOrderInline(admin.TabularInline):
 @admin.register(PaymentRequest)
 class PaymentRequestAdmin(admin.ModelAdmin):
     list_display = (
-        "id", "purpose", "lead", "amount", "status",
+        "id", "purpose", "lead", "amount", "gateway", "account", "status",
         "attempt_count", "paid_at", "created_on",
     )
-    list_filter = ("purpose", "status", "created_on")
+    list_filter = ("purpose", "gateway", "account", "status", "created_on")
     search_fields = (
         "token", "lead__name", "lead__phone", "lead__email",
         "orders__order_id", "orders__txn_id",
     )
     raw_id_fields = ("lead", "created_by", "paid_order")
-    readonly_fields = ("token", "attempt_count", "created_on", "updated_on")
+    readonly_fields = (
+        "token", "gateway", "account", "attempt_count",
+        "created_on", "updated_on",
+    )
     inlines = [PaymentOrderInline]
 
 

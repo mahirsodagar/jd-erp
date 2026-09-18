@@ -290,6 +290,62 @@ the unset settings, or call
 deliberate `SMARTGATEWAY_ENABLED=False`. The lead page shows the same
 thing on its *Online payments* card.
 
+### Settlement accounts and routing
+
+Fees settle into three HDFC accounts, chosen by `apps/payments/routing.py`
+from the fee kind, the **program's** institute and the campus code
+(first matching rule wins):
+
+| Fee | Institute | Campus | Gateway → account |
+|---|---|---|---|
+| Application fee | JDSD | any | Razorpay → `JDSD_TRUST` (not built: manual link for now) |
+| Registration, installments | JDSD | any | SmartGateway → `JDSD_TRUST` (50100515602102) |
+| Registration | JDIFT | any | SmartGateway → `JDIFT_ROYALTY` (50200123417910) |
+| Application fee, installments | JDIFT | BLR, GOA | SmartGateway → `JDIFT_MAIN` (59245987654321) |
+| anything else | | | no route → manual link / no "Pay now" (on hold) |
+
+The route is frozen onto `PaymentRequest.gateway` / `.account` when the
+request is raised. Session creation, `/orders` reads and return-URL
+signature checks all use that account's credentials. Rows with
+`account=""` predate routing and keep using the shared config.
+
+Each account reads `SMARTGATEWAY_<ACCOUNT>_<FIELD>` and falls back to
+the shared value, which covers both ways HDFC may issue the extra TIDs:
+separate merchants (per-account credentials) or one merchant plus
+`GATEWAY_REFERENCE_ID` (sent as `metadata.JUSPAY:gateway_reference_id`).
+An account takes nothing until `SMARTGATEWAY_<ACCOUNT>_LIVE=True`. The
+webhook accepts any configured account's credentials. The status endpoint
+lists each account's `enabled` / `missing_settings`.
+
+Override the whole table per environment with `settings.PAYMENT_ROUTES`.
+
+### Razorpay (JDSD application fee)
+
+`apps/payments/razorpay.py` uses **Payment Links**, not Standard
+Checkout. A link is a hosted page created on the server, so it fits the
+same PaymentRequest → PaymentOrder split as SmartGateway and needs no
+frontend. One `PaymentOrder` is one link: `order_id` goes out as the
+link's `reference_id`, and `sg_order_ref` holds the `plink_…` id.
+
+- **Opening the pay link** creates a link that expires after
+  `RAZORPAY_LINK_EXPIRY_MINUTES` and 302s to its `short_url`. Razorpay's
+  own SMS/email is turned off. Before a replacement is created, the old
+  link is re-checked (and settled if it was paid) or cancelled, so a lead
+  can't pay twice from two tabs.
+- **Callback**: `/api/public/pay/<token>/return/`, the same view as
+  SmartGateway. The signature is
+  `HMAC_SHA256(link_id|reference_id|status|payment_id, key_secret)`.
+- **Webhook**: `/api/public/razorpay/webhook/`, checked against
+  `X-Razorpay-Signature` over the raw body. Events are logged in the
+  webhook-event table as `rzp:<event id>`.
+- Every path settles from `GET /v1/payment_links/{id}`, converted by
+  `normalise_link()` into the body shape `apply_order_body` already reads.
+- Razorpay rejects prefill it doesn't like (e.g. `9999999999` → "Recurring
+  digits in customer contact"). The client then retries once without the
+  customer block rather than failing the payment.
+- `reconcile_smartgateway` also polls Razorpay orders when
+  `RAZORPAY_ENABLED` is on.
+
 ### Amount resolution
 
 The charged amount comes from `_application_fee_for_lead`, unchanged from

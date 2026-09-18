@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from .models import PaymentOrder, PaymentRequest
+from .routing import account_label
 from .services import pay_url_for
 
 
@@ -28,12 +29,14 @@ class PaymentRequestSerializer(serializers.ModelSerializer):
     #: The URL that actually goes out in the SMS. Built rather than
     #: stored, so it follows the configured public base URL.
     pay_url = serializers.SerializerMethodField()
+    account_label = serializers.SerializerMethodField()
 
     class Meta:
         model = PaymentRequest
         fields = (
             "id", "token", "purpose", "lead", "lead_name", "installment",
             "amount", "currency", "description",
+            "gateway", "account", "account_label",
             "status", "paid_at", "attempt_count", "pay_url", "orders",
             "created_by", "created_on", "updated_on",
         )
@@ -42,3 +45,6 @@ class PaymentRequestSerializer(serializers.ModelSerializer):
 
     def get_pay_url(self, obj) -> str:
         return pay_url_for(obj)
+
+    def get_account_label(self, obj) -> str:
+        return account_label(obj.account)

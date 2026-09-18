@@ -1,4 +1,5 @@
-"""Re-read non-terminal SmartGateway orders and settle any that were paid.
+"""Re-read non-terminal gateway orders (SmartGateway and Razorpay) and
+settle any that were paid.
 
 The safety net for webhooks that never landed — a misconfigured endpoint,
 or downtime that outlasted SmartGateway's retry schedule. Safe to run on
@@ -10,10 +11,11 @@ settled via webhook is left alone.
 
 from datetime import timedelta
 
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from apps.payments.gateway import SmartGatewayError, is_enabled
+from apps.payments.errors import PaymentGatewayError
 from apps.payments.models import PaymentOrder
 from apps.payments.services import reconcile_order
 
@@ -32,10 +34,21 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        if not is_enabled():
+        # Only the master switch here: with per-account merchants the
+        # shared credentials may legitimately be blank. Each order is
+        # checked with its own account's credentials, and an account
+        # that is misconfigured shows up as a per-order error below.
+        gateways = [
+            g for g, switch in (
+                ("smartgateway", "SMARTGATEWAY_ENABLED"),
+                ("razorpay", "RAZORPAY_ENABLED"),
+            )
+            if getattr(settings, switch, False)
+        ]
+        if not gateways:
             self.stderr.write(self.style.ERROR(
-                "SmartGateway is not enabled — set SMARTGATEWAY_ENABLED and "
-                "the API key / merchant id / client id.",
+                "No gateway is enabled — set SMARTGATEWAY_ENABLED and/or "
+                "RAZORPAY_ENABLED.",
             ))
             return
 
@@ -47,6 +60,7 @@ class Command(BaseCommand):
             .filter(created_on__gte=cutoff)
             .exclude(status__in=PaymentOrder.TERMINAL_STATUSES)
             .exclude(sg_order_ref="")
+            .filter(request__gateway__in=gateways)
             .select_related(
                 "request", "request__lead", "request__installment",
                 "request__installment__enrollment",
@@ -66,7 +80,7 @@ class Command(BaseCommand):
             previous = order.status
             try:
                 updated = reconcile_order(order)
-            except SmartGatewayError as e:
+            except PaymentGatewayError as e:
                 errors += 1
                 self.stderr.write(self.style.WARNING(
                     f"  {order.order_id}: {e}",
