@@ -176,14 +176,6 @@ class Student(models.Model):
         on_delete=models.SET_NULL, related_name="student",
         help_text="User account used by the student to log into the student panel.",
     )
-    portal_temp_password = models.CharField(
-        max_length=64, blank=True,
-        help_text=(
-            "Last issued plaintext password for the student portal. "
-            "Stored so staff can re-share it without forcing a reset. "
-            "Mirrors the JD_ERP PHP behavior — treat as sensitive."
-        ),
-    )
     parent_user_account = models.OneToOneField(
         settings.AUTH_USER_MODEL, null=True, blank=True,
         on_delete=models.SET_NULL, related_name="parent_of_student",

@@ -182,6 +182,14 @@ class Employee(models.Model):
     status = models.PositiveSmallIntegerField(
         choices=Status.choices, default=Status.ACTIVE,
     )
+    # The latest activate / deactivate. Earlier changes are kept by
+    # auditlog, which tracks these fields like any other.
+    status_reason = models.TextField(blank=True)
+    status_changed_at = models.DateTimeField(null=True, blank=True)
+    status_changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="employee_status_changes",
+    )
     is_deleted = models.BooleanField(default=False)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
@@ -189,14 +197,6 @@ class Employee(models.Model):
     user_account = models.OneToOneField(
         settings.AUTH_USER_MODEL, null=True, blank=True,
         on_delete=models.SET_NULL, related_name="employee",
-    )
-    portal_temp_password = models.CharField(
-        max_length=64, blank=True,
-        help_text=(
-            "Last issued plaintext password for the employee's portal "
-            "account. Stored so HR can re-share it without forcing a "
-            "reset. Mirrors the JD_ERP PHP behavior — treat as sensitive."
-        ),
     )
 
     # Audit fields
@@ -231,6 +231,19 @@ class Employee(models.Model):
         return " ".join(
             p for p in (self.first_name, self.middle_name, self.family_name) if p
         )
+
+    def set_status(self, status, *, reason="", user=None):
+        """Change `status`, recording why, when and by whom."""
+        self.status = status
+        self.status_reason = reason
+        self.status_changed_at = timezone.now()
+        self.status_changed_by = user
+        fields = ["status", "status_reason", "status_changed_at",
+                  "status_changed_by", "updated_on"]
+        if user:
+            self.updated_by = user
+            fields.append("updated_by")
+        self.save(update_fields=fields)
 
     def soft_delete(self, user=None):
         self.is_deleted = True

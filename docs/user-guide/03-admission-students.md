@@ -101,8 +101,10 @@ detected.
 
 On the student's profile, use **Send portal credentials**.
 
-This resets their password, saves it so you can re-share it without another
-reset, and emails the student their username, password and the portal address.
+This resets their password and emails the student their username, password and
+the portal address. The password is shown to you once, on screen, right after
+you send it. It is not saved anywhere, so if it's lost later, send the
+credentials again to issue a new one.
 
 Use it when:
 

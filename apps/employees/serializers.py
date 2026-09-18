@@ -111,7 +111,7 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
     photo_url = serializers.SerializerMethodField()
     qr_url = serializers.SerializerMethodField()
     portal_username = serializers.SerializerMethodField()
-    portal_temp_password = serializers.SerializerMethodField()
+    status_changed_by_name = serializers.SerializerMethodField()
     documents = EmployeeDocumentSerializer(many=True, read_only=True)
 
     class Meta:
@@ -134,8 +134,9 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
             "mobile_primary", "mobile_alternate",
             "email_primary", "email_alternate",
             "photo_url", "qr_url",
-            "status", "is_deleted",
-            "user_account", "portal_username", "portal_temp_password",
+            "status", "status_reason", "status_changed_at",
+            "status_changed_by_name", "is_deleted",
+            "user_account", "portal_username",
             "documents",
             "created_by", "created_on", "updated_by", "updated_on",
         ]
@@ -184,15 +185,14 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         return request.build_absolute_uri(obj.qr_code.url) if obj.qr_code and request else None
 
+    def get_status_changed_by_name(self, obj):
+        u = obj.status_changed_by
+        return (u.full_name or u.username) if u else ""
+
     def get_portal_username(self, obj):
         if not self._can_view_credentials(obj):
             return ""
         return getattr(obj.user_account, "username", "") if obj.user_account_id else ""
-
-    def get_portal_temp_password(self, obj):
-        if not self._can_view_credentials(obj):
-            return ""
-        return obj.portal_temp_password or ""
 
     def _can_view_credentials(self, obj) -> bool:
         request = self.context.get("request")

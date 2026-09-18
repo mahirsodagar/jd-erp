@@ -162,9 +162,12 @@ def finalize(*, application: RelievingApplication,
     ])
 
     if set_inactive:
-        emp = application.employee
-        emp.status = Employee.Status.INACTIVE
-        emp.save(update_fields=["status", "updated_on"])
+        application.employee.set_status(
+            Employee.Status.INACTIVE,
+            reason=(f"Relieved — relieving letter {application.relieving_letter_no}, "
+                    f"last working day {last_working_date_approved:%d/%m/%Y}"),
+            user=finalized_by,
+        )
 
     return application
 

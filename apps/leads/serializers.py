@@ -3,6 +3,7 @@ from rest_framework import serializers
 
 from apps.master.models import Campus, LeadSource, Program
 
+from .fee_lookup import active_application_fee_map
 from .models import (
     Counsellor,
     Lead, LeadCommunication, LeadFollowup, LeadStatusHistory, LeadUtm,
@@ -168,6 +169,27 @@ class LeadDetailSerializer(serializers.ModelSerializer):
         read_only=True, default="",
     )
     utm = LeadUtmSerializer(read_only=True)
+    application_fee_due = serializers.SerializerMethodField()
+
+    def get_application_fee_due(self, obj) -> str:
+        """What master data says this lead owes — the counsellor's screen
+        shows it before any payment is recorded, so the amount quoted on
+        the phone matches the one in the fee-link email.
+
+        Blank when no active FeeTemplate covers the lead's campus/program.
+        The map is built once per serializer (a `many=True` list shares
+        one child instance), so listing 500 leads costs one extra query,
+        not 500.
+        """
+        if not (obj.campus_id and obj.program_id):
+            return ""
+        fees = getattr(self, "_application_fee_map", None)
+        if fees is None:
+            fees = active_application_fee_map()
+            self._application_fee_map = fees
+        fee = fees.get((obj.campus_id, obj.program_id))
+        # A template charging zero is "no fee to quote", not "₹0 due".
+        return str(fee) if fee else ""
 
     class Meta:
         model = Lead
@@ -192,6 +214,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
             "application_fee_notes",
             "application_fee_recorded_by",
             "application_fee_recorded_by_name",
+            "application_fee_due",
             "fee_link_sent_at",
             "created_by", "created_by_name",
             "created_at", "updated_at",

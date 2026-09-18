@@ -27,5 +27,13 @@ class RoleSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "is_system", "created_at", "updated_at"]
 
+    def validate_name(self, value):
+        # System roles are looked up by name elsewhere; renaming one would
+        # quietly detach it.
+        if (self.instance is not None and self.instance.is_system
+                and value != self.instance.name):
+            raise serializers.ValidationError("System roles cannot be renamed.")
+        return value
+
     def get_user_count(self, obj):
         return obj.users.count()

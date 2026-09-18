@@ -109,9 +109,8 @@ See [chapter 4](04-fees.md) §4.11.
 - **Casual Leave** is different again: 12 a year, accruing one per month, and
   the balance counts **months in which you took CL**, not days.
 - **Pending applications don't reduce your balance** until they're approved.
-- At the start of a new leave year, CL figures depend on a date window your
-  technical team must update. If they look wrong in June, that's the first
-  thing to check.
+- The CL leave year runs 1 June – 31 May and rolls over by itself on 1 June,
+  so CL taken before June doesn't count against the new year.
 
 See [chapter 9](09-leaves.md) §9.4.
 

@@ -49,7 +49,7 @@ Note that portal access needs **no permission key at all**. Being linked to a
 | Path | Class | Notes |
 |---|---|---|
 | `me/` | OrParent | Profile + enrolment context |
-| `change-password/` | StudentOnly | Also clears `portal_temp_password` |
+| `change-password/` | StudentOnly | Requires the current password |
 | `dashboard/` | OrParent | Headline tiles |
 | `attendance/calendar/`, `attendance/report/` | OrParent | |
 | `timetable/` | OrParent | From `ScheduleSlot` for the active batch |
@@ -184,7 +184,7 @@ routes them to `/portal` because `/api/auth/me/` returns `is_student: true`.
 
 Credentials are issued by
 `POST /api/admissions/students/<id>/send-portal-credentials/`, which resets the
-password, mirrors it to `Student.portal_temp_password`, and emails
+password, returns it once to staff (it is not stored), and emails
 `student.portal_credentials.email` from `mail.jdinstitute.com`
 ([chapter 5](05-admissions.md) §5.7).
 

@@ -195,11 +195,12 @@ def _fee_structures() -> list[dict]:
     return list(rows.values())
 
 
-# The bucket that holds every program no university confers. It is not a
-# University row and must never become one — both institutes' 2026 terms
-# say in writing that JD "does not award or confer academic degrees". It
-# exists so the 40-odd JD-certified programs remain reachable from a
-# form whose first question is "which university?".
+# Labels for a program no university confers. It is not a University row
+# and must never become one — both institutes' 2026 terms say in writing
+# that JD "does not award or confer academic degrees". It is NOT offered
+# in the university dropdown: a form that asks "which university?" lists
+# only university-affiliated programs, and JD-certified ones are picked
+# on JDIFT links, which skip that question.
 JD_UNIVERSITY = {
     "id": None,
     "code": "JD",
@@ -211,24 +212,18 @@ def _university_options(programs: list[dict]) -> list[dict]:
     """The university dropdown, derived from the programs actually on
     offer so no option can be picked into an empty program list.
 
-    Ordered alphabetically with the JD bucket pinned last — it is the
-    catch-all, not a peer of the degree-awarding bodies.
+    Ordered alphabetically. JD-certified programs contribute no option.
     """
     seen: dict[int, dict] = {}
-    has_jd = False
     for p in programs:
         if p["university"] is None:
-            has_jd = True
             continue
         seen.setdefault(p["university"], {
             "id": p["university"],
             "code": p["university_code"],
             "name": p["university_name"],
         })
-    options = sorted(seen.values(), key=lambda u: u["name"])
-    if has_jd:
-        options.append(dict(JD_UNIVERSITY))
-    return options
+    return sorted(seen.values(), key=lambda u: u["name"])
 
 
 def _prefill(lead: Lead) -> dict:
@@ -244,9 +239,23 @@ def _prefill(lead: Lead) -> dict:
     # it is NULL for JD-certified programs, which is a real answer
     # ("JD does not award or confer academic degrees") rather than
     # missing data — see the `University` model docstring.
+    #
+    # The list is scoped to the institute the form was SENT under (the
+    # lead's program's institute): a JDSD link offers only JDSD programs,
+    # a JDIFT link only JDIFT ones. A student never sees — and so can
+    # never switch to — the other school's catalogue mid-form. Legacy
+    # leads whose program carries no institute fall back to everything,
+    # since there is no institute to scope by.
+    program_qs = Program.objects.filter(is_active=True)
+    sending_institute_id = (
+        lead.program.institute_id if lead.program_id else None
+    )
+    if sending_institute_id:
+        program_qs = program_qs.filter(institute_id=sending_institute_id)
+
     programs = []
     for p in (
-        Program.objects.filter(is_active=True)
+        program_qs
         .select_related("institute", "university")
         .prefetch_related("campuses")
         .order_by("name")

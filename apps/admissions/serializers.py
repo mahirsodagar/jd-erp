@@ -54,7 +54,6 @@ class StudentDetailSerializer(serializers.ModelSerializer):
     )
     photo_url = serializers.SerializerMethodField()
     portal_username = serializers.SerializerMethodField()
-    portal_temp_password = serializers.SerializerMethodField()
 
     class Meta:
         model = Student
@@ -77,7 +76,7 @@ class StudentDetailSerializer(serializers.ModelSerializer):
             "father_occupation", "mother_occupation",
             "photo", "photo_url",
             "user_account", "parent_user_account", "lead_origin",
-            "portal_username", "portal_temp_password",
+            "portal_username",
             "application_fee_paid_at", "application_fee_amount",
             "application_fee_mode", "application_fee_ref",
             "application_fee_recorded_by_name",
@@ -86,7 +85,7 @@ class StudentDetailSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id", "application_form_id",
             "user_account", "parent_user_account", "lead_origin",
-            "portal_username", "portal_temp_password",
+            "portal_username",
             "created_by", "created_on", "updated_by", "updated_on",
             "campus_name", "program_name", "course_name",
             "institute_name", "academic_year_code", "photo_url",
@@ -145,11 +144,6 @@ class StudentDetailSerializer(serializers.ModelSerializer):
         if not self._can_view_credentials(obj):
             return ""
         return getattr(obj.user_account, "username", "") if obj.user_account_id else ""
-
-    def get_portal_temp_password(self, obj):
-        if not self._can_view_credentials(obj):
-            return ""
-        return obj.portal_temp_password or ""
 
     def _can_view_credentials(self, obj) -> bool:
         request = self.context.get("request")

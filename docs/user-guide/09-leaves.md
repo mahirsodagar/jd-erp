@@ -120,10 +120,9 @@ month use up **one** month of accrual, not two.
 
 Types in the "on-duty" category are unlimited and show no balance.
 
-> **A note for HR.** The leave year used by the Casual Leave calculation is a
-> fixed window set in the system and must be updated each year by the technical
-> team. If CL balances look wrong at the start of a new leave year, that is the
-> first thing to check.
+> **A note for HR.** The leave year used by the Casual Leave calculation runs
+> **1 June – 31 May**. The system moves to the new leave year by itself on
+> 1 June, so CL counts start again from 12 with nothing to update.
 
 ## 9.5 Approving leave — for managers
 

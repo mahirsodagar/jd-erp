@@ -13,7 +13,7 @@ from .serializers import (
     DecideSerializer, FinalizeSerializer, RelievingApplicationSerializer,
     SubmitRelievingSerializer, WithdrawSerializer,
 )
-from . import services
+from . import notifications, services
 
 
 def _emp_of(user) -> Employee | None:
@@ -92,6 +92,7 @@ class RelievingListCreateView(APIView):
         except ValueError as e:
             return Response({"detail": str(e)},
                             status=http.HTTP_400_BAD_REQUEST)
+        notifications.notify_submitted(app)
         # Refresh with prefetch
         app = (RelievingApplication.objects
                .select_related("employee")
@@ -158,6 +159,9 @@ class RelievingDecideView(APIView):
         except ValueError as e:
             return Response({"detail": str(e)},
                             status=http.HTTP_400_BAD_REQUEST)
+        app.refresh_from_db()
+        if app.status == RelievingApplication.Status.REJECTED:
+            notifications.notify_rejected(app)
         # Reload + serialize
         app = (RelievingApplication.objects
                .select_related("employee")
@@ -194,6 +198,7 @@ class RelievingFinalizeView(APIView):
         except ValueError as e:
             return Response({"detail": str(e)},
                             status=http.HTTP_400_BAD_REQUEST)
+        notifications.notify_completed(app)
         app = (RelievingApplication.objects
                .select_related("employee")
                .prefetch_related("approvals__approver")

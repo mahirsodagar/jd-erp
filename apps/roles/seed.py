@@ -511,6 +511,9 @@ CATALOGUE = [
     # tile rather than leaking anything.
     ("dashboard", "dashboard.sessions.view", "See my sessions for today"),
     ("dashboard", "dashboard.sessions.view_all", "See everyone's sessions for today"),
+    # The count tile in the stat row, split from the strip above so a
+    # role can have one without the other. Scope follows `view_all`.
+    ("dashboard", "dashboard.sessions_count.view", "See the Today's Sessions count tile"),
     ("dashboard", "dashboard.leads.view", "See lead stats and the priority review list"),
     # Own-data counterpart to the tile above: counts only leads whose
     # `assign_to` is the caller, so a counsellor can be given their own
@@ -623,15 +626,17 @@ def seed_admin_role():
 # permissions. So we grant the minimum set of perms whose presence
 # unlocks the right sidebar groups for an everyday employee:
 #
-#   leaves.report.view     → "Leaves" group (Apply, My Leaves, Balances)
 #   audit.course_end.submit → "Audit" group (so they can submit own
 #                              Faculty Daily / Course-End / Self-Appraisal)
 #
 # All listed perms also gate at least one endpoint that the employee
 # legitimately needs. Anything more sensitive (view_all, approve_any,
 # manage) stays admin-only and is granted later from the Users page.
+#
+# NOT `leaves.report.view`: that key opens the campus-wide leave report.
+# The self-service Leaves menu (Apply, My Leaves, Balances) is shown to
+# every user with an employee profile instead — see Sidebar.tsx.
 FACULTY_PERMISSION_KEYS = [
-    "leaves.report.view",
     "audit.course_end.submit",
     # Fill their own daily report (Dashboard → Daily Report).
     "dashboard.daily_report.submit",
@@ -639,6 +644,7 @@ FACULTY_PERMISSION_KEYS = [
     # other tile (leads / enrolments / students / engagement) is granted
     # explicitly from the Roles page.
     "dashboard.sessions.view",
+    "dashboard.sessions_count.view",
     "dashboard.my_work.view",
     # Their own self-appraisal (submit + view).
     "audit.self_appraisal.view_own",
@@ -675,7 +681,33 @@ def seed_faculty_role():
     return role
 
 
+# Permanent roles besides Admin: they can't be deleted or renamed. Other
+# code finds them by name (e.g. the timetable faculty picker filters on
+# Faculty / HOD), so a rename would silently break it.
+SYSTEM_ROLES = {
+    "Faculty": "Baseline access for employees.",
+    "HOD": "Head of department.",
+    "HR": "Human resources.",
+}
+
+
+def seed_system_roles():
+    """Ensure every `SYSTEM_ROLES` entry exists and is flagged system.
+
+    Never touches permissions — those are managed from the Roles page
+    (unlike `seed_faculty_role`, which resets Faculty's grants)."""
+    for name, description in SYSTEM_ROLES.items():
+        role = Role.objects.filter(name__iexact=name).first()
+        if role is None:
+            Role.objects.create(name=name, description=description,
+                                is_system=True)
+        elif not role.is_system:
+            role.is_system = True
+            role.save(update_fields=["is_system"])
+
+
 def seed_all():
     seed_permissions()
     seed_admin_role()
     seed_faculty_role()
+    seed_system_roles()

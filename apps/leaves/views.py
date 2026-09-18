@@ -27,7 +27,7 @@ from .serializers import (
     LeaveApplyInputSerializer,
     LeaveTypeSerializer,
 )
-from .services import notifications
+from .services import guards, notifications
 from .services.balance import all_balances, cl_dashboard, compute_balance
 from .services.day_count import count_days
 
@@ -245,15 +245,35 @@ class LeaveApplicationListCreateView(APIView):
                 status=http.HTTP_400_BAD_REQUEST,
             )
 
-        app = LeaveApplication.objects.create(
-            employee=target,
-            leave_type=d["leave_type"],
-            from_date=d["from_date"], to_date=d["to_date"],
-            from_session=d["from_session"], count=days,
-            reason=d["reason"],
-            manager_email=manager_email,
-            cc_emails=d.get("cc_emails", "") or "",
-        )
+        with transaction.atomic():
+            # Serialise concurrent applies by the same employee so two
+            # requests can't both pass the overlap/balance checks.
+            Employee.objects.select_for_update().filter(pk=target.pk).first()
+
+            clash = guards.find_overlap(
+                employee=target, from_date=d["from_date"], to_date=d["to_date"],
+                from_session=d["from_session"],
+            )
+            if clash:
+                return Response({"detail": guards.overlap_message(clash)},
+                                status=http.HTTP_400_BAD_REQUEST)
+
+            available = guards.available_balance(target, d["leave_type"])
+            if available is not None and days > available:
+                return Response(
+                    {"detail": guards.balance_message(d["leave_type"], days, available)},
+                    status=http.HTTP_400_BAD_REQUEST,
+                )
+
+            app = LeaveApplication.objects.create(
+                employee=target,
+                leave_type=d["leave_type"],
+                from_date=d["from_date"], to_date=d["to_date"],
+                from_session=d["from_session"], count=days,
+                reason=d["reason"],
+                manager_email=manager_email,
+                cc_emails=d.get("cc_emails", "") or "",
+            )
         notifications.notify_leave_applied(app)
         return Response(LeaveApplicationSerializer(app).data,
                         status=http.HTTP_201_CREATED)
@@ -322,6 +342,28 @@ class LeaveDecisionView(APIView):
         if not (is_manager or has_perm(u, override)):
             return Response({"detail": "Not the manager for this leave."},
                             status=http.HTTP_403_FORBIDDEN)
+
+        # Re-check on approve: pending rows filed before these guards
+        # existed, or an allocation deleted since apply, could otherwise
+        # still overdraw the balance or double-book a day.
+        if s.validated_data["status"] == LeaveApplication.Status.APPROVED:
+            clash = guards.find_overlap(
+                employee=app.employee, from_date=app.from_date, to_date=app.to_date,
+                from_session=app.from_session, exclude_id=app.id,
+                statuses=(LeaveApplication.Status.APPROVED,),
+            )
+            if clash:
+                return Response({"detail": guards.overlap_message(clash)},
+                                status=http.HTTP_400_BAD_REQUEST)
+            available = guards.available_balance(
+                app.employee, app.leave_type, include_pending=False,
+            )
+            if available is not None and app.count > available:
+                return Response(
+                    {"detail": guards.balance_message(app.leave_type, app.count, available)},
+                    status=http.HTTP_400_BAD_REQUEST,
+                )
+
         app.status = s.validated_data["status"]
         app.approver_remarks = s.validated_data.get("remarks", "")
         app.approved_by = get_employee_for(u)
@@ -355,7 +397,7 @@ class LeaveBalancesView(APIView):
 
 
 class LeaveDashboardView(APIView):
-    """Legacy leave_apply.php dashboard counters (fixed leave-year + CL accrual)."""
+    """Legacy leave_apply.php dashboard counters (current Jun–May leave year + CL accrual)."""
     permission_classes = [IsAuthenticated, LeaveAccessPolicy]
 
     def get(self, request):

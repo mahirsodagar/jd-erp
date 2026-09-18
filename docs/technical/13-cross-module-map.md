@@ -225,24 +225,21 @@ Recording these so they are not rediscovered as bugs:
    the remaining sidebar modules.
 3. **`LEAVES_EXCLUDE_HOLIDAYS_AND_WEEKENDS` is dead configuration** — the
    legacy-port `count_days` ignores it.
-4. **The leave-year window is hard-coded** (`LEAVE_YEAR_START` /
-   `LEAVE_YEAR_END` = 1 Jun 2025 – 31 May 2026 in
-   `apps/leaves/services/balance.py`). It must be updated every year.
-5. **WhatsApp is largely dormant.** `WHATSAPP_ENABLED=False` by default, most
+4. **WhatsApp is largely dormant.** `WHATSAPP_ENABLED=False` by default, most
    `XIRCLS_WA_TRIGGERS` are blank, and `lead.application_link.wa` is
    temporarily pointed at the trigger `"Test"`.
-6. **Several `MSG91_FLOW_*` ids are unset**, so those SMS templates only work
+5. **Several `MSG91_FLOW_*` ids are unset**, so those SMS templates only work
    under `SMS_PROVIDER=bulksms`.
-7. **`EMAIL_BACKEND` defaults to the console backend**, which reports success
+6. **`EMAIL_BACKEND` defaults to the console backend**, which reports success
    while delivering nothing. Every real environment must override it.
-8. **Throttling uses LocMemCache by default**, which is per-process. With N
+7. **Throttling uses LocMemCache by default**, which is per-process. With N
    gunicorn workers, effective limits are N× the configured rate.
-9. **`GET /api/leads/` returns at most 500 rows, unpaginated.**
-10. **`enrollment_balance()` ignores `FeeTemplate.course`**, so overlapping
-    templates for the same (year, campus, program) resolve arbitrarily.
-11. **Audit log endpoints are superuser-only in code** with no permission key
+8. **`GET /api/leads/` returns at most 500 rows, unpaginated.**
+9. **`enrollment_balance()` ignores `FeeTemplate.course`**, so overlapping
+   templates for the same (year, campus, program) resolve arbitrarily.
+10. **Audit log endpoints are superuser-only in code** with no permission key
     and no UI.
-12. **Some upload fields still use plain `FileField`** rather than
+11. **Some upload fields still use plain `FileField`** rather than
     `SecureFileField` — safe, low-risk cleanup.
 
 ## 13.10 Quick reference — where things live

@@ -29,7 +29,6 @@ from apps.common.throttles import (
 )
 from apps.notifications.email import send_email
 
-from .password_mirror import mirror_plaintext_password
 from .permissions import HasPerm, has_perm
 from .serializers import (
     AdminResetPasswordSerializer,
@@ -65,11 +64,6 @@ class LoginView(APIView):
 
         user = serializer.validated_data["user"]
         record_login_success(request, user=user)
-        # If this is a student logging in, retire the plaintext mirror of
-        # their portal password — the field is only meant to bridge the
-        # gap between provisioning and the first successful login.
-        from apps.admissions.services import clear_temp_password_for
-        clear_temp_password_for(user)
         return Response(
             {
                 "tokens": serializer.validated_data["tokens"],
@@ -126,10 +120,6 @@ class ChangePasswordView(APIView):
         new_pw = serializer.validated_data["new_password"]
         request.user.set_password(new_pw)
         request.user.save(update_fields=["password"])
-        # Self-change: the student knows the new password. Don't mirror
-        # the plaintext — clear any stale temp from the prior provision.
-        from apps.admissions.services import clear_temp_password_for
-        clear_temp_password_for(request.user)
         record_password_change(request, user=request.user)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -253,7 +243,6 @@ class AdminResetPasswordView(APIView):
         new_pw = serializer.validated_data["new_password"]
         target.set_password(new_pw)
         target.save(update_fields=["password"])
-        mirror_plaintext_password(target, new_pw)
         record_password_reset(request, actor=request.user, target=target)
 
         delivery = {
@@ -368,10 +357,6 @@ class ResetPasswordView(APIView):
         new_pw = serializer.validated_data["new_password"]
         user.set_password(new_pw)
         user.save(update_fields=["password"])
-        # Self-reset via token: the user typed the new password just now,
-        # so they have it. Clear any plaintext mirror lying around.
-        from apps.admissions.services import clear_temp_password_for
-        clear_temp_password_for(user)
         record_password_reset_completed(request, target=user)
 
         # Best-effort: tell the user their password just changed.

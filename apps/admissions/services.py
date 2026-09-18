@@ -825,33 +825,12 @@ def provision_student_portal_credentials(*, student: Student) -> dict:
         user.full_name = student.student_name
         user.save(update_fields=["password", "email", "full_name"])
 
-    # Mirror the plaintext so staff can re-share it without forcing a
-    # rotation. See model field doc for the trade-off.
-    student.portal_temp_password = temp_password
-    student.save(update_fields=[
-        "institute_email", "user_account", "portal_temp_password",
-    ])
+    # The plaintext is returned to staff once (and emailed) but never
+    # stored — to re-share, staff reset it again.
+    student.save(update_fields=["institute_email", "user_account"])
 
     return {
         "username": user.username,
         "email": student.institute_email,
         "temporary_password": temp_password,
     }
-
-
-def clear_temp_password_for(user) -> bool:
-    """Wipe `Student.portal_temp_password` once the student has either
-    logged in successfully or changed their password. Keeps the plaintext
-    mirror short-lived — staff can re-issue via
-    `provision_student_portal_credentials` if needed.
-
-    Accepts the Django User (callers pass `request.user`). Silently no-op
-    when the user isn't a student or the field is already empty. Returns
-    True iff a write actually happened.
-    """
-    student = getattr(user, "student", None)
-    if student is None or not student.portal_temp_password:
-        return False
-    student.portal_temp_password = ""
-    student.save(update_fields=["portal_temp_password"])
-    return True

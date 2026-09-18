@@ -23,12 +23,15 @@ Concretely:
   carved out of the total, not added to it) + concession, matching the
   rule `registration + down_payment + Σ installments + concession =
   total_fee` enforced by the enrollment-create page client-side.
+- Tuition fee = total fee − the application fee paid on the lead. The
+  application fee prints on its own row, so it is kept out of the
+  tuition figure; the balance rows are unaffected.
 
 Every money row states what was actually paid and when: receipts are
 matched to their installment so a paid row reads "Paid on 04/09/2025 -
 Online" while an outstanding one reads "to be paid on 18/11/2026". The
-application fee comes from the lead's SmartGateway payment request,
-which is where that money is recorded.
+application fee comes from the lead the student was promoted from, which
+is where that money is recorded.
 
 We render with fpdf2 (same dependency the receipts service uses) and
 dispatch via the notifications email helper. The PDF is NOT persisted —
@@ -110,34 +113,23 @@ def _row_value(installment, receipts_by_installment) -> str:
     return amount
 
 
-def _application_fee_line(student) -> str:
-    """The application fee as paid on the lead the student came from.
+def _application_fee(student) -> tuple[Decimal, str]:
+    """``(amount, "1000 Paid on 04/09/2025")`` for the application fee
+    paid on the lead the student came from.
 
-    Application money is taken through SmartGateway against the *lead*,
-    before a Student exists, so it is never a FeeReceipt — see
-    `apps.payments`. No lead (a walk-in keyed straight into admissions)
-    means no line to print.
+    Application money is taken against the *lead*, before a Student
+    exists, so it is never a FeeReceipt. The lead's
+    ``application_fee_paid_at`` / ``_amount`` are stamped however it was
+    paid — SmartGateway, Razorpay, or recorded by hand — so they are read
+    rather than any one gateway's records. No lead (a walk-in keyed
+    straight into admissions) or an unpaid fee means nothing to print.
     """
     lead = getattr(student, "lead_origin", None)
-    if lead is None:
-        return ""
-    from apps.payments.models import PaymentRequest
-
-    pr = (
-        PaymentRequest.objects.filter(
-            lead=lead,
-            purpose=PaymentRequest.Purpose.APPLICATION_FEE,
-            status=PaymentRequest.Status.PAID,
-        )
-        .select_related("paid_order")
-        .order_by("-paid_at")
-        .first()
-    )
-    if pr is None:
-        return ""
-    line = f"{_amount(pr.amount)} Paid on {_date(timezone.localtime(pr.paid_at)) if pr.paid_at else ''}".strip()
-    method = getattr(pr.paid_order, "payment_method", "") if pr.paid_order_id else ""
-    return f"{line} - {method}" if method else line
+    if lead is None or lead.application_fee_paid_at is None:
+        return Decimal("0"), ""
+    amount = Decimal(lead.application_fee_amount or 0)
+    paid_on = _date(timezone.localtime(lead.application_fee_paid_at))
+    return amount, f"{_amount(amount)} Paid on {paid_on}"
 
 
 def fee_overview(enrollment: Enrollment) -> dict:
@@ -194,9 +186,12 @@ def fee_overview(enrollment: Enrollment) -> dict:
     total_fee = installments_total + concession_total
 
     upfront_amount = Decimal(upfront.amount) if upfront is not None else Decimal("0")
+    application_fee, application_fee_line = _application_fee(student)
 
     return {
         "total_fee": total_fee,
+        "tuition_fee": max(total_fee - application_fee, Decimal("0")),
+        "application_fee": application_fee,
         "concession": concession_total,
         "upfront": upfront,
         "upfront_line": (
@@ -206,7 +201,7 @@ def fee_overview(enrollment: Enrollment) -> dict:
         "balance_lines": [
             _row_value(i, receipts_by_installment) for i in balance_rows
         ],
-        "application_fee_line": _application_fee_line(student),
+        "application_fee_line": application_fee_line,
     }
 
 
@@ -285,9 +280,10 @@ def render_undertaking_pdf(
     _row(pdf, "DURATION", _duration(program, course))
     _row(pdf, "NAME OF THE STUDENT", student.student_name)
     _row(pdf, "CONTACT NUMBER", student.student_mobile)
+    _row(pdf, "APPLICATION FEE PAID ON", fees["application_fee_line"])
     # "TUTION" is the label on the printed form; kept verbatim so the
     # generated document matches the one staff already hand out.
-    _row(pdf, "TUTION FEE APPLICABLE", _amount(fees["total_fee"]))
+    _row(pdf, "TUTION FEE APPLICABLE", _amount(fees["tuition_fee"]))
     _row(pdf, "REGISTRATION AMOUNT PAID", fees["upfront_line"])
     _row(pdf, "TOTAL BALANCE DUE", _amount(fees["balance_due"]))
 
@@ -299,7 +295,6 @@ def render_undertaking_pdf(
     if fees["concession"] > 0:
         _row(pdf, "CONCESSION", _amount(fees["concession"]))
 
-    _row(pdf, "Application Form", fees["application_fee_line"])
     _row(pdf, "REMARKS:", remarks)
 
     # Full-width acknowledgement row — verbatim from the printed form.

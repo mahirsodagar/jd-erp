@@ -691,7 +691,8 @@ class AssignmentSubmissionsView(APIView):
                 or has_perm(u, "academics.assignment.grade")):
             raise Http404
         qs = a.submissions.select_related("student", "graded_by").all()
-        return Response(AssignmentSubmissionSerializer(qs, many=True).data)
+        return Response(AssignmentSubmissionSerializer(
+            qs, many=True, context={"request": request}).data)
 
 
 # --- Submission grading -----------------------------------------------
@@ -723,7 +724,8 @@ class SubmissionGradeView(APIView):
             )
         except ValueError as e:
             return Response({"detail": str(e)}, status=http.HTTP_400_BAD_REQUEST)
-        return Response(AssignmentSubmissionSerializer(sub).data)
+        return Response(AssignmentSubmissionSerializer(
+            sub, context={"request": request}).data)
 
 
 # --- Student-facing assignment endpoints -----------------------------
@@ -767,12 +769,13 @@ class MyAssignmentsView(APIView):
                 student=student, assignment__in=qs,
             )
         }
+        ctx = {"request": request}
         rows = []
         for a in qs:
             sub = existing.get(a.id)
             rows.append({
-                "assignment": AssignmentSerializer(a).data,
-                "submission": (AssignmentSubmissionSerializer(sub).data
+                "assignment": AssignmentSerializer(a, context=ctx).data,
+                "submission": (AssignmentSubmissionSerializer(sub, context=ctx).data
                                 if sub else None),
             })
         return Response(rows)
@@ -815,8 +818,8 @@ class StudentSubmitView(APIView):
         sub.submitted_at = timezone.now()
         sub.status = submission_status_after_save(sub)
         sub.save()
-        return Response(AssignmentSubmissionSerializer(sub).data,
-                        status=http.HTTP_200_OK)
+        return Response(AssignmentSubmissionSerializer(
+            sub, context={"request": request}).data, status=http.HTTP_200_OK)
 
 
 # --- Marks -----------------------------------------------------------
@@ -1409,6 +1412,19 @@ class TestListCreateView(APIView):
             qs = qs.filter(subject_id=v)
         if v := params.get("status"):
             qs = qs.filter(status=v)
+        if v := params.get("program"):
+            qs = qs.filter(program_id=v)
+        if v := params.get("semester"):
+            # Tests carry no semester; it comes from the subject.
+            qs = qs.filter(subject__semester_id=v)
+        if v := params.get("batch"):
+            # Tests carry no batch; a test belongs to a batch when it has
+            # been mapped to students actively enrolled in it.
+            from apps.admissions.models import Enrollment
+            qs = qs.filter(
+                attempts__student__enrollments__batch_id=v,
+                attempts__student__enrollments__status=Enrollment.Status.ACTIVE,
+            ).distinct()
         return Response(TestSerializer(qs[:500], many=True).data)
 
     def post(self, request):

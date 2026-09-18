@@ -10,9 +10,11 @@ Leave: a fixed 12-per-year monthly accrual (``cl_dashboard``).
 """
 
 from datetime import date as _date
+from datetime import timedelta
 from decimal import Decimal
 
 from django.db.models import Sum
+from django.utils import timezone
 
 from apps.leaves.models import (
     CompOffApplication, LeaveAllocation, LeaveApplication, LeaveType,
@@ -22,10 +24,24 @@ from apps.leaves.models import (
 COMP_OFF_CODE = "COMP_OFF"
 CASUAL_CODE = "CASUAL"
 
-# Fixed leave-year window (legacy leave_apply.php dashboard).
-LEAVE_YEAR_START = _date(2025, 6, 1)
-LEAVE_YEAR_END = _date(2026, 5, 31)
+# The leave year runs 1 June – 31 May. Legacy leave_apply.php hard-coded
+# one such window ('2025-06-01'..'2026-05-31') and needed a yearly edit;
+# here it is derived from the date so it rolls over on its own.
+LEAVE_YEAR_START_MONTH = 6
 CL_PER_YEAR = Decimal("12")
+
+
+def leave_year(on_date=None) -> tuple[_date, _date]:
+    """The (1 Jun, 31 May) leave-year window containing ``on_date``
+    (default: today)."""
+    on_date = on_date or timezone.localdate()
+    start_year = (
+        on_date.year if on_date.month >= LEAVE_YEAR_START_MONTH
+        else on_date.year - 1
+    )
+    start = _date(start_year, LEAVE_YEAR_START_MONTH, 1)
+    end = _date(start_year + 1, LEAVE_YEAR_START_MONTH, 1) - timedelta(days=1)
+    return start, end
 
 
 def _zero() -> Decimal:
@@ -113,17 +129,19 @@ def all_balances(employee, on_date=None) -> list[dict]:
     ]
 
 
-def cl_dashboard(employee) -> dict:
-    """Legacy leave_apply.php dashboard counters over the fixed leave-year.
+def cl_dashboard(employee, on_date=None) -> dict:
+    """Legacy leave_apply.php dashboard counters over the current leave
+    year (see ``leave_year``).
 
     CL Balance follows the 1-CL-per-month accrual: ``12 − (# distinct
     months in which a Casual Leave was approved)``.
     """
+    year_start, year_end = leave_year(on_date)
     approved = LeaveApplication.objects.filter(
         employee=employee,
         status=LeaveApplication.Status.APPROVED,
-        from_date__gte=LEAVE_YEAR_START,
-        from_date__lte=LEAVE_YEAR_END,
+        from_date__gte=year_start,
+        from_date__lte=year_end,
     )
 
     total_leaves = (
@@ -147,8 +165,8 @@ def cl_dashboard(employee) -> dict:
     cl_balance = CL_PER_YEAR - Decimal(len(cl_months))
 
     return {
-        "leave_year_start": str(LEAVE_YEAR_START),
-        "leave_year_end": str(LEAVE_YEAR_END),
+        "leave_year_start": str(year_start),
+        "leave_year_end": str(year_end),
         "total_leaves_taken": total_leaves,
         "total_cl_taken": total_cl,
         "total_compoff_taken": total_compoff,

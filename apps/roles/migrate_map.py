@@ -25,6 +25,9 @@ RULES: dict[str, tuple[str, ...]] = {
     # Sessions and the My Work feed are self-service, so every role that
     # had any access at all keeps them (see EVERY_ROLE below).
     "dashboard.sessions.view_all": ("academics.schedule.view_all",),
+    # The count tile used to ride on the strip's key; roles that saw it
+    # keep it until an admin unticks it.
+    "dashboard.sessions_count.view": ("dashboard.sessions.view",),
     "dashboard.leads.view": ("leads.lead.view", "leads.lead.view_all"),
     "dashboard.enrollments.view": (
         "admissions.enrollment.view", "admissions.enrollment.add",
@@ -284,6 +287,12 @@ ALL_OF_RULES: dict[str, tuple[str, ...]] = {
 #: permission. Both are scoped to the caller's own data server-side, so
 #: handing them out broadly reproduces the pre-split behaviour (the
 #: sessions strip and My Work feed were ungated).
+#:
+#: FIRST RUN ONLY — `migrate_permissions` applies these behind
+#: --with-every-role. They are not implied by any old key, so a second
+#: pass would re-grant what an admin has since unticked on the Roles
+#: page. Revoking one of these is a normal thing to want: it is what
+#: takes the Today's Sessions strip off a role's dashboard.
 EVERY_ROLE: tuple[str, ...] = (
     "dashboard.sessions.view",
     "dashboard.my_work.view",

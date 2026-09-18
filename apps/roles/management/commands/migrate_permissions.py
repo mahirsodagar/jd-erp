@@ -43,6 +43,13 @@ class Command(BaseCommand):
             help="Also reset the Faculty role to its baseline key list "
                  "(discards customisation — off by default).",
         )
+        parser.add_argument(
+            "--with-every-role", action="store_true",
+            help=f"Also grant every role the self-service keys "
+                 f"{', '.join(EVERY_ROLE)}. Only correct on the FIRST run, "
+                 f"where it preserves pre-split behaviour; on a re-run it "
+                 f"restores keys an admin has since revoked. Off by default.",
+        )
 
     def handle(self, *args, **opts):
         dry = opts["dry_run"]
@@ -92,7 +99,13 @@ class Command(BaseCommand):
                     for new_key, old_keys in ALL_OF_RULES.items()
                     if held_before.issuperset(old_keys)
                 )
-                wanted.update(EVERY_ROLE)
+                # First-run only. These keys were never implied by an old
+                # permission — they exist to reproduce behaviour that was
+                # ungated before the split. Re-granting them on a later
+                # run would silently undo a deliberate revocation, which
+                # reads to the admin as "the permission doesn't work".
+                if opts["with_every_role"]:
+                    wanted.update(EVERY_ROLE)
                 to_add = sorted(wanted - held_now)
                 if not to_add:
                     continue
@@ -140,6 +153,6 @@ class Command(BaseCommand):
         ))
         if dry:
             self.stdout.write(
-                "Re-run without --dry-run to apply. Users must log out and "
-                "back in before the new keys reach their session.",
+                "Re-run without --dry-run to apply. Signed-in users pick "
+                "the change up on their next page load.",
             )

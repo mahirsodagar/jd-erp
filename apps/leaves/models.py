@@ -13,6 +13,10 @@ class LeaveType(models.Model):
     name = models.CharField(max_length=60)
     category = models.CharField(max_length=10, choices=Category.choices)
     half_day_allowed = models.BooleanField(default=False)
+    enforce_balance = models.BooleanField(
+        default=False,
+        help_text="Block applies that exceed granted − availed − pending.",
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -150,9 +154,12 @@ class CompOffApplication(models.Model):
 
 
 class EmailDispatchLog(models.Model):
-    """Stand-in for the Celery email pipeline. We log intended emails on
-    PythonAnywhere free (which blocks SMTP) so they can be replayed when
-    a real outbound channel is configured."""
+    """Audit trail for leave / comp-off mail.
+
+    A row is written for every outbound email and then updated with the
+    transport's verdict (see apps.leaves.services.notifications):
+    'sent', 'failed', or — on hosts with SMTP egress disabled —
+    'queued', awaiting `manage.py send_leave_emails`."""
 
     class Status(models.TextChoices):
         QUEUED = "queued", "Queued"

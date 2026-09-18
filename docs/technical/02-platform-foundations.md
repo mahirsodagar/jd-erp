@@ -69,7 +69,7 @@ transparently (see [chapter 12](12-frontend.md) §12.3).
 
 | Method + path | Permission | Notes |
 |---|---|---|
-| `POST /api/auth/login/` | open, throttled `login` (10/min per IP) | Body `{identifier, password}`. Returns `{tokens: {access, refresh}, user: {...}}`. Records an `AuthLog` row. Clears the student's plaintext temp password |
+| `POST /api/auth/login/` | open, throttled `login` (10/min per IP) | Body `{identifier, password}`. Returns `{tokens: {access, refresh}, user: {...}}`. Records an `AuthLog` row |
 | `POST /api/auth/refresh/` | open, throttled `login` | SimpleJWT rotation |
 | `POST /api/auth/logout/` | authenticated | Blacklists the supplied refresh token, logs the event |
 | `GET/PATCH /api/auth/me/` | authenticated | Current user + permissions + modules |
@@ -116,22 +116,20 @@ via `apps.accounts.permissions.has_perm`:
 
 **Do not merge these back together.**
 
-### `portal_temp_password` — a deliberate plaintext store
+### Portal passwords are never stored in plain text
 
-`Student.portal_temp_password` and `Employee.portal_temp_password` hold the
-**last issued plaintext password**, mirrored by
-`apps/accounts/password_mirror.py::mirror_plaintext_password` from every code
-path that sets a password (admin reset, self change, forgot/reset flow).
+Generated portal passwords (lead promotion, employee provisioning, "Send
+portal credentials", admin reset) are returned **once** in the API response
+that issues them — and emailed where that flow emails — and are otherwise only
+kept as Django's password hash. To re-share a lost password, staff issue a new
+one.
 
-This is intentional parity with the legacy PHP system: HR wanted to re-share a
-password without forcing a rotation. It is cleared by
-`apps.admissions.services.clear_temp_password_for` on the student's first
-successful login and on a self-service password change.
-
-**Treat these columns as sensitive.** They are visible in the API to holders of
-the relevant student/employee permissions and in Django admin. If security
-requirements tighten, this is the first thing to remove — but confirm with the
-institute first, because the operational workflow depends on it.
+This replaces the legacy-parity `Student.portal_temp_password` /
+`Employee.portal_temp_password` columns, which held the last password in plain
+text (including passwords users set themselves). Migration
+`admissions.0011_drop_portal_temp_password` dropped them and scrubbed the
+copies django-auditlog had recorded in `LogEntry.changes`; do not reintroduce
+a readable password store.
 
 ---
 
@@ -225,11 +223,14 @@ requirement". Be deliberate about that.
 | Role | Contents |
 |---|---|
 | `Admin` | Every permission. `is_system=True`. `seed_admin_role()` re-`set`s it to the full catalogue on every run |
-| `Faculty` | The minimal baseline attached to every freshly-provisioned employee. Keys in `FACULTY_PERMISSION_KEYS`: `leaves.report.view`, `audit.course_end.submit`, `dashboard.daily_report.submit`, `dashboard.sessions.view`, `dashboard.my_work.view`, `audit.self_appraisal.view_own`, `audit.self_appraisal.submit` |
+| `Faculty` | The minimal baseline attached to every freshly-provisioned employee. Keys in `FACULTY_PERMISSION_KEYS`: `audit.course_end.submit`, `dashboard.daily_report.submit`, `dashboard.sessions.view`, `dashboard.sessions_count.view`, `dashboard.my_work.view`, `audit.self_appraisal.view_own`, `audit.self_appraisal.submit` |
 
 The Faculty set is chosen for its **sidebar side-effects** as much as for the
-endpoints: `leaves.report.view` unlocks the Leaves menu group,
-`audit.course_end.submit` unlocks the Audit group.
+endpoints: `audit.course_end.submit` unlocks the Audit group. The Leaves menu
+group is shown to every user with an employee profile (`forEmployees` in
+`Sidebar.tsx`) — do **not** put `leaves.report.view` back in the baseline to
+unlock it: that key opens the campus-wide leave report (removed from the
+Faculty role by `roles.0003_faculty_drop_leave_report`).
 
 `Designation.role` lets HR attach a default role per designation — provisioning
 an employee's portal account applies it automatically

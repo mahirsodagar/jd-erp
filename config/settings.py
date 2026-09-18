@@ -654,6 +654,8 @@ EMAIL_SENDER_DOMAIN_POLICY = {
     "leaves.application_employee.email":          "HR",
     "leaves.application_status_employee.email":   "HR",
     "leaves.application_status_student.email":    "HR",
+    "leaves.compoff_application_employee.email":  "HR",
+    "leaves.compoff_status_employee.email":       "HR",
     "hr.relieving.application.email":             "HR",
     "hr.relieving.application_rejected.email":     "HR",
     "hr.relieving.experience_letter.email":        "HR",
@@ -716,6 +718,8 @@ ACADEMIC_MANAGER_INBOX = env("ACADEMIC_MANAGER_INBOX", default="")
 SMTP_INTERNAL_TEMPLATE_KEYS = {
     "leaves.application_employee.email",
     "leaves.application_status_employee.email",
+    "leaves.compoff_application_employee.email",
+    "leaves.compoff_status_employee.email",
     "hr.relieving.application.email",
     "hr.relieving.application_rejected.email",
     "hr.relieving.experience_letter.email",

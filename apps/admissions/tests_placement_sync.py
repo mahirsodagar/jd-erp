@@ -211,8 +211,9 @@ class PlacementSyncTests(TestCase):
 
 class ApplicationUniversityDropdownTests(TestCase):
     """The form asks for the university before the program, so the
-    university list has to stay a faithful index of what is actually on
-    offer — including the programs no university confers."""
+    university list has to stay a faithful index of the universities
+    actually on offer. JD-certified programs are not a university and
+    get no option."""
 
     @classmethod
     def setUpTestData(cls):
@@ -263,17 +264,14 @@ class ApplicationUniversityDropdownTests(TestCase):
         by_code = {p["code"]: p for p in data["programs"]}
         self.assertEqual(by_code["BDES-F"]["university"], self.uni_a.id)
         self.assertEqual(by_code["BDES-F"]["university_name"], "Alpha University")
-        # The JD bucket is labelled, not left blank — the dropdown has to
-        # show the student something they can pick.
+        # Still labelled for display, though it is never a dropdown option.
         self.assertIsNone(by_code["CERT-ST"]["university"])
         self.assertEqual(by_code["CERT-ST"]["university_code"], "JD")
 
-    def test_jd_bucket_is_offered_and_pinned_last(self):
+    def test_jd_certified_is_not_offered_as_a_university(self):
         options = self._get()["universities"]
-        self.assertEqual(
-            [u["code"] for u in options], ["TU-A", "TU-B", "JD"],
-        )
-        self.assertIsNone(options[-1]["id"])
+        self.assertEqual([u["code"] for u in options], ["TU-A", "TU-B"])
+        self.assertTrue(all(u["id"] is not None for u in options))
 
     def test_only_universities_with_a_live_program_are_listed(self):
         """An option that filters the program list to nothing is a dead
@@ -282,12 +280,69 @@ class ApplicationUniversityDropdownTests(TestCase):
         self.mumbai_only.save(update_fields=["is_active"])
         self.assertEqual(
             [u["code"] for u in self._get()["universities"]],
-            ["TU-A", "JD"],
+            ["TU-A"],
         )
 
-    def test_no_jd_bucket_when_every_program_is_affiliated(self):
-        self.jd_prog.is_active = False
-        self.jd_prog.save(update_fields=["is_active"])
-        self.assertNotIn(
-            "JD", [u["code"] for u in self._get()["universities"]],
+
+class ApplicationInstituteScopingTests(TestCase):
+    """A form sent under one institute offers only that institute's
+    catalogue. The two schools sell different qualifications under
+    different terms, so letting a JDSD applicant switch to a JDIFT
+    program mid-form would attach the wrong rules to the submission."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.jdsd = Institute.objects.create(name="JD School of Design", code="JDSD")
+        cls.jdift = Institute.objects.create(
+            name="JD Institute of Fashion Technology", code="JDIFT",
         )
+        cls.source = LeadSource.objects.create(name="Website", slug="website")
+        cls.blr = Campus.objects.create(name="Bengaluru", code="BLR")
+        cls.uni = University.objects.create(name="Alpha University", code="TU-A")
+
+        cls.jdsd_prog = Program.objects.create(
+            name="B.Des Interior", code="BDES-I", institute=cls.jdsd,
+            university=cls.uni,
+        )
+        cls.jdsd_prog.campuses.set([cls.blr])
+        cls.jdift_prog = Program.objects.create(
+            name="Certificate in Styling", code="CERT-ST",
+            institute=cls.jdift, certification="JD",
+        )
+        cls.jdift_prog.campuses.set([cls.blr])
+
+        cls.jdsd_lead = Lead.objects.create(
+            name="Asha", email="asha@example.com", phone="+919900112233",
+            campus=cls.blr, program=cls.jdsd_prog, source=cls.source,
+            application_token=uuid.uuid4(),
+        )
+        cls.jdift_lead = Lead.objects.create(
+            name="Bala", email="bala@example.com", phone="+919900112244",
+            campus=cls.blr, program=cls.jdift_prog, source=cls.source,
+            application_token=uuid.uuid4(),
+        )
+
+    def _get(self, lead):
+        return self.client.get(
+            f"/api/public/application/{lead.application_token}/",
+        ).json()
+
+    def test_jdsd_link_offers_only_jdsd_programs(self):
+        data = self._get(self.jdsd_lead)
+        self.assertEqual([p["code"] for p in data["programs"]], ["BDES-I"])
+
+    def test_jdift_link_offers_only_jdift_programs(self):
+        data = self._get(self.jdift_lead)
+        self.assertEqual([p["code"] for p in data["programs"]], ["CERT-ST"])
+
+    def test_university_list_follows_the_scoped_programs(self):
+        """The dropdown is derived from the offered programs, so scoping
+        the programs must not leave the other school's universities
+        behind as dead options."""
+        self.assertEqual(
+            [u["code"] for u in self._get(self.jdsd_lead)["universities"]],
+            ["TU-A"],
+        )
+        # JDIFT here awards nothing, so there are no options — the
+        # frontend hides the dropdown for JDIFT anyway.
+        self.assertEqual(self._get(self.jdift_lead)["universities"], [])

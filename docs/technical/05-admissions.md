@@ -33,7 +33,7 @@ Mirrors the legacy PHP `student_master`. Field groups:
 | Addresses | current + permanent: `address`, `city`, `state`, `pincode` |
 | Contacts | `student_mobile`, `father_mobile`, `mother_mobile`, `student_email`, `father_email`, `mother_email`, `institute_email`, occupations |
 | Media | `photo` |
-| Links | `user_account` (1:1 → `User`), `parent_user_account` (1:1 → `User`), `lead_origin` (1:1 → `Lead`), `portal_temp_password` |
+| Links | `user_account` (1:1 → `User`), `parent_user_account` (1:1 → `User`), `lead_origin` (1:1 → `Lead`) |
 
 Phones are validated against `^\+?[1-9]\d{7,14}$` (international format).
 
@@ -155,7 +155,7 @@ Note the cross-module rule: **promoting a lead requires both
 | `GET/POST /api/admissions/students/<id>/documents/`, `DELETE /api/admissions/documents/<id>/` | |
 | `GET/POST /api/admissions/students/<id>/remarks/` | |
 | `GET/POST /api/admissions/students/<id>/parent/` | Provision the parent account (handled by `apps.portal.views.ProvisionParentView`) |
-| `POST /api/admissions/students/<id>/send-portal-credentials/` | Resets the password, mirrors it to `portal_temp_password`, emails it |
+| `POST /api/admissions/students/<id>/send-portal-credentials/` | Resets the password, returns it once (not stored), emails it |
 | `POST /api/admissions/students/<id>/send-handbook/` | |
 | `GET /api/admissions/me/`, `GET /api/admissions/me/documents/` | Student's own record |
 | `GET/POST /api/admissions/enrollments/`, `GET/PATCH /api/admissions/enrollments/<id>/` | |
@@ -189,15 +189,15 @@ because fpdf2's core fonts are Latin-1 only.
 
 ## 5.7 Portal provisioning (`services_portal_email.py`)
 
-"Send portal credentials" resets the student's password, mirrors the plaintext
-onto `Student.portal_temp_password`, and queues
+"Send portal credentials" resets the student's password, returns the plaintext
+once in the response (it is never stored), and queues
 `student.portal_credentials.email` with `{name, email, username, password,
 institute, login_url}`. `login_url` comes from
 `settings.STUDENT_PORTAL_LOGIN_URL`. The trigger routes to the `PORTAL` sender
 domain (`mail.jdinstitute.com`).
 
-`clear_temp_password_for(user)` wipes the mirror on the student's first
-successful login and on a self-service password change.
+To re-share a lost password, run "Send portal credentials" again — it issues a
+new one.
 
 ## 5.8 Handbook (`services_handbook.py`)
 

@@ -7,19 +7,21 @@ it is due, and that the balance excludes what was already taken.
 """
 
 import io
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from django.core.files.base import ContentFile
 from django.test import TestCase
+from django.utils import timezone
 
 from apps.admissions.models import Enrollment, Student
 from apps.admissions.services_undertaking import (
     fee_overview, render_undertaking_pdf,
 )
 from apps.fees.models import Concession, FeeReceipt, Installment
+from apps.leads.models import Lead
 from apps.master.models import (
-    AcademicYear, Batch, Campus, Institute, Program, Semester,
+    AcademicYear, Batch, Campus, Institute, LeadSource, Program, Semester,
 )
 
 
@@ -92,6 +94,47 @@ class UndertakingTests(TestCase):
                          Decimal("30000"))
 
     # --- rendering -------------------------------------------------
+
+    # --- application fee ---------------------------------------------
+
+    def test_application_fee_is_its_own_row_and_out_of_tuition(self):
+        _installment(self.enrollment, 1, "30000", kind=Installment.Kind.REGISTRATION)
+        _installment(self.enrollment, 2, "72500")
+        _paid_application_fee(self.enrollment, "1000",
+                              datetime(2026, 9, 4, 11, 0))
+
+        o = fee_overview(self.enrollment)
+        self.assertEqual(o["application_fee_line"], "1000 Paid on 04/09/2026")
+        self.assertEqual(o["total_fee"], Decimal("102500"))
+        self.assertEqual(o["tuition_fee"], Decimal("101500"))
+        # What is still owed doesn't depend on the application fee.
+        self.assertEqual(o["balance_due"], Decimal("72500"))
+
+    def test_hand_recorded_application_fee_is_picked_up(self):
+        """Not only gateway payments — a fee a counsellor marked paid on
+        the lead prints too."""
+        _paid_application_fee(self.enrollment, "500",
+                              datetime(2026, 8, 1, 10, 0), mode="CASH")
+        self.assertEqual(fee_overview(self.enrollment)["application_fee_line"],
+                         "500 Paid on 01/08/2026")
+
+    def test_no_lead_or_unpaid_fee_leaves_tuition_as_the_total(self):
+        _installment(self.enrollment, 1, "50000")
+        o = fee_overview(self.enrollment)
+        self.assertEqual(o["application_fee_line"], "")
+        self.assertEqual(o["tuition_fee"], Decimal("50000"))
+
+        lead = _lead_for(self.enrollment)
+        lead.save()
+        o = fee_overview(self.enrollment)
+        self.assertEqual(o["application_fee_line"], "")
+        self.assertEqual(o["tuition_fee"], Decimal("50000"))
+
+    def test_renders_with_application_fee(self):
+        _installment(self.enrollment, 1, "50000")
+        _paid_application_fee(self.enrollment, "1000",
+                              datetime(2026, 9, 4, 11, 0))
+        self.assertTrue(render_undertaking_pdf(self.enrollment).startswith(b"%PDF"))
 
     def test_renders_diploma(self):
         _installment(self.enrollment, 1, "30000",
@@ -199,3 +242,26 @@ def _receipt(enrollment, installment, amount, received, *, status=None):
         payment_mode=FeeReceipt.PaymentMode.ONLINE, received_date=received,
         status=status or FeeReceipt.Status.ACTIVE,
     )
+
+
+def _lead_for(enrollment):
+    student = enrollment.student
+    lead = Lead.objects.create(
+        name=student.student_name, phone=student.student_mobile,
+        email=student.student_email, campus=enrollment.campus,
+        program=enrollment.program,
+        source=LeadSource.objects.get_or_create(
+            slug="website", defaults={"name": "Website"})[0],
+    )
+    student.lead_origin = lead
+    student.save(update_fields=["lead_origin"])
+    return lead
+
+
+def _paid_application_fee(enrollment, amount, paid_at, *, mode="ONLINE"):
+    lead = _lead_for(enrollment)
+    lead.application_fee_amount = Decimal(amount)
+    lead.application_fee_paid_at = timezone.make_aware(paid_at)
+    lead.application_fee_mode = mode
+    lead.save()
+    return lead

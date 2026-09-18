@@ -81,8 +81,9 @@ access rights:
 
 Anything beyond that is granted afterwards from **Admin → Users**.
 
-The generated password is saved so you can share it again without another
-reset. It clears itself once the employee logs in or changes their password.
+The generated password is shown **once**, right after the account is created —
+share it with the employee then. It is not saved anywhere, so if it's lost,
+reset it from **Admin → Users** to issue a new one.
 
 > Setting a default role on a designation only affects **new** portal accounts.
 > Existing accounts keep the roles they already have.
@@ -106,7 +107,7 @@ Three different things:
 
 | Action | Effect |
 |---|---|
-| **Deactivate** | Marks the employee inactive. They stay in the system with all their history |
+| **Deactivate** | Marks the employee inactive. They stay in the system with all their history. The reason you type is saved and shown on the Status card with the date and who did it |
 | **Activate** | Reverses it |
 | **Delete** | A *soft* delete — the record is hidden but nothing is destroyed, and the employee code stays reserved |
 

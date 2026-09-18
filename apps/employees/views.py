@@ -142,6 +142,16 @@ def _apply_filters(qs, params):
         qs = qs.filter(gender=v)
     if v := params.get("nationality"):
         qs = qs.filter(nationality=v)
+    if v := params.get("roles"):
+        # Comma-separated login-role names (case-insensitive), e.g.
+        # "Faculty,HOD" — employees whose linked user holds any of them.
+        from django.db.models import Q
+        names = [n.strip() for n in v.split(",") if n.strip()]
+        match = Q()
+        for n in names:
+            match |= Q(user_account__roles__name__iexact=n)
+        if names:
+            qs = qs.filter(match).distinct()
     if v := params.get("created_after"):
         if d := parse_date(v):
             qs = qs.filter(created_on__date__gte=d)
@@ -168,7 +178,9 @@ def _apply_ordering(qs, params):
         bare = token.lstrip("-")
         if bare in allowed:
             fields.append(token)
-    return qs.order_by(*fields) if fields else qs
+    # `pk` breaks ties (e.g. employees imported with the same
+    # `created_on`), so a row can't repeat or go missing between pages.
+    return qs.order_by(*(fields or ["-created_on"]), "-pk")
 
 
 class EmployeeListCreateView(APIView):
@@ -398,9 +410,11 @@ class _StatusBase(APIView):
             return Response({"reason": "Reason is required (≥ 5 chars)."},
                             status=http.HTTP_400_BAD_REQUEST)
 
-        emp.status = self.target_status
-        emp.updated_by = request.user
-        emp.save(update_fields=["status", "updated_by", "updated_on"])
+        emp.set_status(
+            self.target_status,
+            reason=s.validated_data.get("reason", ""),
+            user=request.user,
+        )
         return Response(EmployeeDetailSerializer(emp, context={"request": request}).data)
 
 

@@ -98,3 +98,84 @@ class SubjectScopeTests(TestCase):
         self.assertEqual(made.program, self.bdes)
         self.assertEqual(made.semester, self.s2)
         self.assertTrue(made.is_elective)
+
+
+class SubjectFilterAndDeleteTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin = User.objects.create_superuser(
+            username="admin", email="a@e.com", password="x",
+        )
+        cls.institute = Institute.objects.create(name="JDIFT", code="JDIFT")
+        cls.bdes = Program.objects.create(
+            name="B.Des", code="BDES", institute=cls.institute,
+        )
+        cls.s1 = Semester.objects.create(name="Sem 1", number=1)
+        Subject.objects.create(
+            name="Design Studio", code="DS1", program=cls.bdes, semester=cls.s1,
+        )
+        Subject.objects.create(
+            name="Fashion Styling", code="FS1", program=cls.bdes,
+            semester=cls.s1, is_elective=True,
+        )
+        Subject.objects.create(name="Old Drawing", code="OD1", is_active=False)
+
+    def setUp(self):
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.admin)
+
+    def _codes(self, **params):
+        r = self.client.get("/api/master/subjects/", params)
+        self.assertEqual(r.status_code, 200, r.content)
+        return {row["code"] for row in r.json()}
+
+    def test_search_matches_name_or_code(self):
+        self.assertEqual(self._codes(q="studio"), {"DS1"})
+        self.assertEqual(self._codes(q="fs1"), {"FS1"})
+
+    def test_elective_filter(self):
+        self.assertEqual(self._codes(elective="1"), {"FS1"})
+        self.assertEqual(self._codes(elective="0"), {"DS1", "OD1"})
+
+    def test_status_filter(self):
+        self.assertEqual(self._codes(active="1"), {"DS1", "FS1"})
+        self.assertEqual(self._codes(active="0"), {"OD1"})
+
+    def test_plain_delete_deactivates(self):
+        sub = Subject.objects.get(code="DS1")
+        r = self.client.delete(f"/api/master/subjects/{sub.id}/")
+        self.assertEqual(r.status_code, 204)
+        sub.refresh_from_db()
+        self.assertFalse(sub.is_active)
+
+    def test_reactivate_via_patch(self):
+        sub = Subject.objects.get(code="OD1")
+        r = self.client.patch(f"/api/master/subjects/{sub.id}/",
+                              {"is_active": True}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        sub.refresh_from_db()
+        self.assertTrue(sub.is_active)
+
+    def test_hard_delete_removes_unused_subject(self):
+        sub = Subject.objects.get(code="OD1")
+        r = self.client.delete(f"/api/master/subjects/{sub.id}/?hard=1")
+        self.assertEqual(r.status_code, 204)
+        self.assertFalse(Subject.objects.filter(pk=sub.pk).exists())
+
+    def test_hard_delete_blocked_when_referenced(self):
+        from apps.master.models import CurriculumMapping
+
+        sub = Subject.objects.get(code="DS1")
+        CurriculumMapping.objects.create(
+            subject=sub, program=self.bdes, semester=self.s1,
+        )
+        r = self.client.delete(f"/api/master/subjects/{sub.id}/?hard=1")
+        self.assertEqual(r.status_code, 409, r.content)
+        self.assertTrue(Subject.objects.filter(pk=sub.pk).exists())
+
+    def test_hard_delete_needs_permission(self):
+        sub = Subject.objects.get(code="OD1")
+        plain = User.objects.create_user(username="p", email="p@e.com", password="x")
+        self.client.force_authenticate(user=plain)
+        r = self.client.delete(f"/api/master/subjects/{sub.id}/?hard=1")
+        self.assertEqual(r.status_code, 403)

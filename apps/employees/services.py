@@ -256,9 +256,7 @@ def provision_portal_user(
     if designation_role_id:
         user.roles.add(designation_role_id)
 
-    # Mirror the plaintext so HR can re-share it without forcing a
-    # rotation. See model field doc for the trade-off.
+    # The plaintext is returned once for HR to share and never stored.
     employee.user_account = user
-    employee.portal_temp_password = temp_password
-    employee.save(update_fields=["user_account", "portal_temp_password"])
+    employee.save(update_fields=["user_account"])
     return user, temp_password

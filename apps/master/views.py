@@ -1,3 +1,4 @@
+from django.db.models import ProtectedError, Q
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -497,19 +498,68 @@ class SubjectListCreateView(_ListCreateBase):
 
     def get(self, request):
         qs = Subject.objects.select_related("program", "semester")
-        if request.query_params.get("active") == "1":
+        params = request.query_params
+        if params.get("active") == "1":
             qs = qs.filter(is_active=True)
+        elif params.get("active") == "0":
+            qs = qs.filter(is_active=False)
         for param in ("program", "semester"):
-            value = request.query_params.get(param)
+            value = params.get(param)
             if value:
                 qs = qs.filter(**{f"{param}_id": value})
+        if params.get("elective") in ("0", "1"):
+            qs = qs.filter(is_elective=params["elective"] == "1")
+        if q := params.get("q", "").strip():
+            qs = qs.filter(Q(name__icontains=q) | Q(code__icontains=q))
         return Response(self.serializer(qs, many=True).data)
 
 
 class SubjectDetailView(_DetailBase):
+    """`DELETE` deactivates, like every master row. `DELETE ?hard=1`
+    removes the row for good — only allowed while nothing references
+    it, so a subject with timetable, marks, curriculum etc. history
+    can only ever be deactivated."""
+
     model = Subject
     serializer = SubjectSerializer
     perm_base = "master.subject"
+
+    def delete(self, request, pk):
+        if request.query_params.get("hard") != "1":
+            return super().delete(request, pk)
+        obj = self._obj(pk)
+        if _subject_is_chosen_elective(obj.pk):
+            return Response(
+                {"detail": "Students have chosen this elective. "
+                           "Deactivate it instead."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        try:
+            obj.delete()
+        except ProtectedError as exc:
+            used_in = sorted({
+                o._meta.verbose_name_plural for o in exc.protected_objects
+            })
+            return Response(
+                {"detail": f"Subject is in use ({', '.join(used_in)}). "
+                           "Deactivate it instead."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def _subject_is_chosen_elective(subject_id):
+    """`Enrollment.elective_subjects` is free text of subject ids, not an
+    FK, so PROTECT can't guard it — check it by hand."""
+    from apps.academics.attendance_service import _elective_ids
+    from apps.admissions.models import Enrollment
+
+    wanted = str(subject_id)
+    raws = (
+        Enrollment.objects.exclude(elective_subjects="")
+        .values_list("elective_subjects", flat=True)
+    )
+    return any(wanted in _elective_ids(raw) for raw in raws)
 
 
 class ClassroomListCreateView(_ListCreateBase):
