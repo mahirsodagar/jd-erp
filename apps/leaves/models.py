@@ -77,6 +77,14 @@ class LeaveApplication(models.Model):
 
     from_date = models.DateField()
     to_date = models.DateField()
+    # Keep timings in sync with LEAVE_SESSION_LABELS in jd-erp-web api/endpoints/leaves.ts.
+    SESSION_LABELS = {
+        1: "Half day (10:00 AM – 1:30 PM)",
+        2: "Full day",
+        3: "Permission (9:30 AM – 11:00 AM)",
+        4: "Permission (4:00 PM – 5:30 PM)",
+    }
+
     from_session = models.PositiveSmallIntegerField(
         help_text="1=AM, 2=Full day, 3=Permission slot 1, 4=Permission slot 2",
     )

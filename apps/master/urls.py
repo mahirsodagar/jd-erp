@@ -33,6 +33,7 @@ from .views import (
     StateListView,
     StateManageView,
     SubjectDetailView,
+    SubjectImportView,
     SubjectListCreateView,
     UniversityDetailView,
     UniversityListCreateView,
@@ -94,6 +95,7 @@ urlpatterns = [
 
     path("subjects/", SubjectListCreateView.as_view(), name="subject-list-create"),
     path("subjects/<int:pk>/", SubjectDetailView.as_view(), name="subject-detail"),
+    path("subjects/import/", SubjectImportView.as_view(), name="subject-import"),
 
     path("classrooms/", ClassroomListCreateView.as_view(), name="classroom-list-create"),
     path("classrooms/<int:pk>/", ClassroomDetailView.as_view(), name="classroom-detail"),

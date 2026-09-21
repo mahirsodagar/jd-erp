@@ -715,6 +715,8 @@ class ZeroHourReportListCreateView(PaginatedAPIViewMixin, APIView):
                                  "next": None, "previous": None})
             qs = qs.filter(submitted_by=u)
         params = request.query_params
+        if v := params.get("program"):
+            qs = qs.filter(batch__program_id=v)
         if v := params.get("batch"):
             qs = qs.filter(batch_id=v)
         if v := params.get("mentor"):

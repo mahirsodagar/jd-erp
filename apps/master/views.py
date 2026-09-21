@@ -548,6 +548,59 @@ class SubjectDetailView(_DetailBase):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class SubjectImportView(APIView):
+    """Bulk create/update subjects from a CSV — see `subject_import`.
+
+    POST multipart `file`. With `dry_run=1` only the per-row plan is
+    returned; without it the file is re-validated and written, all or
+    nothing. Rows that update an existing subject also need
+    `master.subject.edit`.
+    """
+
+    permission_classes = [IsAuthenticated, HasPerm]
+    required_perm = "master.subject.add"
+
+    def post(self, request):
+        from . import subject_import as imp
+
+        upload = request.FILES.get("file")
+        if not upload:
+            return Response({"detail": "Attach a CSV file as `file`."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if upload.size > 2 * 1024 * 1024:
+            return Response({"detail": "File is larger than 2 MB."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            results = imp.plan(imp.read_rows(upload.read()))
+        except imp.ImportFileError as exc:
+            return Response({"detail": str(exc)},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        summary = imp.summarise(results)
+        body = {"summary": summary,
+                "rows": [r.as_dict() for r in results],
+                "applied": False}
+        dry_run = str(request.data.get("dry_run", "")).lower() in ("1", "true")
+        if dry_run:
+            return Response(body)
+
+        if summary["error"]:
+            body["detail"] = f"{summary['error']} row(s) have errors; nothing was imported."
+            return Response(body, status=status.HTTP_400_BAD_REQUEST)
+        user = request.user
+        if summary["update"] and not (
+            user.is_superuser
+            or user.roles.filter(permissions__key="master.subject.edit").exists()
+        ):
+            body["detail"] = ("This file updates existing subjects, which "
+                              "needs the subject edit permission.")
+            return Response(body, status=status.HTTP_403_FORBIDDEN)
+
+        imp.apply(results)
+        body["applied"] = True
+        return Response(body)
+
+
 def _subject_is_chosen_elective(subject_id):
     """`Enrollment.elective_subjects` is free text of subject ids, not an
     FK, so PROTECT can't guard it — check it by hand."""

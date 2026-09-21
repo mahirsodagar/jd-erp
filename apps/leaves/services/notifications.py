@@ -112,7 +112,8 @@ def notify_leave_applied(application) -> None:
         f"{emp.full_name} ({emp.emp_code}) has applied for "
         f"{application.leave_type.name}.\n"
         f"Dates: {application.from_date} → {application.to_date}\n"
-        f"Days: {application.count} (session {application.from_session})\n"
+        f"Days: {application.count} "
+        f"({application.SESSION_LABELS.get(application.from_session, application.from_session)})\n"
         f"Reason: {application.reason}\n"
     )
     send_email_now(
