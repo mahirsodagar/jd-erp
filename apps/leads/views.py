@@ -7,12 +7,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import HasPerm
+from apps.common.csv_export import csv_response, fmt_date, wants_csv
 from apps.common.throttles import LeadIntakeThrottle
 
 from .intake_auth import HasIntakeApiKey
 from .models import (
     Counsellor,
-    Lead, LeadCommunication, LeadFollowup,
+    Lead, LeadCommunication, LeadFollowup, LeadUtm,
 )
 from .permissions import LeadVisibility, can_see_all_leads, filter_visible
 from .serializers import (
@@ -70,7 +71,41 @@ class LeadListCreateView(APIView):
                 followups__next_followup_date__lt=today,
             ).distinct()
 
+        if wants_csv(request):
+            return self._csv(qs)
         return Response(LeadDetailSerializer(qs[:500], many=True).data)
+
+    def _csv(self, qs):
+        # Legacy JD_ERP "Lead Master.csv" columns (minus "Actions").
+        def utm(lead, field):
+            try:
+                return getattr(lead.utm, field)
+            except LeadUtm.DoesNotExist:
+                return ""
+
+        def row(i, lead):
+            return [
+                i, fmt_date(lead.created_at),
+                lead.assign_to.username if lead.assign_to else "",
+                lead.name, lead.phone, lead.alternative_phone, lead.email,
+                lead.campus.name if lead.campus else "",
+                lead.program.name if lead.program else "",
+                lead.source.name if lead.source else "",
+                utm(lead, "utm_source"), utm(lead, "utm_campaign"),
+                utm(lead, "utm_medium"), lead.city, lead.state,
+                "Yes" if lead.is_repeated else "No",
+                lead.remarks, lead.get_status_display(),
+            ]
+
+        return csv_response(
+            "Lead Master.csv",
+            ["Sl no", "Created on", "Assigned To", "Name", "Phone",
+             "Alt Phone", "E-mail", "Campus", "Program", "Source",
+             "utm_source", "utm_campaign", "utm_medium", "city", "state",
+             "Is Repeated", "Remarks", "Status"],
+            (row(i, lead) for i, lead in
+             enumerate(qs.iterator(chunk_size=2000), start=1)),
+        )
 
     def post(self, request):
         if not (request.user.is_superuser

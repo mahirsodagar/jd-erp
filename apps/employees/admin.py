@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Department, Designation, Employee, EmployeeDocument
+from .models import Department, Designation, Employee, EmployeeDocument, Holiday
 
 
 @admin.register(Department)
@@ -49,3 +49,10 @@ class EmployeeDocumentAdmin(admin.ModelAdmin):
     search_fields = ("name", "employee__emp_code", "employee__first_name")
     autocomplete_fields = ("employee", "uploaded_by")
     readonly_fields = ("created_at",)
+
+
+@admin.register(Holiday)
+class HolidayAdmin(admin.ModelAdmin):
+    list_display = ("date", "name", "campus")
+    list_filter = ("campus",)
+    date_hierarchy = "date"

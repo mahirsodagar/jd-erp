@@ -59,6 +59,16 @@ class ScheduleSlot(models.Model):
         on_delete=models.SET_NULL, related_name="frozen_schedule_slots",
     )
 
+    # Marking closes ATTENDANCE_WINDOW after class start (legacy PHP
+    # rule, academics/aget.php:2357). An admin may re-open one slot so
+    # its instructor can still mark — legacy `timetable_pub.freeze_status=1`.
+    attendance_unlocked = models.BooleanField(default=False)
+    attendance_unlocked_at = models.DateTimeField(null=True, blank=True)
+    attendance_unlocked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="unlocked_schedule_slots",
+    )
+
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True,
         on_delete=models.SET_NULL, related_name="schedule_slots_created",
@@ -274,12 +284,14 @@ class MarksEntry(models.Model):
         max_digits=5, decimal_places=1, null=True, blank=True,
         help_text="Internal Assessment.",
     )
-    ia_max = models.DecimalField(max_digits=5, decimal_places=1, default=20)
+    # Legacy marksentry.php fixed both at 40 (the other 20 of its grade
+    # formula came from attendance).
+    ia_max = models.DecimalField(max_digits=5, decimal_places=1, default=40)
     ea_marks = models.DecimalField(
         max_digits=5, decimal_places=1, null=True, blank=True,
         help_text="External Assessment.",
     )
-    ea_max = models.DecimalField(max_digits=5, decimal_places=1, default=80)
+    ea_max = models.DecimalField(max_digits=5, decimal_places=1, default=40)
 
     published = models.BooleanField(default=False, db_index=True)
     published_at = models.DateTimeField(null=True, blank=True)

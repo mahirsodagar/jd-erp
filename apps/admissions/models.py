@@ -328,3 +328,36 @@ class Enrollment(models.Model):
 
     def __str__(self):
         return f"{self.student.student_name} → {self.batch.name} (sem {self.semester.number})"
+
+
+class StudentStatusChange(models.Model):
+    """Drop Out / Re-activate history for a student.
+
+    Legacy Student Search → Actions → "Drop Out" prompted for remarks, set
+    `student_master.active_status = 3` and wrote the remarks to `logs`
+    (includes/save.php:1208). Here lifecycle lives on Enrollment, so a
+    dropout moves the live (ACTIVE / PENDING) enrollments to DROPPED and
+    this row records who, when, why — and each enrollment's previous
+    status so a re-activation can put it back exactly.
+    """
+
+    class Action(models.TextChoices):
+        DROPOUT = "DROPOUT", "Dropout"
+        REACTIVATE = "REACTIVATE", "Re-activated"
+
+    student = models.ForeignKey(
+        Student, on_delete=models.CASCADE, related_name="status_changes",
+    )
+    action = models.CharField(max_length=12, choices=Action.choices)
+    remarks = models.TextField()
+    # [{"enrollment": id, "from": status, "to": status}, ...]
+    enrollments = models.JSONField(default=list)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="student_status_changes",
+    )
+    created_on = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_on", "-id")
+

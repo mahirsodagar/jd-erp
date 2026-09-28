@@ -213,7 +213,7 @@ def _header_band(pdf: FPDF, institute_name: str, title: str):
 def _meta_block(pdf: FPDF, certificate: Certificate):
     pdf.set_font("Helvetica", "", 11)
     pdf.cell(95, 6, _safe(f"Certificate No: {certificate.certificate_no}"))
-    issued = certificate.issued_at.strftime("%d-%b-%Y") if certificate.issued_at else ""
+    issued = certificate.issued_at.strftime("%d-%m-%y") if certificate.issued_at else ""
     pdf.cell(0, 6, _safe(f"Date of Issue: {issued}"),
              new_x="LMARGIN", new_y="NEXT")
     pdf.ln(4)

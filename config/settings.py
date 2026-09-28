@@ -1,5 +1,6 @@
 """Django settings for the jd-erp project (single-tenant)."""
 
+import sys
 from datetime import timedelta
 from pathlib import Path
 
@@ -172,6 +173,15 @@ REST_FRAMEWORK = {
         "lead_intake": env("THROTTLE_LEAD_INTAKE", default="120/hour"),
     },
 }
+
+# The general buckets are keyed on user pk / IP, which every test reuses
+# (rolled-back rows hand out the same pk again) while the LocMem cache
+# keeps counting — so the suite as a whole tripped 100/min and failed
+# order-dependently with 429s. Lift only those two buckets under test.
+if len(sys.argv) > 1 and sys.argv[1] == "test":
+    REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update(
+        user="100000/min", anon="100000/min",
+    )
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=env.int("ACCESS_TOKEN_MINUTES", default=15)),

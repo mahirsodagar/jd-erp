@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import HasPerm
 
-from .models import Department, Designation, Employee, EmployeeDocument
+from .models import Department, Designation, Employee, EmployeeDocument, Holiday
 from .pagination import EmployeePagination
 from .permissions import (
     EmployeeAccessPolicy,
@@ -31,6 +31,7 @@ from .serializers import (
     EmployeeListSerializer,
     EmployeeSelfUpdateSerializer,
     EmployeeUpdateSerializer,
+    HolidaySerializer,
     PortalAccountSerializer,
     StatusToggleSerializer,
 )
@@ -121,6 +122,63 @@ class DepartmentDetailView(_MasterDetail):
 class DesignationDetailView(_MasterDetail):
     model = Designation
     serializer = DesignationSerializer
+
+
+# --- Holiday Calendar (HR) ----------------------------------------------
+#
+# Legacy hr/holiday_calender.php: every employee sees their own campus's
+# holidays for a year. Reading is open to any signed-in user (a campus
+# holiday list is not sensitive, and `?campus=` lets HR look at another
+# campus); writes need `hr.holiday.add/edit/delete`.
+
+class HolidayListCreateView(APIView):
+    perm_base = "hr.holiday"
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), HasPerm()]
+
+    def get(self, request):
+        campus = request.query_params.get("campus")
+        if not campus:
+            emp = getattr(request.user, "employee", None)
+            campus = emp.campus_id if emp else None
+        if not campus:
+            return Response([])
+        qs = Holiday.objects.filter(campus_id=campus).select_related("campus")
+        if (year := request.query_params.get("year", "")).isdigit():
+            qs = qs.filter(date__year=int(year))
+        return Response(HolidaySerializer(qs, many=True).data)
+
+    def post(self, request):
+        s = HolidaySerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        s.save(created_by=request.user)
+        return Response(s.data, status=http.HTTP_201_CREATED)
+
+
+class HolidayDetailView(APIView):
+    perm_base = "hr.holiday"
+
+    def get_permissions(self):
+        return [IsAuthenticated(), HasPerm()]
+
+    def _obj(self, pk):
+        try:
+            return Holiday.objects.get(pk=pk)
+        except Holiday.DoesNotExist as e:
+            raise Http404 from e
+
+    def patch(self, request, pk):
+        s = HolidaySerializer(self._obj(pk), data=request.data, partial=True)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response(s.data)
+
+    def delete(self, request, pk):
+        self._obj(pk).delete()
+        return Response(status=http.HTTP_204_NO_CONTENT)
 
 
 # --- Employees ---------------------------------------------------------

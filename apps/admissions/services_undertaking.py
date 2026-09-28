@@ -81,7 +81,7 @@ def _amount(v) -> str:
 
 
 def _date(value) -> str:
-    return value.strftime("%d/%m/%Y") if value else ""
+    return value.strftime("%d-%m-%y") if value else ""
 
 
 # --- Fee overview ------------------------------------------------------
@@ -272,7 +272,7 @@ def render_undertaking_pdf(
     date_w = pdf.get_string_width("Date: ") + 1
     pdf.cell(date_w, 5, "Date: ")
     pdf.set_font("Helvetica", "", 9)
-    pdf.cell(0, 5, timezone.localtime().strftime("%d-%m-%Y %H:%M:%S"),
+    pdf.cell(0, 5, timezone.localtime().strftime("%d-%m-%y %H:%M:%S"),
              new_x="LMARGIN", new_y="NEXT")
     pdf.ln(3)
 

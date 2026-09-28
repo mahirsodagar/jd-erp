@@ -2,7 +2,7 @@
 per-module date grid). All gated on `academics.attendance.view_report`.
 The per-slot student modal reuses the existing roster endpoint."""
 
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from django.utils.dateparse import parse_date
 from rest_framework import status as http
 from rest_framework.permissions import IsAuthenticated
@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 from apps.master.models import Batch
 
 from . import attendance_reports as reports
+from . import shortage_letter
 from .permissions import has_perm
 
 
@@ -103,6 +104,49 @@ class BatchWiseReportView(APIView):
             to_date=parse_date(p.get("to") or "") or None,
             semester=_int(p, "semester"),
         ))
+
+
+class ShortageLetterView(APIView):
+    """GET — Shortage of Attendance letter PDF (legacy Batch-Wise
+    "Shortage of Attendance (Download)"). `?student=<id>` for one
+    student, omitted for every shortage student on one PDF. Takes the
+    same from / to / semester filters as the Batch-Wise report."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        if not _can(request.user):
+            return _deny()
+        try:
+            batch = Batch.objects.get(pk=pk)
+        except Batch.DoesNotExist as e:
+            raise Http404 from e
+        p = request.query_params
+        to_date = parse_date(p.get("to") or "") or None
+        student = _int(p, "student")
+        rows = shortage_letter.shortage_rows(
+            batch=batch,
+            from_date=parse_date(p.get("from") or "") or None,
+            to_date=to_date,
+            semester=_int(p, "semester"),
+            student_id=student,
+        )
+        if not rows:
+            return Response(
+                {"detail": ("This student is not below 75% attendance."
+                            if student else
+                            "No student in this report is below 75% attendance.")},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+        from datetime import date
+        as_of = min(to_date, date.today()) if to_date else date.today()
+        pdf = shortage_letter.render_shortage_letters(
+            batch=batch, rows=rows, as_of=as_of)
+        name = (f"shortage-of-attendance-{rows[0]['application_form_id'] or student}.pdf"
+                if student else f"shortage-of-attendance-{batch.pk}.pdf")
+        resp = HttpResponse(pdf, content_type="application/pdf")
+        resp["Content-Disposition"] = f'attachment; filename="{name}"'
+        return resp
 
 
 class BatchSemestersView(APIView):

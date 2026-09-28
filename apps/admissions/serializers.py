@@ -1,18 +1,22 @@
 from rest_framework import serializers
 
-from .models import Enrollment, Student, StudentDocument, StudentRemark
+from .models import (
+    Enrollment, Student, StudentDocument, StudentRemark, StudentStatusChange,
+)
 
 
 class StudentListSerializer(serializers.ModelSerializer):
     campus_name = serializers.CharField(source="campus.name", read_only=True)
     program_name = serializers.CharField(source="program.name", read_only=True)
     academic_year_code = serializers.CharField(source="academic_year.code", read_only=True)
+    # Annotated by StudentListView (legacy "Active" / "Dropout" badge).
+    is_dropout = serializers.BooleanField(read_only=True, default=False)
 
     class Meta:
         model = Student
         fields = [
             "id", "application_form_id", "registration_number",
-            "student_name",
+            "student_name", "is_dropout",
             "campus", "campus_name",
             "program", "program_name",
             "academic_year", "academic_year_code",
@@ -54,12 +58,13 @@ class StudentDetailSerializer(serializers.ModelSerializer):
     )
     photo_url = serializers.SerializerMethodField()
     portal_username = serializers.SerializerMethodField()
+    is_dropout = serializers.SerializerMethodField()
 
     class Meta:
         model = Student
         fields = [
             "id", "application_form_id", "registration_number",
-            "student_name", "father_name", "mother_name",
+            "student_name", "is_dropout", "father_name", "mother_name",
             "gender", "dob", "category", "study_medium",
             "nationality", "aadhaar_number", "blood_group",
             "institute", "institute_name",
@@ -85,7 +90,7 @@ class StudentDetailSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id", "application_form_id",
             "user_account", "parent_user_account", "lead_origin",
-            "portal_username",
+            "portal_username", "is_dropout",
             "created_by", "created_on", "updated_by", "updated_on",
             "campus_name", "program_name", "course_name",
             "institute_name", "academic_year_code", "photo_url",
@@ -137,6 +142,10 @@ class StudentDetailSerializer(serializers.ModelSerializer):
     def get_photo_url(self, obj):
         request = self.context.get("request")
         return request.build_absolute_uri(obj.photo.url) if obj.photo and request else None
+
+    def get_is_dropout(self, obj):
+        from .services import is_dropout
+        return is_dropout(obj)
 
     def get_portal_username(self, obj):
         # Only surface to staff — students shouldn't see their own row
@@ -274,3 +283,24 @@ class PromotionResultSerializer(serializers.Serializer):
     username = serializers.CharField()
     temporary_password = serializers.CharField()
     note = serializers.CharField()
+
+
+class StudentStatusChangeSerializer(serializers.ModelSerializer):
+    action_label = serializers.CharField(
+        source="get_action_display", read_only=True)
+    created_by_name = serializers.CharField(
+        source="created_by.full_name", read_only=True, default="",
+    )
+
+    class Meta:
+        model = StudentStatusChange
+        fields = [
+            "id", "action", "action_label", "remarks", "enrollments",
+            "created_by_name", "created_on",
+        ]
+        read_only_fields = fields
+
+
+class StudentStatusChangeInputSerializer(serializers.Serializer):
+    remarks = serializers.CharField(max_length=1000)
+

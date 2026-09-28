@@ -253,7 +253,7 @@ class InstallmentPayView(APIView):
                 {"detail": (
                     f"Installments must be paid in order. Please clear "
                     f"installment #{next_payable.sequence} "
-                    f"(due {next_payable.due_date.isoformat()}) first."
+                    f"(due {next_payable.due_date.strftime('%d-%m-%y')}) first."
                 )},
                 status=http.HTTP_409_CONFLICT,
             )

@@ -53,7 +53,7 @@ def _fmt_aadhaar(value: str) -> str:
     return f"{digits[:4]} {digits[4:8]} {digits[8:]}"
 
 
-def _fmt_date(value, fmt: str = "%d-%b-%Y") -> str:
+def _fmt_date(value, fmt: str = "%d-%m-%y") -> str:
     """Format a date/datetime, tolerating one that is still a string.
 
     An unsaved Student carries whatever the form posted — `dob` is an
@@ -135,7 +135,7 @@ def _header(pdf: FPDF, student: Student) -> None:
     pdf.cell(0, 5, _safe(ref), align="C", new_x="LMARGIN", new_y="NEXT")
     pdf.cell(
         0, 5,
-        _safe(f"Submitted: {_fmt_date(student.created_on, '%d-%b-%Y %H:%M')}"),
+        _safe(f"Submitted: {_fmt_date(student.created_on, '%d-%m-%y %H:%M')}"),
         align="C", new_x="LMARGIN", new_y="NEXT",
     )
     pdf.set_text_color(0, 0, 0)
@@ -220,7 +220,7 @@ def _accepted_line(pdf: FPDF, label: str, accepted_at) -> None:
         pdf.set_text_color(20, 100, 60)
         text = (
             f"[X] {label} by the student on "
-            f"{_fmt_date(accepted_at, '%d-%b-%Y %H:%M')}"
+            f"{_fmt_date(accepted_at, '%d-%m-%y %H:%M')}"
         )
     else:
         pdf.set_text_color(150, 60, 20)

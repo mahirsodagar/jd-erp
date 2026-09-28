@@ -15,7 +15,7 @@ from django.utils import timezone
 
 from apps.leads.models import Lead
 
-from .models import Enrollment, Student
+from .models import Enrollment, Student, StudentStatusChange
 
 User = get_user_model()
 
@@ -834,3 +834,84 @@ def provision_student_portal_credentials(*, student: Student) -> dict:
         "email": student.institute_email,
         "temporary_password": temp_password,
     }
+
+
+# --- Drop Out / Re-activate --------------------------------------------
+
+LIVE_STATUSES = (Enrollment.Status.ACTIVE, Enrollment.Status.PENDING)
+
+
+def is_dropout(student: Student) -> bool:
+    """No live enrollment, and at least one DROPPED — the legacy
+    "Dropout" badge. Also true for a drop made from Edit Enrollment."""
+    rows = Enrollment.objects.filter(student=student)
+    return (not rows.filter(status__in=LIVE_STATUSES).exists()
+            and rows.filter(status=Enrollment.Status.DROPPED).exists())
+
+
+class StatusChangeError(Exception):
+    pass
+
+
+@transaction.atomic
+def drop_out_student(*, student: Student, remarks: str, by) -> StudentStatusChange:
+    """Move every live enrollment to DROPPED and log the change.
+
+    Fees are left untouched (legacy did the same); collection already
+    refuses DROPPED enrollments. Portal login is kept so the student can
+    still reach receipts, documents and a transfer certificate.
+    """
+    remarks = (remarks or "").strip()
+    if not remarks:
+        raise StatusChangeError("Dropout remarks are required.")
+    live = list(Enrollment.objects.select_for_update().filter(
+        student=student, status__in=LIVE_STATUSES))
+    if not live:
+        raise StatusChangeError(
+            "This student has no active or pending enrollment to drop.")
+    moved = []
+    for e in live:
+        moved.append({"enrollment": e.id, "from": e.status,
+                      "to": Enrollment.Status.DROPPED})
+        e.status = Enrollment.Status.DROPPED
+        e.save(update_fields=["status", "updated_on"])
+    return StudentStatusChange.objects.create(
+        student=student, action=StudentStatusChange.Action.DROPOUT,
+        remarks=remarks, enrollments=moved, created_by=by,
+    )
+
+
+@transaction.atomic
+def reactivate_student(*, student: Student, remarks: str, by) -> StudentStatusChange:
+    """Undo the latest dropout: each enrollment it dropped goes back to
+    the status it had, if it is still DROPPED. A student dropped from
+    Edit Enrollment (no dropout record) gets their newest DROPPED
+    enrollment set to ACTIVE."""
+    remarks = (remarks or "").strip()
+    if not remarks:
+        raise StatusChangeError("Re-activation remarks are required.")
+    if not is_dropout(student):
+        raise StatusChangeError("This student is not a dropout.")
+
+    last = student.status_changes.filter(
+        action=StudentStatusChange.Action.DROPOUT).first()
+    targets = {m["enrollment"]: m["from"] for m in (last.enrollments if last else [])}
+    rows = Enrollment.objects.select_for_update().filter(
+        student=student, status=Enrollment.Status.DROPPED)
+    restore = [e for e in rows if e.id in targets]
+    if not restore:
+        newest = rows.order_by("-created_on").first()
+        restore = [newest]
+        targets = {newest.id: Enrollment.Status.ACTIVE}
+
+    moved = []
+    for e in restore:
+        moved.append({"enrollment": e.id, "from": e.status,
+                      "to": targets[e.id]})
+        e.status = targets[e.id]
+        e.save(update_fields=["status", "updated_on"])
+    return StudentStatusChange.objects.create(
+        student=student, action=StudentStatusChange.Action.REACTIVATE,
+        remarks=remarks, enrollments=moved, created_by=by,
+    )
+

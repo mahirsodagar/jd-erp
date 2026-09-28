@@ -568,23 +568,29 @@ class LeaveReportSummaryView(APIView):
         return Response({"count": len(rows), "rows": rows})
 
     def _csv(self, qs):
-        resp = HttpResponse(content_type="text/csv")
-        resp["Content-Disposition"] = 'attachment; filename="leave_report.csv"'
+        # Legacy JD_ERP "Leave Report.csv" columns, plus code / campus /
+        # department / decided-on which this report also filters by.
+        resp = HttpResponse(content_type="text/csv; charset=utf-8")
+        resp["Content-Disposition"] = 'attachment; filename="Leave Report.csv"'
+        resp.write("﻿")  # BOM so Excel reads UTF-8
         w = csv.writer(resp)
-        w.writerow(["emp_code", "employee", "campus", "department", "leave_type",
-                    "applied_for", "from_date", "to_date", "count", "reason",
-                    "status", "approver", "approver_remarks",
-                    "applied_on", "decided_on"])
-        for a in qs.iterator():
+        w.writerow(["Sl No.", "Employee Code", "Employee Name", "Campus",
+                    "Department", "Leave From", "Leave To", "Employee Remarks",
+                    "Leave Count", "Leave Type", "Applied For", "Approver Name",
+                    "Approver Remarks", "Leave Status", "Applied On",
+                    "Decided On"])
+        for i, a in enumerate(qs.iterator(), start=1):
             w.writerow([
-                a.employee.emp_code, a.employee.full_name,
+                i, a.employee.emp_code, a.employee.full_name,
                 a.employee.campus.name, a.employee.department.name,
+                a.from_date.strftime("%d-%m-%Y"),
+                a.to_date.strftime("%d-%m-%Y"), a.reason, a.count,
                 a.leave_type.name, a.leave_type.get_category_display(),
-                a.from_date, a.to_date, a.count, a.reason,
-                a.get_status_display(),
                 a.approved_by.full_name if a.approved_by else "",
                 a.approver_remarks,
-                a.applied_on.isoformat(),
-                a.decided_on.isoformat() if a.decided_on else "",
+                a.get_status_display(),
+                timezone.localtime(a.applied_on).strftime("%d-%m-%Y"),
+                (timezone.localtime(a.decided_on).strftime("%d-%m-%Y")
+                 if a.decided_on else ""),
             ])
         return resp

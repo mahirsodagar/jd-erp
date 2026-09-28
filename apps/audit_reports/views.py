@@ -183,7 +183,8 @@ class FacultyDailyReportDetailView(APIView):
 
 
 class FacultyDailyComputedView(APIView):
-    """Per-day scheduled class hours + leave hours for one faculty."""
+    """Per-day class hours (attendance-marked slots only), missed hours
+    and leave hours for one faculty."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -427,7 +428,7 @@ class CourseEndReportListCreateView(APIView):
     def get(self, request):
         u = request.user
         qs = CourseEndReport.objects.select_related(
-            "instructor", "subject", "batch",
+            "instructor", "subject", "batch", "batch__program",
         )
         if not (has_perm(u, "audit.course_end.view_all")
                 or has_perm(u, "audit.course_end.edit_any")
@@ -435,6 +436,8 @@ class CourseEndReportListCreateView(APIView):
             emp = _emp_of(u)
             qs = qs.filter(instructor=emp) if emp else qs.none()
         params = request.query_params
+        if v := params.get("program"):
+            qs = qs.filter(batch__program_id=v)
         if v := params.get("batch"):
             qs = qs.filter(batch_id=v)
         if v := params.get("subject"):
@@ -506,7 +509,8 @@ class CourseEndReportDetailView(APIView):
     def _obj(self, pk):
         try:
             return CourseEndReport.objects.select_related(
-                "instructor", "subject", "batch").get(pk=pk)
+                "instructor", "subject", "batch", "batch__program",
+            ).get(pk=pk)
         except CourseEndReport.DoesNotExist as e:
             raise Http404 from e
 

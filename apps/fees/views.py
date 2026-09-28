@@ -272,6 +272,7 @@ class FeeReceiptListCreateView(APIView):
     def get(self, request):
         qs = FeeReceipt.objects.select_related(
             "enrollment", "enrollment__student", "enrollment__campus",
+            "enrollment__course", "enrollment__batch",
             "received_by", "cancelled_by",
         )
         qs = visible_enrollments_filter(qs, request.user)

@@ -15,7 +15,7 @@ Students module:
   key that gates those fields on the student profile.
 """
 
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from rest_framework import status as http
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -138,3 +138,23 @@ class BatchFeedbackView(APIView):
             "feedback_link": batch.feedback_link,
             "feedback_link_enabled": batch.feedback_link_enabled,
         })
+
+
+class BatchPhotosView(APIView):
+    """GET — ZIP of the batch's active students' photos (legacy Student
+    Search → "Download Photos"). Same gate as the roster."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        if not _can_view_roster(request.user):
+            return _deny()
+        batch = _get_batch(pk)
+        if not _in_scope(request.user, batch):
+            raise Http404
+        data, _ = reports.batch_photos_zip(batch)
+        name = reports._slug(batch.short_name or batch.name) or f"batch-{batch.pk}"
+        resp = HttpResponse(data, content_type="application/zip")
+        resp["Content-Disposition"] = f'attachment; filename="{name}-photos.zip"'
+        return resp
+

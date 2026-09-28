@@ -42,8 +42,8 @@ class UndertakingTests(TestCase):
         self.assertEqual(o["total_fee"], Decimal("175000"))
         self.assertEqual(o["balance_due"], Decimal("145000"))
         self.assertEqual(o["balance_lines"], [
-            "72500 to be paid on 18/11/2026",
-            "72500 to be paid on 18/12/2026",
+            "72500 to be paid on 18-11-26",
+            "72500 to be paid on 18-12-26",
         ])
 
     def test_paid_rows_say_when_and_how(self):
@@ -53,7 +53,7 @@ class UndertakingTests(TestCase):
         _receipt(self.enrollment, reg, "30000", date(2025, 9, 4))
 
         o = fee_overview(self.enrollment)
-        self.assertEqual(o["upfront_line"], "30000 Paid on 04/09/2025 - Online")
+        self.assertEqual(o["upfront_line"], "30000 Paid on 04-09-25 - Online")
 
     def test_cancelled_receipts_do_not_mark_a_row_paid(self):
         reg = _installment(self.enrollment, 1, "30000",
@@ -63,7 +63,7 @@ class UndertakingTests(TestCase):
                  status=FeeReceipt.Status.CANCELLED)
 
         o = fee_overview(self.enrollment)
-        self.assertEqual(o["upfront_line"], "30000 to be paid on 04/09/2025")
+        self.assertEqual(o["upfront_line"], "30000 to be paid on 04-09-25")
 
     def test_down_payment_stands_in_when_there_is_no_registration_row(self):
         _installment(self.enrollment, 1, "50000", description="Down payment")
@@ -104,7 +104,7 @@ class UndertakingTests(TestCase):
                               datetime(2026, 9, 4, 11, 0))
 
         o = fee_overview(self.enrollment)
-        self.assertEqual(o["application_fee_line"], "1000 Paid on 04/09/2026")
+        self.assertEqual(o["application_fee_line"], "1000 Paid on 04-09-26")
         self.assertEqual(o["total_fee"], Decimal("102500"))
         self.assertEqual(o["tuition_fee"], Decimal("101500"))
         # What is still owed doesn't depend on the application fee.
@@ -116,7 +116,7 @@ class UndertakingTests(TestCase):
         _paid_application_fee(self.enrollment, "500",
                               datetime(2026, 8, 1, 10, 0), mode="CASH")
         self.assertEqual(fee_overview(self.enrollment)["application_fee_line"],
-                         "500 Paid on 01/08/2026")
+                         "500 Paid on 01-08-26")
 
     def test_no_lead_or_unpaid_fee_leaves_tuition_as_the_total(self):
         _installment(self.enrollment, 1, "50000")

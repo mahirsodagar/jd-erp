@@ -116,3 +116,56 @@ def batch_roster(batch, *, include_sensitive: bool = True) -> dict:
         "campus": batch.campus.name,
         "rows": rows,
     }
+
+
+# === Batch-wise photo download ========================================
+#
+# Legacy Student Search (includes/get.php:2434) zipped the photos of a
+# batch's active students behind a "Download Photos" link. Files are
+# named "<AppID>_<Name>.<ext>" so they can be matched for ID cards; a
+# `missing.txt` lists students without a photo.
+
+def _slug(text: str) -> str:
+    import re
+    return re.sub(r"[^A-Za-z0-9-]+", "_", (text or "").strip()).strip("_")
+
+
+def batch_photos_zip(batch) -> tuple[bytes, int]:
+    """(zip bytes, number of photos added) for the batch's ACTIVE roster."""
+    import io
+    import os
+    import zipfile
+
+    enrolments = (Enrollment.objects
+                  .filter(batch=batch, status=Enrollment.Status.ACTIVE)
+                  .select_related("student")
+                  .order_by("student__student_name"))
+    buf = io.BytesIO()
+    used, missing, added = set(), [], 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for e in enrolments:
+            s = e.student
+            label = f"{s.application_form_id or s.id} {s.student_name}"
+            if not s.photo:
+                missing.append(label)
+                continue
+            try:
+                with s.photo.open("rb") as fh:
+                    data = fh.read()
+            except (FileNotFoundError, OSError):
+                missing.append(f"{label} (file not found)")
+                continue
+            ext = os.path.splitext(s.photo.name)[1].lower() or ".jpg"
+            base = "_".join(filter(None, (
+                _slug(s.application_form_id), _slug(s.student_name),
+            ))) or str(s.id)
+            name, n = f"{base}{ext}", 2
+            while name in used:
+                name, n = f"{base}_{n}{ext}", n + 1
+            used.add(name)
+            zf.writestr(name, data)
+            added += 1
+        if missing:
+            zf.writestr("missing.txt",
+                        "Students without a photo:\n" + "\n".join(missing) + "\n")
+    return buf.getvalue(), added

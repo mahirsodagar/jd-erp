@@ -280,3 +280,36 @@ class EmployeeDocument(models.Model):
 
     def __str__(self):
         return f"{self.employee_id}: {self.name}"
+
+
+class Holiday(models.Model):
+    """One entry in a campus's Holiday Calendar (HR → Holiday Calendar).
+
+    Ports legacy `holiday_calender_master` (holiday_date, holiday_name,
+    campus_id) — hr/holiday_calender.php. Display only: leave day counts
+    stay plain calendar days, as in legacy.
+    """
+
+    campus = models.ForeignKey(
+        "master.Campus", on_delete=models.CASCADE, related_name="holidays",
+    )
+    date = models.DateField()
+    name = models.CharField(max_length=120)
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="holidays_created",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("date",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=["campus", "date"], name="uniq_holiday_campus_date",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.date} {self.name}"

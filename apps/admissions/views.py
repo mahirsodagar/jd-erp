@@ -7,6 +7,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.common.csv_export import csv_response, fmt_date, wants_csv
+
 from .models import Enrollment, Student, StudentDocument, StudentRemark
 from .permissions import (
     StudentAccessPolicy, can_view_all_campuses, filter_visible,
@@ -20,9 +22,12 @@ from .serializers import (
     StudentListSerializer,
     StudentRemarkSerializer,
     StudentSelfUpdateSerializer,
+    StudentStatusChangeInputSerializer,
+    StudentStatusChangeSerializer,
 )
 from .services import (
-    can_enroll, graduate_batch, promote_batch,
+    LIVE_STATUSES, StatusChangeError, can_enroll, drop_out_student,
+    graduate_batch, promote_batch, reactivate_student,
     provision_student_portal_credentials,
     sync_student_placement_from_enrollment,
 )
@@ -32,6 +37,18 @@ from .services_undertaking import render_undertaking_pdf, send_undertaking
 
 
 # --- HR-facing student endpoints ---------------------------------------
+
+def _dropout_annotation():
+    from django.db.models import Exists, OuterRef
+    rows = Enrollment.objects.filter(student=OuterRef("pk"))
+    return (
+        Exists(rows.filter(status=Enrollment.Status.DROPPED))
+        & ~Exists(rows.filter(status__in=LIVE_STATUSES))
+    )
+
+
+_DROPOUT_ANNOTATION = _dropout_annotation()
+
 
 class StudentListView(APIView):
     permission_classes = [IsAuthenticated, StudentAccessPolicy]
@@ -48,6 +65,20 @@ class StudentListView(APIView):
             qs = qs.filter(program_id=v)
         if v := params.get("academic_year"):
             qs = qs.filter(academic_year_id=v)
+        # Legacy Student Search filtered by batch. Batch lives on the
+        # enrollment; any enrollment in it counts (a batch keeps its
+        # students across semesters).
+        if v := params.get("batch"):
+            from django.db.models import Exists, OuterRef
+            qs = qs.filter(Exists(Enrollment.objects.filter(
+                student=OuterRef("pk"), batch_id=v,
+            )))
+        qs = qs.annotate(is_dropout=_DROPOUT_ANNOTATION)
+        # Legacy Student Data report filtered Active / Dropout.
+        if (v := params.get("status")) == "dropout":
+            qs = qs.filter(is_dropout=True)
+        elif v == "active":
+            qs = qs.filter(is_dropout=False)
         if q := params.get("search"):
             from django.db.models import Q
             qs = qs.filter(
@@ -57,7 +88,67 @@ class StudentListView(APIView):
                 | Q(student_email__icontains=q)
                 | Q(student_mobile__icontains=q)
             )
+        if wants_csv(request):
+            return self._csv(qs, request.user)
         return Response(StudentListSerializer(qs[:500], many=True).data)
+
+    # Legacy JD_ERP "Student Data.csv". Columns marked sensitive are
+    # dropped unless the user may see them — the same rule as
+    # StudentDetailSerializer.SENSITIVE_FIELDS.
+    _CSV_COLUMNS = (
+        ("Student ID", False, lambda s: s.application_form_id),
+        ("Registration No", False, lambda s: s.registration_number),
+        ("Name", False, lambda s: s.student_name),
+        ("Status", False, lambda s: "Dropout" if s.is_dropout else "Active"),
+        ("Email", False, lambda s: s.student_email),
+        ("Institute Mail", False, lambda s: s.institute_email),
+        ("Phone No", False, lambda s: s.student_mobile),
+        ("DOB", True, lambda s: fmt_date(s.dob)),
+        ("Nationality", True, lambda s: s.get_nationality_display()),
+        ("Blood Group", True, lambda s: s.get_blood_group_display()),
+        ("Gender", True, lambda s: s.get_gender_display()),
+        ("Category", True, lambda s: s.get_category_display()),
+        ("Institute", False, lambda s: s.institute.name),
+        ("Program", False, lambda s: s.program.name),
+        ("Course", False, lambda s: s.course.name if s.course else ""),
+        ("Campus", False, lambda s: s.campus.name),
+        ("Academic Year", False, lambda s: s.academic_year.code),
+        ("Current Address", True, lambda s: s.current_address),
+        ("Current State", True,
+         lambda s: s.current_state.name if s.current_state else ""),
+        ("Current City", True,
+         lambda s: s.current_city.name if s.current_city else ""),
+        ("Current Pincode", True, lambda s: s.current_pincode),
+        ("Permanent Address", True, lambda s: s.permanent_address),
+        ("Permanent State", True,
+         lambda s: s.permanent_state.name if s.permanent_state else ""),
+        ("Permanent City", True,
+         lambda s: s.permanent_city.name if s.permanent_city else ""),
+        ("Permanent Pincode", True, lambda s: s.permanent_pincode),
+        ("Father Name", True, lambda s: s.father_name),
+        ("Father No.", True, lambda s: s.father_mobile),
+        ("Father Email", True, lambda s: s.father_email),
+        ("Mother Name", True, lambda s: s.mother_name),
+        ("Mother No.", True, lambda s: s.mother_mobile),
+        ("Mother Email", True, lambda s: s.mother_email),
+        ("Created On", False, lambda s: fmt_date(s.created_on)),
+        ("Created By", False,
+         lambda s: s.created_by.username if s.created_by else ""),
+    )
+
+    def _csv(self, qs, user):
+        sensitive = has_perm(user, "admissions.student.view_sensitive")
+        cols = [c for c in self._CSV_COLUMNS if sensitive or not c[1]]
+        qs = qs.select_related(
+            "course", "created_by", "current_state", "current_city",
+            "permanent_state", "permanent_city",
+        )
+        return csv_response(
+            "Student Data.csv",
+            ["SL NO", *(c[0] for c in cols)],
+            ([i, *(c[2](s) for c in cols)]
+             for i, s in enumerate(qs.iterator(), start=1)),
+        )
 
 
 class StudentDetailView(APIView):
@@ -271,6 +362,60 @@ class StudentRemarksView(APIView):
         s.is_valid(raise_exception=True)
         s.save(student=student, created_by=request.user)
         return Response(s.data, status=http.HTTP_201_CREATED)
+
+
+class _StudentStatusChangeBase(APIView):
+    """Drop Out / Re-activate (legacy Student Search → Actions → Drop
+    Out, includes/save.php:1208). Remarks are mandatory."""
+
+    permission_classes = [IsAuthenticated, StudentAccessPolicy]
+    required_perm = ""
+    service = None
+
+    def post(self, request, pk):
+        try:
+            student = Student.objects.get(pk=pk)
+        except Student.DoesNotExist as e:
+            raise Http404 from e
+        self.check_object_permissions(request, student)
+        if not has_perm(request.user, self.required_perm):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = StudentStatusChangeInputSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        try:
+            change = type(self).service(
+                student=student, remarks=s.validated_data["remarks"],
+                by=request.user,
+            )
+        except StatusChangeError as e:
+            return Response({"detail": str(e)},
+                            status=http.HTTP_400_BAD_REQUEST)
+        return Response(StudentStatusChangeSerializer(change).data,
+                        status=http.HTTP_201_CREATED)
+
+
+class StudentDropoutView(_StudentStatusChangeBase):
+    required_perm = "admissions.student.dropout"
+    service = staticmethod(drop_out_student)
+
+
+class StudentReactivateView(_StudentStatusChangeBase):
+    required_perm = "admissions.student.reactivate"
+    service = staticmethod(reactivate_student)
+
+
+class StudentStatusHistoryView(APIView):
+    permission_classes = [IsAuthenticated, StudentAccessPolicy]
+
+    def get(self, request, pk):
+        try:
+            student = Student.objects.get(pk=pk)
+        except Student.DoesNotExist as e:
+            raise Http404 from e
+        self.check_object_permissions(request, student)
+        qs = student.status_changes.select_related("created_by")
+        return Response(StudentStatusChangeSerializer(qs, many=True).data)
 
 
 # --- Enrollments -------------------------------------------------------

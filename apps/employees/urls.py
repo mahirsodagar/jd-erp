@@ -14,6 +14,8 @@ from .views import (
     EmployeeListCreateView,
     EmployeePortalAccountView,
     EmployeeQrView,
+    HolidayDetailView,
+    HolidayListCreateView,
 )
 
 urlpatterns = [
@@ -22,6 +24,9 @@ urlpatterns = [
 
     path("designations/", DesignationListCreateView.as_view(), name="designation-list-create"),
     path("designations/<int:pk>/", DesignationDetailView.as_view(), name="designation-detail"),
+
+    path("holidays/", HolidayListCreateView.as_view(), name="holiday-list-create"),
+    path("holidays/<int:pk>/", HolidayDetailView.as_view(), name="holiday-detail"),
 
     path("", EmployeeListCreateView.as_view(), name="employee-list-create"),
     path("<int:pk>/", EmployeeDetailView.as_view(), name="employee-detail"),

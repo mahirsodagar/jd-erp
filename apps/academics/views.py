@@ -12,16 +12,18 @@ from apps.master.models import (
 from apps.employees.models import Employee
 
 from .attendance_service import (
+    attendance_deadline, attendance_window_open,
     batch_attendance_summary, bulk_mark, freeze_attendance,
-    notify_absent_students, roster_for, student_attendance_summary,
-    unfreeze_attendance,
+    notify_absent_students, relock_attendance, roster_for,
+    student_attendance_summary, unfreeze_attendance, unlock_attendance,
 )
 from .cert_service import (
     build_snapshot, check_eligibility, generate_certificate_no,
     graduate_enrollment, render_certificate_pdf,
 )
 from .marks_service import (
-    build_transcript, grade_submission, publish_marks,
+    build_transcript, grade_submission, marks_sheet, publish_marks,
+    save_marks_sheet, set_marks_sheet_published,
     submission_status_after_save, unpublish_marks,
 )
 from . import lesson_service
@@ -38,6 +40,8 @@ from .serializers import (
     BulkWeeklyPublishSerializer, CertificateIssueSerializer,
     CertificateRejectSerializer, CertificateRequestSerializer,
     CertificateSerializer, FreezeSerializer, MarksEntrySerializer,
+    MarksSheetKeySerializer, MarksSheetPublishSerializer,
+    MarksSheetSaveSerializer,
     ScheduleSlotSerializer, StudentSubmitSerializer, SubmissionGradeSerializer,
     WeeklyGridPublishSerializer,
 )
@@ -409,6 +413,10 @@ class AttendanceRosterView(APIView):
             "frozen_at": slot.attendance_frozen_at,
             "frozen_by": (slot.attendance_frozen_by.username
                           if slot.attendance_frozen_by_id else None),
+            "window_closes_at": attendance_deadline(slot),
+            "window_open": attendance_window_open(slot),
+            "unlocked": slot.attendance_unlocked,
+            "remarks": slot.notes,
             "roster": rows,
         })
 
@@ -429,13 +437,40 @@ class AttendanceRosterView(APIView):
                 status=http.HTTP_400_BAD_REQUEST,
             )
 
+        # Legacy 15-minute rule; admins holding edit_frozen may still
+        # correct a register after the window.
+        if not attendance_window_open(slot) and not has_perm(
+            request.user, "academics.attendance.edit_frozen"
+        ):
+            return Response(
+                {"detail": "Attendance marking time is closed (15 minutes "
+                           "after class start). Please contact the admin "
+                           "team."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+
         s = BulkMarkAttendanceSerializer(data=request.data)
         s.is_valid(raise_exception=True)
+
+        # Legacy made remarks required when the register is first taken
+        # and optional on later edits (academics/aget.php:2396 vs :2610).
+        remarks = s.validated_data.get("remarks")
+        first_marking = not Attendance.objects.filter(
+            schedule_slot=slot).exists()
+        if first_marking and not (remarks or "").strip():
+            return Response(
+                {"remarks": ["Remarks are required when taking "
+                             "attendance."]},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
 
         result = bulk_mark(
             slot=slot, marks=s.validated_data["marks"],
             marked_by=request.user,
         )
+        if remarks is not None:
+            slot.notes = remarks.strip()
+            slot.save(update_fields=["notes"])
 
         notified = 0
         if s.validated_data.get("notify_absent"):
@@ -491,6 +526,35 @@ class AttendanceUnfreezeView(APIView):
                             status=http.HTTP_400_BAD_REQUEST)
         unfreeze_attendance(slot=slot, by_user=request.user)
         return Response({"frozen": False})
+
+
+class AttendanceUnlockView(APIView):
+    """`POST` re-opens marking on a slot past its 15-minute window;
+    `DELETE` closes it again. Admin-only (legacy freeze checkbox)."""
+    permission_classes = [IsAuthenticated]
+
+    def _slot(self, request, pk):
+        if not has_perm(request.user, "academics.attendance.freeze"):
+            return None, Response({"detail": "Permission denied."},
+                                  status=http.HTTP_403_FORBIDDEN)
+        try:
+            return ScheduleSlot.objects.get(pk=pk), None
+        except ScheduleSlot.DoesNotExist as e:
+            raise Http404 from e
+
+    def post(self, request, pk):
+        slot, denied = self._slot(request, pk)
+        if denied:
+            return denied
+        unlock_attendance(slot=slot, by_user=request.user)
+        return Response({"unlocked": True})
+
+    def delete(self, request, pk):
+        slot, denied = self._slot(request, pk)
+        if denied:
+            return denied
+        relock_attendance(slot=slot, by_user=request.user)
+        return Response({"unlocked": False})
 
 
 # --- Reports ----------------------------------------------------------
@@ -838,6 +902,8 @@ class MarksListCreateView(APIView):
         params = request.query_params
         if v := params.get("student"):
             qs = qs.filter(student_id=v)
+        if v := params.get("program"):
+            qs = qs.filter(batch__program_id=v)
         if v := params.get("subject"):
             qs = qs.filter(subject_id=v)
         if v := params.get("batch"):
@@ -936,6 +1002,74 @@ class MarksUnpublishView(APIView):
                             status=http.HTTP_400_BAD_REQUEST)
         unpublish_marks(marks=m, by_user=u)
         return Response(MarksEntrySerializer(m).data)
+
+
+class MarksSheetView(APIView):
+    """Batch-wise IA/EA entry (legacy academics/marksentry.php).
+
+    `GET ?batch=&semester=&subject=` — roster with current marks.
+    `POST` — save the whole sheet; optionally publish it."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        u = request.user
+        if not (has_perm(u, "academics.marks.view")
+                or has_perm(u, "academics.marks.enter")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        key = MarksSheetKeySerializer(data=request.query_params)
+        key.is_valid(raise_exception=True)
+        return Response({
+            **marks_sheet(**key.validated_data),
+            "can_edit_published": has_perm(u, "academics.marks.edit_published"),
+        })
+
+    def post(self, request):
+        u = request.user
+        if not has_perm(u, "academics.marks.enter"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = MarksSheetSaveSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        d = s.validated_data
+        if d["publish"] and not has_perm(u, "academics.marks.publish"):
+            return Response({"detail": "You cannot publish marks. Save "
+                                       "without publishing."},
+                            status=http.HTTP_403_FORBIDDEN)
+        try:
+            result = save_marks_sheet(
+                batch=d["batch"], semester=d["semester"], subject=d["subject"],
+                ia_max=d["ia_max"], ea_max=d["ea_max"], rows=d["rows"],
+                entered_by=u, publish=d["publish"],
+                can_edit_published=has_perm(u, "academics.marks.edit_published"),
+            )
+        except ValueError as e:
+            return Response(
+                {"detail": "Some marks are out of range.",
+                 "row_errors": {str(k): v for k, v in e.args[0].items()}},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+        return Response(result)
+
+
+class MarksSheetPublishView(APIView):
+    """Publish / retract every row of one batch marks sheet."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        s = MarksSheetPublishSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        d = s.validated_data
+        needed = ("academics.marks.publish" if d["publish"]
+                  else "academics.marks.unpublish")
+        if not has_perm(request.user, needed):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        n = set_marks_sheet_published(
+            batch=d["batch"], semester=d["semester"], subject=d["subject"],
+            publish=d["publish"], by_user=request.user,
+        )
+        return Response({"updated": n})
 
 
 # --- Transcript -------------------------------------------------------

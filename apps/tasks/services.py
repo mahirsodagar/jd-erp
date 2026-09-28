@@ -31,7 +31,7 @@ def notify_task_assigned(*, task: Task) -> None:
         f"Hi {assignee_name},\n\n"
         f"{creator_name} has assigned a task to you.\n\n"
         f"Task: {task.name}\n"
-        f"Due:  {task.end_date.strftime('%d-%b-%Y')}\n"
+        f"Due:  {task.end_date.strftime('%d-%m-%y')}\n"
         f"\nDetails:\n{task.description or '(none)'}\n\n"
         "Open the ERP to update progress or mark it complete.\n\n"
         "— JD ERP"
@@ -56,7 +56,7 @@ def notify_task_completed(*, task: Task) -> None:
         task.assignee.full_name or task.assignee.username
     )
     completed_on = (task.completed_at or timezone.now()).strftime(
-        "%d-%b-%Y %H:%M",
+        "%d-%m-%y %H:%M",
     )
     subject = f"Task completed: {task.name}"
     body = (
@@ -64,7 +64,7 @@ def notify_task_completed(*, task: Task) -> None:
         f"{assignee_name} has marked the following task as completed.\n\n"
         f"Task:          {task.name}\n"
         f"Completed on:  {completed_on}\n"
-        f"Assigned on:   {task.created_at.strftime('%d-%b-%Y %H:%M')}\n"
+        f"Assigned on:   {task.created_at.strftime('%d-%m-%y %H:%M')}\n"
         f"\nAssignee remarks:\n{task.assignee_remarks or '(none)'}\n\n"
         "— JD ERP"
     )

@@ -6,6 +6,9 @@ get added/removed from a batch get reflected in the next attendance
 view but past attendance rows persist.
 """
 
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
 from django.db import transaction
 from django.utils import timezone
 
@@ -87,6 +90,49 @@ def bulk_mark(*, slot: ScheduleSlot, marks: list[dict], marked_by) -> dict:
         (created if was_created else updated).append(obj.id)
 
     return {"created": created, "updated": updated, "skipped": skipped}
+
+
+# Legacy rule (academics/aget.php:2357): attendance can be taken until
+# 15 minutes after the class starts; after that only an admin unlock of
+# the slot re-opens it.
+ATTENDANCE_WINDOW = timedelta(minutes=15)
+# Timetable times are institute wall-clock; settings.TIME_ZONE is UTC.
+INSTITUTE_TZ = ZoneInfo("Asia/Kolkata")
+
+
+def attendance_deadline(slot: ScheduleSlot) -> datetime | None:
+    """Aware datetime after which marking closes; None if no time slot."""
+    if slot.time_slot_id is None:
+        return None
+    start = datetime.combine(
+        slot.date, slot.time_slot.start_time, tzinfo=INSTITUTE_TZ)
+    return start + ATTENDANCE_WINDOW
+
+
+def attendance_window_open(slot: ScheduleSlot) -> bool:
+    """True while the instructor may still mark this slot."""
+    if slot.attendance_unlocked:
+        return True
+    deadline = attendance_deadline(slot)
+    return deadline is None or timezone.now() <= deadline
+
+
+def unlock_attendance(*, slot: ScheduleSlot, by_user) -> ScheduleSlot:
+    slot.attendance_unlocked = True
+    slot.attendance_unlocked_at = timezone.now()
+    slot.attendance_unlocked_by = by_user
+    slot.save(update_fields=["attendance_unlocked", "attendance_unlocked_at",
+                              "attendance_unlocked_by", "updated_at"])
+    return slot
+
+
+def relock_attendance(*, slot: ScheduleSlot, by_user) -> ScheduleSlot:
+    slot.attendance_unlocked = False
+    slot.attendance_unlocked_at = None
+    slot.attendance_unlocked_by = None
+    slot.save(update_fields=["attendance_unlocked", "attendance_unlocked_at",
+                              "attendance_unlocked_by", "updated_at"])
+    return slot
 
 
 def freeze_attendance(*, slot: ScheduleSlot, by_user) -> ScheduleSlot:

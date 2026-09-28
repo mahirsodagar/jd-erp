@@ -1,4 +1,8 @@
+from decimal import Decimal
+
 from rest_framework import serializers
+
+from apps.master.models import Batch, Semester, Subject
 
 from .models import (
     AlumniRecord, Assignment, AssignmentSubmission, Attendance, Certificate,
@@ -147,6 +151,10 @@ class AttendanceMarkItemSerializer(serializers.Serializer):
 
 class BulkMarkAttendanceSerializer(serializers.Serializer):
     marks = AttendanceMarkItemSerializer(many=True)
+    # Slot-level "Remarks if any (syllabus completed)" — legacy
+    # timetable_pub.remarks, stored on ScheduleSlot.notes.
+    remarks = serializers.CharField(required=False, allow_blank=True,
+                                    max_length=400)
     notify_absent = serializers.BooleanField(
         required=False, default=False,
         help_text="Queue notifications for absent students after marking.",
@@ -214,6 +222,13 @@ class AssignmentSerializer(serializers.ModelSerializer):
         if batch is not None and batch.program_id != program.id:
             raise serializers.ValidationError(
                 {"batch": "Batch does not belong to the selected program."}
+            )
+        # Same for the subject; legacy subjects with no program pass.
+        subject = attrs.get("subject") or getattr(self.instance, "subject", None)
+        if (subject is not None and subject.program_id
+                and subject.program_id != program.id):
+            raise serializers.ValidationError(
+                {"subject": "Subject does not belong to the selected program."}
             )
         return attrs
 
@@ -330,6 +345,45 @@ class MarksEntrySerializer(serializers.ModelSerializer):
                 {"ea_marks": f"EA {ea} exceeds max {ea_max}."}
             )
         return attrs
+
+
+class MarksSheetKeySerializer(serializers.Serializer):
+    """Identifies one batch marks sheet; subject / semester must belong
+    to the batch's program."""
+    batch = serializers.PrimaryKeyRelatedField(queryset=Batch.objects.all())
+    semester = serializers.PrimaryKeyRelatedField(queryset=Semester.objects.all())
+    subject = serializers.PrimaryKeyRelatedField(queryset=Subject.objects.all())
+
+    def validate(self, attrs):
+        prog = attrs["batch"].program_id
+        if attrs["semester"].program_id and attrs["semester"].program_id != prog:
+            raise serializers.ValidationError(
+                {"semester": "Semester does not belong to the batch's program."})
+        if attrs["subject"].program_id and attrs["subject"].program_id != prog:
+            raise serializers.ValidationError(
+                {"subject": "Subject does not belong to the batch's program."})
+        return attrs
+
+
+class MarksSheetRowSerializer(serializers.Serializer):
+    student = serializers.IntegerField()
+    ia_marks = serializers.DecimalField(max_digits=5, decimal_places=1,
+                                        allow_null=True, required=False)
+    ea_marks = serializers.DecimalField(max_digits=5, decimal_places=1,
+                                        allow_null=True, required=False)
+
+
+class MarksSheetSaveSerializer(MarksSheetKeySerializer):
+    ia_max = serializers.DecimalField(max_digits=5, decimal_places=1,
+                                      min_value=Decimal("0.1"))
+    ea_max = serializers.DecimalField(max_digits=5, decimal_places=1,
+                                      min_value=Decimal("0.1"))
+    rows = MarksSheetRowSerializer(many=True)
+    publish = serializers.BooleanField(required=False, default=False)
+
+
+class MarksSheetPublishSerializer(MarksSheetKeySerializer):
+    publish = serializers.BooleanField()
 
 
 class StudentSubmitSerializer(serializers.Serializer):

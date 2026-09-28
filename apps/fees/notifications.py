@@ -144,7 +144,7 @@ def fire_installment_due_reminder(installment: Installment) -> None:
     course_name = getattr(getattr(enrollment, "program", None), "name", "") or ""
     registration_no = getattr(student, "registration_number", "") or ""
     amount = _money(installment.amount)
-    due = installment.due_date.strftime("%d-%m-%Y") if installment.due_date else ""
+    due = installment.due_date.strftime("%d-%m-%y") if installment.due_date else ""
 
     # Student leg
     _fire_sms(

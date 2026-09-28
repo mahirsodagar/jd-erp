@@ -19,39 +19,53 @@ WORKDAY_HOURS = Decimal("8")
 
 
 def faculty_daily_computed(*, faculty, start: date, end: date) -> dict:
-    """Per-day scheduled class hours + leave hours for one faculty.
+    """Per-day class hours + missed hours + leave hours for one faculty.
 
-    Returns {"YYYY-MM-DD": {"class_hours": float, "leave_hours": float}}
-    for days that have either. Class hours = sum of (end-start) over the
-    faculty's non-cancelled ScheduleSlots. Leave hours = approved-leave
-    day-fraction × WORKDAY_HOURS (Sundays skipped; holidays not netted)."""
+    Returns {"YYYY-MM-DD": {"class_hours", "missed_hours", "leave_hours"}}
+    for days that have any. Class hours = sum of (end-start) over the
+    faculty's non-cancelled ScheduleSlots that have student attendance
+    marked — a class without attendance is treated as not taken. Missed
+    hours = such unmarked slots whose end time has already passed.
+    Leave hours = approved-leave day-fraction × WORKDAY_HOURS (Sundays
+    skipped; holidays not netted)."""
     from datetime import datetime
+    from zoneinfo import ZoneInfo
 
-    from apps.academics.models import ScheduleSlot
+    from apps.academics.models import Attendance, ScheduleSlot
     from apps.leaves.models import LeaveApplication
 
     out: dict = {}
 
     def bucket(d):
-        return out.setdefault(
-            d.isoformat(), {"class_hours": 0.0, "leave_hours": 0.0})
+        return out.setdefault(d.isoformat(), {
+            "class_hours": 0.0, "missed_hours": 0.0, "leave_hours": 0.0})
 
-    slots = (
+    slots = list(
         ScheduleSlot.objects.filter(
             instructor=faculty, date__gte=start, date__lte=end,
         )
         .exclude(status=ScheduleSlot.Status.CANCELLED)
         .select_related("time_slot")
     )
+    marked_ids = set(
+        Attendance.objects.filter(schedule_slot__in=slots)
+        .values_list("schedule_slot_id", flat=True).distinct()
+    )
+    # Slot times are institute wall-clock (IST); settings.TIME_ZONE is UTC.
+    now = timezone.localtime(
+        timezone=ZoneInfo("Asia/Kolkata")).replace(tzinfo=None)
     for s in slots:
         ts = s.time_slot
         if ts is None:
             continue
+        slot_end = datetime.combine(s.date, ts.end_time)
         hours = (
-            datetime.combine(s.date, ts.end_time)
-            - datetime.combine(s.date, ts.start_time)
+            slot_end - datetime.combine(s.date, ts.start_time)
         ).total_seconds() / 3600
-        bucket(s.date)["class_hours"] += hours
+        if s.id in marked_ids:
+            bucket(s.date)["class_hours"] += hours
+        elif slot_end <= now:
+            bucket(s.date)["missed_hours"] += hours
 
     leaves = LeaveApplication.objects.filter(
         employee=faculty, status=LeaveApplication.Status.APPROVED,

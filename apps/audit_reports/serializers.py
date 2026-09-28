@@ -53,12 +53,16 @@ class CourseEndReportSerializer(serializers.ModelSerializer):
     instructor_name = serializers.CharField(source="instructor.full_name", read_only=True)
     subject_code = serializers.CharField(source="subject.code", read_only=True)
     batch_name = serializers.CharField(source="batch.name", read_only=True)
+    # A report's program is its batch's program — not stored separately.
+    program = serializers.IntegerField(source="batch.program_id", read_only=True)
+    program_name = serializers.CharField(source="batch.program.name", read_only=True)
 
     class Meta:
         model = CourseEndReport
         fields = [
             "id",
             "instructor", "instructor_name",
+            "program", "program_name",
             "subject", "subject_code",
             "batch", "batch_name",
             "completed_on",
@@ -69,9 +73,19 @@ class CourseEndReportSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id", "instructor_name", "subject_code", "batch_name",
+            "program_name",
             "hod_status", "hod_remarks", "hod_reviewed_at", "hod_reviewed_by",
             "submitted_by", "created_at", "updated_at",
         ]
+
+    def validate(self, attrs):
+        batch = attrs.get("batch") or getattr(self.instance, "batch", None)
+        subject = attrs.get("subject") or getattr(self.instance, "subject", None)
+        if (batch and subject and subject.program_id
+                and subject.program_id != batch.program_id):
+            raise serializers.ValidationError(
+                {"subject": "Subject does not belong to the batch's program."})
+        return attrs
 
 
 class CourseEndReviewSerializer(serializers.Serializer):

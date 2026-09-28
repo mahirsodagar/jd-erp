@@ -197,6 +197,8 @@ CATALOGUE = [
     ("admissions", "admissions.student.set_registration_no", "Set or change a student's registration number"),
     ("admissions", "admissions.student.view_remarks", "Read admin remarks on a student"),
     ("admissions", "admissions.student.add_remark", "Add an admin remark to a student"),
+    ("admissions", "admissions.student.dropout", "Mark a student as Dropout (with remarks)"),
+    ("admissions", "admissions.student.reactivate", "Re-activate a dropped-out student"),
 
     ("admissions", "admissions.student.promote", "Promote students to the next batch or semester"),
     ("admissions", "admissions.student.send_credentials", "Send portal credentials and reset the student's password"),
@@ -539,6 +541,11 @@ CATALOGUE = [
     ("hr", "hr.relieving.view_all", "View all relieving applications"),
     ("hr", "hr.relieving.finalize", "HR finalizes relieving + generates letters"),
     ("hr", "hr.relieving.override", "Override approval sequence (skip levels)"),
+    # Module HR — Holiday Calendar. Viewing is open to every employee
+    # (own campus), so there is no `.view` key.
+    ("hr", "hr.holiday.add", "Add a holiday to the calendar"),
+    ("hr", "hr.holiday.edit", "Edit a holiday"),
+    ("hr", "hr.holiday.delete", "Delete a holiday"),
 
     # Student & Parent Portal
     ("courseware", "courseware.view", "See courseware topics"),

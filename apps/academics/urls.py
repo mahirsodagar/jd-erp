@@ -3,6 +3,7 @@ from django.urls import path
 from .batch_report_views import (
     BatchFeedbackView,
     BatchReportListView,
+    BatchPhotosView,
     BatchRosterView,
 )
 from .closing_report_views import (
@@ -12,6 +13,7 @@ from .closing_report_views import (
 from .attendance_report_views import (
     ActivityReportView as AR_ActivityReportView,
     BatchSemestersView as AR_BatchSemestersView,
+    ShortageLetterView as AR_ShortageLetterView,
     BatchWiseReportView as AR_BatchWiseReportView,
     InstructorLogView as AR_InstructorLogView,
     ModuleGridView as AR_ModuleGridView,
@@ -28,6 +30,7 @@ from .views import (
     AttendanceFreezeView,
     AttendanceRosterView,
     AttendanceUnfreezeView,
+    AttendanceUnlockView,
     BatchAttendanceReportView,
     BulkWeeklyPublishView,
     CertificateDetailView,
@@ -44,6 +47,8 @@ from .views import (
     MarksDetailView,
     MarksListCreateView,
     MarksPublishView,
+    MarksSheetPublishView,
+    MarksSheetView,
     MarksUnpublishView,
     MyAssignmentsView,
     MyAttendanceView,
@@ -75,6 +80,8 @@ urlpatterns = [
          name="attendance-freeze"),
     path("schedule/<int:pk>/attendance/unfreeze/", AttendanceUnfreezeView.as_view(),
          name="attendance-unfreeze"),
+    path("schedule/<int:pk>/attendance/unlock/", AttendanceUnlockView.as_view(),
+         name="attendance-unlock"),
     path("attendance/batch/<int:pk>/report/", BatchAttendanceReportView.as_view(),
          name="attendance-batch-report"),
     path("attendance/student/<int:pk>/report/", StudentAttendanceReportView.as_view(),
@@ -90,6 +97,8 @@ urlpatterns = [
          AR_ModuleGridView.as_view(), name="attendance-report-module-grid"),
     path("attendance/report/batch/<int:pk>/",
          AR_BatchWiseReportView.as_view(), name="attendance-report-batch"),
+    path("attendance/report/batch/<int:pk>/shortage-letter/",
+         AR_ShortageLetterView.as_view(), name="attendance-report-shortage-letter"),
     path("attendance/report/batch/<int:pk>/semesters/",
          AR_BatchSemestersView.as_view(), name="attendance-report-batch-semesters"),
     path("attendance/report/student/<int:pk>/",
@@ -100,6 +109,8 @@ urlpatterns = [
     # Academics — Batch Report (batch list + roster + feedback link)
     path("batch-report/", BatchReportListView.as_view(),
          name="batch-report-list"),
+    path("batch-report/<int:pk>/photos/", BatchPhotosView.as_view(),
+         name="batch-report-photos"),
     path("batch-report/<int:pk>/roster/", BatchRosterView.as_view(),
          name="batch-report-roster"),
     path("batch-report/<int:pk>/feedback/", BatchFeedbackView.as_view(),
@@ -129,6 +140,9 @@ urlpatterns = [
          name="lesson-review"),
 
     path("marks/", MarksListCreateView.as_view(), name="marks-list-create"),
+    path("marks/sheet/", MarksSheetView.as_view(), name="marks-sheet"),
+    path("marks/sheet/publish/", MarksSheetPublishView.as_view(),
+         name="marks-sheet-publish"),
     path("marks/<int:pk>/", MarksDetailView.as_view(), name="marks-detail"),
     path("marks/<int:pk>/publish/", MarksPublishView.as_view(), name="marks-publish"),
     path("marks/<int:pk>/unpublish/", MarksUnpublishView.as_view(), name="marks-unpublish"),

@@ -5,7 +5,7 @@ from rest_framework import serializers
 
 from apps.common.file_validation import SecureFileField
 
-from .models import Department, Designation, Employee, EmployeeDocument
+from .models import Department, Designation, Employee, EmployeeDocument, Holiday
 from .services import PHOTO_MAX_BYTES, validate_photo
 
 # PDF / JPG / JPEG / PNG only — jpg and jpeg both sniff as image/jpeg.
@@ -334,3 +334,24 @@ class PortalAccountSerializer(serializers.Serializer):
         child=serializers.IntegerField(), required=False,
     )
     send_credentials = serializers.BooleanField(required=False, default=False)
+
+
+class HolidaySerializer(serializers.ModelSerializer):
+    campus_name = serializers.CharField(source="campus.name", read_only=True)
+
+    class Meta:
+        model = Holiday
+        fields = ["id", "campus", "campus_name", "date", "name"]
+        read_only_fields = ["id", "campus_name"]
+        validators = []  # uniqueness reported below with a readable message
+
+    def validate(self, attrs):
+        campus = attrs.get("campus", getattr(self.instance, "campus", None))
+        day = attrs.get("date", getattr(self.instance, "date", None))
+        clash = Holiday.objects.filter(campus=campus, date=day)
+        if self.instance:
+            clash = clash.exclude(pk=self.instance.pk)
+        if clash.exists():
+            raise serializers.ValidationError(
+                {"date": "This campus already has a holiday on that date."})
+        return attrs

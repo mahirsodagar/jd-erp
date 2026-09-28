@@ -197,6 +197,13 @@ class FeeReceiptDetailSerializer(serializers.ModelSerializer):
         source="enrollment.student.application_form_id", read_only=True,
     )
     campus_name = serializers.CharField(source="enrollment.campus.name", read_only=True)
+    # Course / batch feed the Fee Report CSV (legacy JD_ERP columns).
+    course_name = serializers.CharField(
+        source="enrollment.course.name", read_only=True, default="",
+    )
+    batch_name = serializers.CharField(
+        source="enrollment.batch.name", read_only=True, default="",
+    )
     other_fee_name = serializers.CharField(
         source="other_fee.name", read_only=True, default="",
     )
@@ -212,6 +219,7 @@ class FeeReceiptDetailSerializer(serializers.ModelSerializer):
         fields = [
             "id", "receipt_no",
             "enrollment", "student_name", "student_application_id", "campus_name",
+            "course_name", "batch_name",
             "installment", "other_fee", "other_fee_name",
             "basic_fee", "sgst", "cgst", "igst", "amount",
             "payment_mode", "instrument_ref", "bank",
@@ -253,6 +261,9 @@ class ConcessionDetailSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(
         source="enrollment.student.student_name", read_only=True,
     )
+    student_application_id = serializers.CharField(
+        source="enrollment.student.application_form_id", read_only=True,
+    )
     requested_by_name = serializers.CharField(
         source="requested_by.username", read_only=True, default="",
     )
@@ -263,7 +274,7 @@ class ConcessionDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Concession
         fields = [
-            "id", "enrollment", "student_name",
+            "id", "enrollment", "student_name", "student_application_id",
             "amount", "reason", "status",
             "requested_by", "requested_by_name", "requested_on",
             "approver", "approver_name", "approver_remarks", "decided_on",

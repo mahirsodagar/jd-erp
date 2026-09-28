@@ -194,7 +194,7 @@ def _mode_label(receipt) -> str:
 def _draw_payment_table(pdf: FPDF, receipt) -> None:
     taxes = _tax_columns(receipt)
 
-    ref_date = (receipt.received_date.strftime("%d-%m-%Y")
+    ref_date = (receipt.received_date.strftime("%d-%m-%y")
                 if receipt.received_date else "")
     base = [
         ("Sl. No", "1", "C"),
@@ -263,9 +263,9 @@ def _draw_receipt_page(pdf: FPDF, receipt) -> None:
     # money was received.
     issued_at = timezone.localtime(receipt.created_on) if receipt.created_on else None
     if issued_at:
-        date_s = issued_at.strftime("%d-%m-%Y %H:%M:%S")
+        date_s = issued_at.strftime("%d-%m-%y %H:%M:%S")
     elif receipt.received_date:
-        date_s = receipt.received_date.strftime("%d-%m-%Y")
+        date_s = receipt.received_date.strftime("%d-%m-%y")
     else:
         date_s = ""
 
@@ -325,7 +325,7 @@ def _draw_receipt_page(pdf: FPDF, receipt) -> None:
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(0, 6, "CANCELLED", new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("Helvetica", "", 9)
-        when = (receipt.cancelled_on.strftime("%d-%m-%Y")
+        when = (receipt.cancelled_on.strftime("%d-%m-%y")
                 if receipt.cancelled_on else "")
         detail = receipt.cancellation_reason or ""
         if when:
