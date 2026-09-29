@@ -15,6 +15,7 @@ from .permissions import (
     has_perm, is_self_student,
 )
 from .serializers import (
+    BatchTransferSerializer,
     EnrollmentSerializer,
     StudentDetailSerializer,
     StudentDocumentSerializer,
@@ -29,7 +30,7 @@ from .services import (
     LIVE_STATUSES, StatusChangeError, can_enroll, drop_out_student,
     graduate_batch, promote_batch, reactivate_student,
     provision_student_portal_credentials,
-    sync_student_placement_from_enrollment,
+    sync_student_placement_from_enrollment, transfer_enrollment,
 )
 from .services_handbook import send_handbook_email
 from .services_portal_email import send_portal_credentials_email
@@ -754,6 +755,102 @@ class BatchPromoteView(APIView):
             return Response({"detail": str(e)},
                             status=http.HTTP_400_BAD_REQUEST)
         return Response(result)
+
+
+class BatchTransferView(APIView):
+    """GET  /api/admissions/batch-transfer/?student=<id>
+        Transfer history, newest first (optionally one student's).
+    POST /api/admissions/batch-transfer/
+
+    Body:
+        enrollment: int              # the live enrolment being moved
+        target_batch: int
+        target_semester: int
+        target_academic_year: int
+        remarks: str
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        u = request.user
+        if not has_perm(u, "admissions.student.transfer"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        from .models import BatchTransfer
+
+        qs = BatchTransfer.objects.select_related(
+            "student", "created_by",
+            "from_batch", "from_program", "from_campus", "from_semester",
+            "from_academic_year",
+            "to_batch", "to_program", "to_campus", "to_semester",
+            "to_academic_year",
+        )
+        student = request.query_params.get("student")
+        if student:
+            qs = qs.filter(student_id=student)
+        if not can_view_all_campuses(u):
+            from django.db.models import Q
+            campuses = list(u.campuses.values_list("pk", flat=True))
+            qs = qs.filter(Q(from_campus_id__in=campuses)
+                           | Q(to_campus_id__in=campuses))
+        return Response(BatchTransferSerializer(qs[:200], many=True).data)
+
+    def post(self, request):
+        u = request.user
+        if not has_perm(u, "admissions.student.transfer"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+
+        from apps.master.models import AcademicYear, Batch, Semester
+
+        try:
+            enrollment = Enrollment.objects.select_related(
+                "student", "batch", "program", "campus", "semester",
+                "academic_year", "course",
+            ).get(pk=request.data.get("enrollment"))
+            target_batch = Batch.objects.select_related(
+                "program", "campus",
+            ).get(pk=request.data.get("target_batch"))
+            target_semester = Semester.objects.get(
+                pk=request.data.get("target_semester"),
+            )
+            target_year = AcademicYear.objects.get(
+                pk=request.data.get("target_academic_year"),
+            )
+        except (Enrollment.DoesNotExist, Batch.DoesNotExist,
+                Semester.DoesNotExist, AcademicYear.DoesNotExist,
+                ValueError, TypeError):
+            return Response(
+                {"detail": "Enrolment / target batch / semester / academic "
+                           "year not found."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+
+        # Campus scope — both ends must be campuses the user can see.
+        if not can_view_all_campuses(u):
+            campuses = set(u.campuses.values_list("pk", flat=True))
+            if enrollment.campus_id not in campuses \
+                    or target_batch.campus_id not in campuses:
+                return Response(
+                    {"detail": "Current or target campus is out of scope."},
+                    status=http.HTTP_403_FORBIDDEN,
+                )
+
+        try:
+            transfer = transfer_enrollment(
+                enrollment=enrollment,
+                target_batch=target_batch,
+                target_semester=target_semester,
+                target_academic_year=target_year,
+                remarks=request.data.get("remarks") or "",
+                actor=u,
+            )
+        except ValueError as e:
+            return Response({"detail": str(e)},
+                            status=http.HTTP_400_BAD_REQUEST)
+        return Response(BatchTransferSerializer(transfer).data,
+                        status=http.HTTP_201_CREATED)
 
 
 class BatchGraduateView(APIView):

@@ -178,10 +178,12 @@ class ScheduleSlotDetailView(APIView):
 # --- Bulk weekly publish ----------------------------------------------
 
 class BulkWeeklyPublishView(APIView):
-    permission_classes = [IsAuthenticated, ScheduleAccess]
+    # Not `ScheduleAccess`: that gates POST on `schedule.add`, and
+    # publishing has its own key.
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        if not has_perm(request.user, "academics.schedule.add"):
+        if not has_perm(request.user, "academics.schedule.publish"):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         s = BulkWeeklyPublishSerializer(data=request.data)
         s.is_valid(raise_exception=True)
@@ -216,10 +218,11 @@ class WeeklyGridPublishView(APIView):
     entire weekday × time_slot grid for one batch and expands it across
     the date range in one transaction."""
 
-    permission_classes = [IsAuthenticated, ScheduleAccess]
+    # Not `ScheduleAccess` — see `BulkWeeklyPublishView`.
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        if not has_perm(request.user, "academics.schedule.add"):
+        if not has_perm(request.user, "academics.schedule.publish"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         s = WeeklyGridPublishSerializer(data=request.data)
@@ -328,9 +331,15 @@ class ConflictCheckView(APIView):
     """Dry-run check — returns what would happen if a slot was created
     with the given fields. Useful for the HOD UI to give live feedback
     before submitting."""
-    permission_classes = [IsAuthenticated, TimetableAccess]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        # A dry run writes nothing, so anyone who may create, publish or
+        # edit slots can ask for one.
+        if not any(has_perm(request.user, f"academics.schedule.{k}")
+                   for k in ("add", "publish", "edit")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
         try:
             batch = Batch.objects.get(pk=request.data.get("batch"))
             instructor = Employee.objects.get(pk=request.data.get("instructor"))

@@ -185,6 +185,8 @@ class AssignmentSerializer(serializers.ModelSerializer):
                                          default="")
     batch_name = serializers.CharField(source="batch.name", read_only=True,
                                        default="")
+    semester_name = serializers.CharField(source="semester.name", read_only=True,
+                                          default="")
     submission_count = serializers.SerializerMethodField()
     graded_count = serializers.SerializerMethodField()
     image_url = serializers.SerializerMethodField()
@@ -194,6 +196,7 @@ class AssignmentSerializer(serializers.ModelSerializer):
         fields = [
             "id", "subject", "subject_name", "subject_code",
             "program", "program_name", "batch", "batch_name",
+            "semester", "semester_name",
             "title", "description", "max_marks",
             "due_date", "attachment", "image", "image_url", "is_published",
             "submission_count", "graded_count",
@@ -201,7 +204,7 @@ class AssignmentSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id", "subject_name", "subject_code", "program_name", "batch_name",
-            "image_url",
+            "semester_name", "image_url",
             "submission_count", "graded_count",
             "created_by", "created_at", "updated_at",
         ]
@@ -229,6 +232,13 @@ class AssignmentSerializer(serializers.ModelSerializer):
                 and subject.program_id != program.id):
             raise serializers.ValidationError(
                 {"subject": "Subject does not belong to the selected program."}
+            )
+        # Semesters are per-program; legacy semesters with no program pass.
+        semester = attrs.get("semester") or getattr(self.instance, "semester", None)
+        if (semester is not None and semester.program_id
+                and semester.program_id != program.id):
+            raise serializers.ValidationError(
+                {"semester": "Semester does not belong to the selected program."}
             )
         return attrs
 

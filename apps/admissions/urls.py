@@ -5,6 +5,7 @@ from apps.portal.views import ProvisionParentView
 from .views import (
     BatchGraduateView,
     BatchPromoteView,
+    BatchTransferView,
     EnrollmentDetailView,
     EnrollmentListCreateView,
     EnrollmentUndertakingPdfView,
@@ -58,6 +59,8 @@ urlpatterns = [
 
     path("batch-promote/", BatchPromoteView.as_view(),
          name="batch-promote"),
+    path("batch-transfer/", BatchTransferView.as_view(),
+         name="batch-transfer"),
     path("batch-graduate/", BatchGraduateView.as_view(),
          name="batch-graduate"),
 ]

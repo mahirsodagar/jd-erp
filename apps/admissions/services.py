@@ -714,6 +714,116 @@ def graduate_batch(
     }
 
 
+# --- Batch transfer ----------------------------------------------------
+
+@transaction.atomic
+def transfer_enrollment(
+    *,
+    enrollment,
+    target_batch,
+    target_semester,
+    target_academic_year,
+    remarks: str,
+    actor=None,
+):
+    """Move one student's live enrolment into another batch. Mirrors the
+    JD_ERP PHP "Program/Batch Transfer" screen.
+
+    Unlike promotion, the enrolment row is updated IN PLACE, as in PHP:
+    it is the same admission continuing somewhere else, so its fee
+    schedule, attendance and marks stay attached. The before/after
+    placement is kept on a `BatchTransfer` row.
+
+    Program and campus come from the target batch; the program year
+    follows the target semester, as it does on promotion. Fees are not
+    touched — a change of program or campus is priced by HR.
+
+    Raises ValueError on anything the caller should fix.
+    """
+    from apps.master.models import Course
+
+    from .models import BatchTransfer, StudentRemark
+
+    remarks = (remarks or "").strip()
+    if not remarks:
+        raise ValueError("Remarks are required for a batch transfer.")
+    if enrollment.status not in LIVE_STATUSES:
+        raise ValueError(
+            "Only an active or pending enrolment can be transferred.",
+        )
+    if target_batch.id == enrollment.batch_id:
+        raise ValueError("The student is already in this batch.")
+    if not target_batch.is_active:
+        raise ValueError("The target batch is inactive.")
+    if (target_semester.program_id
+            and target_semester.program_id != target_batch.program_id):
+        raise ValueError(
+            "Semester does not belong to the target batch's program.",
+        )
+    if Enrollment.objects.filter(
+        student_id=enrollment.student_id,
+        batch=target_batch,
+        status__in=LIVE_STATUSES,
+    ).exclude(pk=enrollment.pk).exists():
+        raise ValueError(
+            "The student already has a live enrolment in the target batch.",
+        )
+
+    old = {
+        "batch": enrollment.batch,
+        "program": enrollment.program,
+        "campus": enrollment.campus,
+        "semester": enrollment.semester,
+        "academic_year": enrollment.academic_year,
+    }
+
+    course = Course.for_semester(
+        program=target_batch.program, semester=target_semester,
+    )
+    # Same program with no year covering the semester: keep the old
+    # year rather than blank it. A different program's year never fits.
+    if course is None and target_batch.program_id == enrollment.program_id:
+        course = enrollment.course
+
+    enrollment.batch = target_batch
+    enrollment.program = target_batch.program
+    enrollment.campus = target_batch.campus
+    enrollment.course = course
+    enrollment.semester = target_semester
+    enrollment.academic_year = target_academic_year
+    enrollment.save(update_fields=[
+        "batch", "program", "campus", "course", "semester",
+        "academic_year", "updated_on",
+    ])
+
+    transfer = BatchTransfer.objects.create(
+        student=enrollment.student,
+        enrollment=enrollment,
+        from_batch=old["batch"],
+        from_program=old["program"],
+        from_campus=old["campus"],
+        from_semester=old["semester"],
+        from_academic_year=old["academic_year"],
+        to_batch=target_batch,
+        to_program=target_batch.program,
+        to_campus=target_batch.campus,
+        to_semester=target_semester,
+        to_academic_year=target_academic_year,
+        remarks=remarks,
+        created_by=actor,
+    )
+    StudentRemark.objects.create(
+        student=enrollment.student,
+        note=(f"Batch transfer: {old['batch'].name} → {target_batch.name}. "
+              f"{remarks}"),
+        created_by=actor,
+    )
+    # A transfer can cross programs / campuses — carry it up to the
+    # Student so the profile and documents follow.
+    sync_student_placement_from_enrollment(enrollment.student, actor=actor)
+    return transfer
+
+
 # --- Enrollment guard --------------------------------------------------
 
 def can_enroll(student: Student) -> tuple[bool, str]:

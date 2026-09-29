@@ -130,24 +130,37 @@ must approve. The see-all permission widens it to every application.
 (a separate permission). It records the reason and the requested last working
 date.
 
-At this moment the system **captures the employee's four reporting managers**
-onto the application. Levels with no manager configured are marked as skipped.
+At this moment the system **captures the four approvers** onto the application:
+
+| Level | Approver |
+|---|---|
+| 1 and 2 | The employee's first and second reporting managers |
+| 3 | The **Principal** |
+| 4 | **HR** (Trupti), the final approver |
+
+The Principal and HR approvers are the same for every employee and are set by
+your technical team. If one is not set up, the employee's own third or fourth
+reporting manager is used instead. Levels with nobody to approve are marked
+as skipped.
 
 > Because the approvers are captured at submission, **changing someone's
 > reporting manager afterwards does not reroute an application already in
 > progress.** New applications use the new manager.
 
-**2. Each manager approves or rejects**, with remarks, at their level.
+**2. Each level approves or rejects** in order, with remarks.
 A rejection records which level rejected it and why.
 
-**3. HR finalises it.** HR sets the **approved** last working date — which may
-differ from the requested one — and the application is completed.
+**3. The final approval issues the letters.** When HR (level 4) approves,
+the application is completed at once. There is no separate finalise step.
+The system:
 
-At finalisation the system stamps two document numbers: one for the relieving
-letter and one for the experience letter.
+- stamps a relieving-letter number and an experience-letter number
+- takes the requested last working date as the final one
+- marks the employee inactive
+- emails both letters to the employee's personal email address
 
-**4. Letters are generated.** Both the relieving letter and the experience
-letter can be downloaded as PDFs, produced fresh from the record.
+**4. The employee downloads the letters.** On the Relieving page, the
+employee can view or download both PDFs immediately.
 
 ### Other things to know
 
@@ -169,5 +182,5 @@ letter can be downloaded as PDFs, produced fresh from the record.
 | Change a reporting manager | Requests already in progress keep the original approver |
 | Create a portal account | The employee can log in immediately with the baseline access |
 | Deactivate an employee | They stop appearing in active lists; their history stays intact |
-| Finalise a relieving application | Letter numbers are stamped and the letters become available |
+| Give the final (HR) approval on a relieving application | Letter numbers are stamped, the employee is marked inactive, and the letters are emailed and become available to download |
 | Change a campus | Changes which colleagues can see that employee |

@@ -770,6 +770,23 @@ PRINCIPAL_INBOX = env("PRINCIPAL_INBOX", default="")
 VICE_PRINCIPAL_INBOX = env("VICE_PRINCIPAL_INBOX", default="")
 ACADEMIC_MANAGER_INBOX = env("ACADEMIC_MANAGER_INBOX", default="")
 
+# Relieving approval chain: L1/L2 come from the employee's reporting
+# managers; L3 and L4 are fixed institute-wide (Principal, then HR — the
+# final approver, whose approval issues the letters). Each is matched to
+# an Employee by `email_primary`. Blank / no matching active employee =
+# fall back to that employee's reporting_manager_3 / _4.
+RELIEVING_L3_APPROVER_EMAIL = env(
+    "RELIEVING_L3_APPROVER_EMAIL", default="principal@jdinstitute.edu.in",
+)
+RELIEVING_L4_APPROVER_EMAIL = env("RELIEVING_L4_APPROVER_EMAIL", default="")
+# Signatory printed under the signature on relieving / experience letters.
+RELIEVING_LETTER_SIGNATORY = env(
+    "RELIEVING_LETTER_SIGNATORY", default="TRUPTI DESHPANDE",
+)
+RELIEVING_LETTER_SIGNATORY_TITLE = env(
+    "RELIEVING_LETTER_SIGNATORY_TITLE", default="HR",
+)
+
 # Templates that *intentionally* route through SMTP — listed here so
 # the dispatcher logs a warning if someone tries to add them to
 # MSG91_EMAIL_TEMPLATES by mistake. Keep in sync with the policy above.

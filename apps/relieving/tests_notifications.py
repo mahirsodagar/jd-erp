@@ -41,6 +41,10 @@ def make_employee(code, *, institute, campus, email_alternate="", **extra):
 @override_settings(
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
     DEFAULT_FROM_EMAIL="JD Communications <admin.a@jdinstitute.edu.in>",
+    # Route purely by reporting managers here; the fixed L3/L4 approvers
+    # have their own tests in tests_workflow.
+    RELIEVING_L3_APPROVER_EMAIL="",
+    RELIEVING_L4_APPROVER_EMAIL="",
 )
 class RelievingEmailTests(TestCase):
 
@@ -111,16 +115,13 @@ class RelievingEmailTests(TestCase):
         self.assertEqual(Log.objects.get(template_key=TPL_REJECTED).status,
                          Log.Status.SENT)
 
-    def test_completion_sends_both_letters_to_personal_mail(self):
+    def test_final_approval_sends_both_letters_to_personal_mail(self):
         pk = self._submit()
-        for level in (1, 2, 4):
+        for level in (1, 2):
             self._decide(pk, level, "APPROVED")
         mail.outbox.clear()
 
-        r = self.client.post(f"/api/hr/relieving/{pk}/finalize/",
-                             {"last_working_date_approved": "2026-10-31"},
-                             format="json")
-        self.assertEqual(r.status_code, 200, r.data)
+        self._decide(pk, 4, "APPROVED")  # final level — no HR finalize step
 
         self.assertEqual(len(mail.outbox), 2)
         relieving, experience = mail.outbox

@@ -168,6 +168,12 @@ class Assignment(models.Model):
         "master.Batch", on_delete=models.PROTECT, related_name="assignments",
         null=True, blank=True,
     )
+    # Semester of the program the assignment is set for. Optional so
+    # older rows (created before this field) stay valid.
+    semester = models.ForeignKey(
+        "master.Semester", on_delete=models.PROTECT, related_name="assignments",
+        null=True, blank=True,
+    )
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
     max_marks = models.DecimalField(max_digits=5, decimal_places=1)

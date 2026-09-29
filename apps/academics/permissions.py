@@ -46,6 +46,10 @@ class TimetableAccess(ScheduleAccess):
     Students and instructors are unaffected: they reach their own
     sessions through `MyTimetableView` (/schedule/me), which is not
     behind this class.
+
+    The list page (`schedule.view`) and the Calendar page
+    (`schedule.view_calendar`) read the same endpoint, so either key
+    opens it.
     """
 
     message = "Permission denied for the timetable."
@@ -55,5 +59,6 @@ class TimetableAccess(ScheduleAccess):
         if not u or not u.is_authenticated:
             return False
         if request.method in ("GET", "HEAD", "OPTIONS"):
-            return has_perm(u, "academics.schedule.view")
+            return (has_perm(u, "academics.schedule.view")
+                    or has_perm(u, "academics.schedule.view_calendar"))
         return super().has_permission(request, view)

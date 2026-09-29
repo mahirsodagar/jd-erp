@@ -4,9 +4,9 @@ from django.db import models
 
 class RelievingApplication(models.Model):
     """Exit workflow. Submitted by the employee (or by HR on behalf),
-    walks through up to 4 manager approvals snapshotted at submission
-    time, then HR finalizes and generates relieving + experience
-    letters.
+    walks through up to 4 approvals snapshotted at submission time
+    (RM1, RM2, Principal, HR). The final approval completes it and
+    issues the relieving + experience letters.
     """
 
     class Status(models.TextChoices):

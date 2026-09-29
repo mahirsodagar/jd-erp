@@ -361,3 +361,66 @@ class StudentStatusChange(models.Model):
     class Meta:
         ordering = ("-created_on", "-id")
 
+
+class BatchTransfer(models.Model):
+    """One student moved from one batch to another.
+
+    Legacy Program/Batch Transfer (academics/asave.php) overwrote the
+    enrolment row and kept only the two batch ids in `student_logs`.
+    The enrolment is still updated in place here — fees, attendance and
+    marks stay attached to it — but this row keeps the full before/after
+    placement and the reason, so the move can be read back later.
+    """
+
+    student = models.ForeignKey(
+        Student, on_delete=models.CASCADE, related_name="batch_transfers",
+    )
+    enrollment = models.ForeignKey(
+        Enrollment, on_delete=models.CASCADE, related_name="transfers",
+    )
+
+    from_batch = models.ForeignKey(
+        "master.Batch", on_delete=models.PROTECT, related_name="+",
+    )
+    from_program = models.ForeignKey(
+        "master.Program", on_delete=models.PROTECT, related_name="+",
+    )
+    from_campus = models.ForeignKey(
+        "master.Campus", on_delete=models.PROTECT, related_name="+",
+    )
+    from_semester = models.ForeignKey(
+        "master.Semester", on_delete=models.PROTECT, related_name="+",
+    )
+    from_academic_year = models.ForeignKey(
+        "master.AcademicYear", on_delete=models.PROTECT, related_name="+",
+    )
+
+    to_batch = models.ForeignKey(
+        "master.Batch", on_delete=models.PROTECT, related_name="+",
+    )
+    to_program = models.ForeignKey(
+        "master.Program", on_delete=models.PROTECT, related_name="+",
+    )
+    to_campus = models.ForeignKey(
+        "master.Campus", on_delete=models.PROTECT, related_name="+",
+    )
+    to_semester = models.ForeignKey(
+        "master.Semester", on_delete=models.PROTECT, related_name="+",
+    )
+    to_academic_year = models.ForeignKey(
+        "master.AcademicYear", on_delete=models.PROTECT, related_name="+",
+    )
+
+    remarks = models.TextField()
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="batch_transfers_made",
+    )
+    created_on = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_on", "-id")
+
+    def __str__(self):
+        return (f"{self.student_id}: {self.from_batch_id} → "
+                f"{self.to_batch_id}")

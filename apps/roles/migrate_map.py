@@ -137,6 +137,10 @@ RULES: dict[str, tuple[str, ...]] = {
     "academics.schedule.override_conflict": (
         "academics.schedule.add", "academics.schedule.edit",
     ),
+    # Publish Timetable used to ride on `add`; the Calendar page on
+    # `view`. Both got their own keys so each sidebar entry is grantable.
+    "academics.schedule.publish": ("academics.schedule.add",),
+    "academics.schedule.view_calendar": ("academics.schedule.view",),
 
     # --- Module 6.2: Academics > Attendance ----------------------------
     # The roster was readable by anyone authenticated; give the key to

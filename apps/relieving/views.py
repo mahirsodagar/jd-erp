@@ -162,6 +162,9 @@ class RelievingDecideView(APIView):
         app.refresh_from_db()
         if app.status == RelievingApplication.Status.REJECTED:
             notifications.notify_rejected(app)
+        elif app.status == RelievingApplication.Status.COMPLETED:
+            # Final approval issued the letters — mail them out.
+            notifications.notify_completed(app)
         # Reload + serialize
         app = (RelievingApplication.objects
                .select_related("employee")
@@ -173,6 +176,8 @@ class RelievingDecideView(APIView):
 # --- Finalize (HR generates letters) -------------------------------
 
 class RelievingFinalizeView(APIView):
+    """Letters are now issued automatically on the final approval; this
+    stays for applications left APPROVED from before that change."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):

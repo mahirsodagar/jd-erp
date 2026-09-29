@@ -1,7 +1,8 @@
 from rest_framework import serializers
 
 from .models import (
-    Enrollment, Student, StudentDocument, StudentRemark, StudentStatusChange,
+    BatchTransfer, Enrollment, Student, StudentDocument, StudentRemark,
+    StudentStatusChange,
 )
 
 
@@ -304,3 +305,42 @@ class StudentStatusChangeSerializer(serializers.ModelSerializer):
 class StudentStatusChangeInputSerializer(serializers.Serializer):
     remarks = serializers.CharField(max_length=1000)
 
+
+
+class BatchTransferSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source="student.student_name", read_only=True)
+    student_application_id = serializers.CharField(
+        source="student.application_form_id", read_only=True,
+    )
+    from_batch_name = serializers.CharField(source="from_batch.name", read_only=True)
+    from_program_name = serializers.CharField(source="from_program.name", read_only=True)
+    from_campus_name = serializers.CharField(source="from_campus.name", read_only=True)
+    from_semester_name = serializers.CharField(source="from_semester.name", read_only=True)
+    from_academic_year_code = serializers.CharField(
+        source="from_academic_year.code", read_only=True,
+    )
+    to_batch_name = serializers.CharField(source="to_batch.name", read_only=True)
+    to_program_name = serializers.CharField(source="to_program.name", read_only=True)
+    to_campus_name = serializers.CharField(source="to_campus.name", read_only=True)
+    to_semester_name = serializers.CharField(source="to_semester.name", read_only=True)
+    to_academic_year_code = serializers.CharField(
+        source="to_academic_year.code", read_only=True,
+    )
+    created_by_name = serializers.CharField(
+        source="created_by.full_name", read_only=True, default="",
+    )
+
+    class Meta:
+        model = BatchTransfer
+        fields = [
+            "id", "student", "student_name", "student_application_id",
+            "enrollment",
+            "from_batch", "from_batch_name", "from_program", "from_program_name",
+            "from_campus", "from_campus_name", "from_semester", "from_semester_name",
+            "from_academic_year", "from_academic_year_code",
+            "to_batch", "to_batch_name", "to_program", "to_program_name",
+            "to_campus", "to_campus_name", "to_semester", "to_semester_name",
+            "to_academic_year", "to_academic_year_code",
+            "remarks", "created_by_name", "created_on",
+        ]
+        read_only_fields = fields

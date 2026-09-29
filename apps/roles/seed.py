@@ -290,9 +290,17 @@ CATALOGUE = [
     # (`ScheduleAccess` allowed every GET); staff now need
     # `schedule.view`. Students and instructors still reach their own
     # sessions through /schedule/me, which stays ungated.
-    ("academics", "academics.schedule.view", "See the timetable and calendar"),
+    #
+    # The role editor lists these under their own "Timetable" section
+    # (see `groupPermissionsMatrix` in the web app), not under Academics.
+    # `publish` (Publish Timetable page) and `view_calendar` (Calendar
+    # page) were split off `add` and `view` so each Timetable sidebar
+    # entry can be granted on its own.
+    ("academics", "academics.schedule.view", "See the timetable list"),
+    ("academics", "academics.schedule.view_calendar", "See the timetable calendar"),
     ("academics", "academics.schedule.view_all", "See the timetable for every campus, not just mine"),
-    ("academics", "academics.schedule.add", "Create slots and publish timetables"),
+    ("academics", "academics.schedule.add", "Create a single slot (New Slot)"),
+    ("academics", "academics.schedule.publish", "Publish a weekly timetable"),
     ("academics", "academics.schedule.edit", "Edit a scheduled slot"),
     ("academics", "academics.schedule.delete", "Cancel a scheduled slot"),
     ("academics", "academics.schedule.override_conflict", "Publish a slot despite a classroom clash"),

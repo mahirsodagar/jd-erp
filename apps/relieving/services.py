@@ -3,6 +3,7 @@
 import re
 from datetime import datetime
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
@@ -14,13 +15,30 @@ from .models import RelievingApplication, RelievingApproval
 
 # --- Helpers --------------------------------------------------------
 
+def _fixed_approver(email: str, *, applicant: Employee) -> Employee | None:
+    """Active employee whose primary email is `email`. Never the
+    applicant themselves — nobody approves their own exit."""
+    if not email:
+        return None
+    return (Employee.objects
+            .filter(email_primary__iexact=email.strip(),
+                    status=Employee.Status.ACTIVE)
+            .exclude(pk=applicant.pk)
+            .first())
+
+
 def _approval_chain_for(employee: Employee) -> list[Employee | None]:
-    """Snapshot of reporting_manager_1..4 at submission time."""
+    """Snapshot at submission time: reporting_manager_1 and _2, then the
+    institute-wide L3 (Principal) and L4 (HR) from settings. L3/L4 fall
+    back to reporting_manager_3/_4 when the setting is blank or matches
+    no active employee."""
+    l3 = _fixed_approver(settings.RELIEVING_L3_APPROVER_EMAIL, applicant=employee)
+    l4 = _fixed_approver(settings.RELIEVING_L4_APPROVER_EMAIL, applicant=employee)
     return [
         employee.reporting_manager_1,
         employee.reporting_manager_2,
-        employee.reporting_manager_3,
-        employee.reporting_manager_4,
+        l3 or employee.reporting_manager_3,
+        l4 or employee.reporting_manager_4,
     ]
 
 
@@ -129,10 +147,21 @@ def decide(*, approval: RelievingApproval, decision: str,
     else:
         app.status = RelievingApplication.Status.IN_REVIEW
     app.save(update_fields=["status", "updated_at"])
+
+    # Final approval issues the letters straight away (legacy parity:
+    # the L4 approval in hrsave.php generated the relieving letter).
+    if pending == 0:
+        finalize(
+            application=app,
+            last_working_date_approved=app.last_working_date_requested,
+            finalized_by=decided_by,
+        )
     return approval
 
 
-# --- Finalize (HR generates letters) -------------------------------
+# --- Finalize (letters issued) --------------------------------------
+# Called by `decide` on the final approval. The HR finalize endpoint
+# remains only for applications approved before that was automatic.
 
 @transaction.atomic
 def finalize(*, application: RelievingApplication,
