@@ -10,7 +10,7 @@ from .letters import render_experience_letter, render_relieving_letter
 from .models import RelievingApplication, RelievingApproval
 from .permissions import has_perm
 from .serializers import (
-    DecideSerializer, FinalizeSerializer, RelievingApplicationSerializer,
+    AcceptSerializer, DecideSerializer, FinalizeSerializer, RelievingApplicationSerializer,
     SubmitRelievingSerializer, WithdrawSerializer,
 )
 from . import notifications, services
@@ -209,6 +209,96 @@ class RelievingFinalizeView(APIView):
                .prefetch_related("approvals__approver")
                .get(pk=pk))
         return Response(RelievingApplicationSerializer(app).data)
+
+
+# --- Accept directly (HR) ------------------------------------------
+
+class RelievingAcceptView(APIView):
+    """HR accepts an open resignation in one step, without waiting for
+    the remaining approval levels. Completes it and mails the relieving
+    letter; the experience letter goes out from its own endpoint."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        u = request.user
+        if not (u.is_superuser or has_perm(u, "hr.relieving.finalize")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        try:
+            app = RelievingApplication.objects.select_related(
+                "employee", "employee__institute",
+            ).get(pk=pk)
+        except RelievingApplication.DoesNotExist as e:
+            raise Http404 from e
+        s = AcceptSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        d = s.validated_data
+        try:
+            services.accept(
+                application=app,
+                last_working_date_approved=d["last_working_date_approved"],
+                remarks=d.get("remarks", ""),
+                set_inactive=d.get("set_inactive", True),
+                accepted_by=u,
+            )
+        except ValueError as e:
+            return Response({"detail": str(e)},
+                            status=http.HTTP_400_BAD_REQUEST)
+        notifications.notify_completed(app)
+        return Response(RelievingApplicationSerializer(
+            RelievingApplication.objects
+            .select_related("employee")
+            .prefetch_related("approvals__approver")
+            .get(pk=pk)
+        ).data)
+
+
+# --- Send experience letter (HR) -----------------------------------
+
+class SendExperienceLetterView(APIView):
+    """Mail the experience letter to the employee. Repeatable — a second
+    call re-sends it."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        u = request.user
+        if not (u.is_superuser or has_perm(u, "hr.relieving.finalize")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        try:
+            app = RelievingApplication.objects.select_related(
+                "employee", "employee__institute",
+                "employee__designation", "employee__department",
+            ).get(pk=pk)
+        except RelievingApplication.DoesNotExist as e:
+            raise Http404 from e
+        if app.status != RelievingApplication.Status.COMPLETED:
+            return Response(
+                {"detail": "Experience letter can only be sent once the "
+                           "application is COMPLETED."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+        emp = app.employee
+        if not (emp.email_alternate or emp.email_primary):
+            return Response(
+                {"detail": "Employee has no email address on record."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+        log = notifications.send_experience_letter(app)
+        if log is None or log.status != log.Status.SENT:
+            return Response(
+                {"detail": "Could not send the experience letter"
+                           + (f": {log.error}" if log and log.error else ".")},
+                status=http.HTTP_502_BAD_GATEWAY,
+            )
+        app.experience_letter_sent_at = log.sent_at
+        app.save(update_fields=["experience_letter_sent_at", "updated_at"])
+        return Response(RelievingApplicationSerializer(
+            RelievingApplication.objects
+            .select_related("employee")
+            .prefetch_related("approvals__approver")
+            .get(pk=pk)
+        ).data)
 
 
 # --- Withdraw ------------------------------------------------------

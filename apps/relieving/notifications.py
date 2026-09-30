@@ -6,8 +6,9 @@ Legacy sent four mails:
   reject     → approver 1, cc approvers 2–4        (employee_relieving_application_rejected)
   completion → employee's PERSONAL mail, cc approvers + institutional
                mail, relieving letter PDF attached  (relieving_letter_employee)
-  experience → employee's personal mail, cc final approver,
-               experience letter PDF attached       (experience_letter_employee)
+  experience → HR button, sent separately: employee's personal mail,
+               cc final approver, experience letter PDF attached
+                                                    (experience_letter_employee)
 
 Legacy hard-coded the four approver addresses; here the chain is the
 per-application snapshot in `RelievingApproval` (reporting managers 1–4).
@@ -164,9 +165,9 @@ def notify_rejected(application) -> None:
 
 
 def notify_completed(application) -> None:
-    """Email the relieving letter, then the experience letter, to the
-    employee. Legacy sent the experience letter from a separate HR
-    button; here both letters are issued at finalize, so both go out."""
+    """Email the relieving letter to the employee. The experience letter
+    is not sent here — HR sends it from its own button (legacy parity),
+    see `send_experience_letter`."""
     emp = application.employee
     personal = emp.email_alternate or emp.email_primary
     if not personal:
@@ -193,7 +194,19 @@ def notify_completed(application) -> None:
         )],
     )
 
-    _safe_send(
+
+def send_experience_letter(application) -> NotificationDispatchLog | None:
+    """Email the experience letter to the employee's personal mail, cc the
+    final approver. Returns the dispatch log (None when the employee has
+    no address or the send blew up) so the caller can report the outcome."""
+    emp = application.employee
+    personal = emp.email_alternate or emp.email_primary
+    if not personal:
+        return None
+    approvers = _approver_emails(application)
+    inst_name = emp.institute.name
+
+    return _safe_send(
         template=TPL_EXPERIENCE_LETTER, application=application,
         to=personal, cc=_join(approvers[-1:]),
         subject=f"Experience Letter — {emp.full_name}",

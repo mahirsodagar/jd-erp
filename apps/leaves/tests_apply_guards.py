@@ -89,6 +89,21 @@ class ApplyGuardTests(TestCase):
         self.assertEqual(self._apply(self.perm, "2026-10-05", session=4).status_code, 201)
         self.assertEqual(self._apply(self.perm, "2026-10-05", session=3).status_code, 400)
 
+    def test_first_and_second_half_same_day_coexist(self):
+        r = self._apply(self.cl, "2026-10-05", session=5)
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(Decimal(r.json()["count"]), Decimal("0.5"))
+        self.assertEqual(self._apply(self.cl, "2026-10-05", session=1).status_code, 201)
+        self.assertEqual(self._apply(self.cl, "2026-10-05", session=5).status_code, 400)
+
+    def test_half_day_clashes_with_permission_inside_it(self):
+        self.assertEqual(self._apply(self.cl, "2026-10-05", session=5).status_code, 201)
+        self.assertEqual(self._apply(self.perm, "2026-10-05", session=4).status_code, 400)
+        self.assertEqual(self._apply(self.perm, "2026-10-05", session=3).status_code, 201)
+
+    def test_unknown_session_rejected(self):
+        self.assertEqual(self._apply(self.cl, "2026-10-05", session=6).status_code, 400)
+
     def test_part_day_clashes_with_full_day(self):
         self.assertEqual(self._apply(self.perm, "2026-10-05", session=3).status_code, 201)
         self.assertEqual(self._apply(self.cl, "2026-10-05").status_code, 400)

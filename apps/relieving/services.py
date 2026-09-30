@@ -1,4 +1,4 @@
-"""Submit / decide / finalize / withdraw flows for relieving."""
+"""Submit / decide / accept / finalize / withdraw flows for relieving."""
 
 import re
 from datetime import datetime
@@ -157,6 +157,38 @@ def decide(*, approval: RelievingApproval, decision: str,
             finalized_by=decided_by,
         )
     return approval
+
+
+# --- Accept directly (HR) -------------------------------------------
+
+@transaction.atomic
+def accept(*, application: RelievingApplication, last_working_date_approved,
+           accepted_by, remarks: str = "",
+           set_inactive: bool = True) -> RelievingApplication:
+    """HR accepts the resignation in one step: every still-pending level
+    is approved on HR's behalf (recorded as such in the chain), then the
+    application is finalized."""
+    if application.status not in (
+        RelievingApplication.Status.SUBMITTED,
+        RelievingApplication.Status.IN_REVIEW,
+    ):
+        raise ValueError(f"Application is {application.status}; cannot accept.")
+
+    note = "Accepted directly by HR." + (f" {remarks}" if remarks else "")
+    application.approvals.filter(
+        status=RelievingApproval.Status.PENDING,
+    ).update(
+        status=RelievingApproval.Status.APPROVED,
+        remarks=note, decided_at=timezone.now(), decided_by=accepted_by,
+    )
+    application.status = RelievingApplication.Status.APPROVED
+    application.save(update_fields=["status", "updated_at"])
+
+    return finalize(
+        application=application,
+        last_working_date_approved=last_working_date_approved,
+        finalized_by=accepted_by, set_inactive=set_inactive,
+    )
 
 
 # --- Finalize (letters issued) --------------------------------------

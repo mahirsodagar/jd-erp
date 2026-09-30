@@ -421,7 +421,9 @@ class CompOffListCreateView(APIView):
                     or has_perm(request.user, "leaves.compoff.view_all")):
                 return Response([], status=http.HTTP_200_OK)
         elif scope == "team":
-            qs = qs.filter(employee__reporting_manager_1__user_account=request.user)
+            # Same as leave: matched on the manager_email snapshot.
+            qs = qs.filter(manager_email__iexact=request.user.email) \
+                if request.user.email else qs.none()
         else:
             me = get_employee_for(request.user)
             qs = qs.filter(employee=me) if me else qs.none()
@@ -436,6 +438,18 @@ class CompOffListCreateView(APIView):
         if target is None:
             return Response({"detail": "No employee profile linked."},
                             status=http.HTTP_400_BAD_REQUEST)
+        # Manager email snapshot (default: reporting manager 1), as leave.
+        manager_email = d.get("manager_email") or ""
+        if not manager_email:
+            rm = target.reporting_manager_1
+            manager_email = rm.email_primary if rm else ""
+        if not manager_email:
+            return Response(
+                {"manager_email": "No reporting manager is set on your "
+                                  "profile. Ask HR to set one, or enter "
+                                  "your manager's email."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
         count = Decimal("1.0") if (d["worked_session_1"] + d["worked_session_2"] == 2) else Decimal("0.5")
         co = CompOffApplication.objects.create(
             employee=target,
@@ -444,6 +458,8 @@ class CompOffListCreateView(APIView):
             worked_session_2=d["worked_session_2"],
             count=count,
             reason=d["reason"],
+            manager_email=manager_email,
+            cc_emails=d.get("cc_emails", "") or "",
         )
         notifications.notify_compoff_applied(co)
         return Response(CompOffApplicationSerializer(co).data,
@@ -459,7 +475,6 @@ class CompOffDecisionView(APIView):
         except CompOffApplication.DoesNotExist as e:
             raise Http404 from e
         u = request.user
-        emp = co.employee
         if co.status != CompOffApplication.Status.PENDING:
             return Response({"detail": "Already decided."},
                             status=http.HTTP_400_BAD_REQUEST)
@@ -467,8 +482,7 @@ class CompOffDecisionView(APIView):
         s.is_valid(raise_exception=True)
 
         is_manager = bool(
-            emp.reporting_manager_1
-            and emp.reporting_manager_1.user_account_id == u.id
+            u.email and co.manager_email.lower() == u.email.lower()
         )
         override = (
             "leaves.compoff.approve_any"
@@ -485,6 +499,20 @@ class CompOffDecisionView(APIView):
         co.save(update_fields=["status", "approver", "approver_remarks", "decided_on"])
         notifications.notify_compoff_decision(co)
         return Response(CompOffApplicationSerializer(co).data)
+
+
+class ReportingManagerView(APIView):
+    """GET — `{"manager": {...} | null}`: the caller's reporting manager 1.
+    Shown on the apply forms so the employee sees where a request goes."""
+    permission_classes = [IsAuthenticated, LeaveAccessPolicy]
+
+    def get(self, request):
+        me = get_employee_for(request.user)
+        rm = me.reporting_manager_1 if me else None
+        return Response({"manager": rm and {
+            "id": rm.id, "name": rm.full_name,
+            "emp_code": rm.emp_code, "email": rm.email_primary,
+        }})
 
 
 class CompOffBalanceView(APIView):

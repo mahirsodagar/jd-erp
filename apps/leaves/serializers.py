@@ -109,7 +109,8 @@ class LeaveApplyInputSerializer(serializers.Serializer):
     leave_type = serializers.PrimaryKeyRelatedField(queryset=LeaveType.objects.all())
     from_date = serializers.DateField()
     to_date = serializers.DateField()
-    from_session = serializers.IntegerField(min_value=1, max_value=4)
+    from_session = serializers.ChoiceField(
+        choices=list(LeaveApplication.SESSION_LABELS))
     reason = serializers.CharField(min_length=3, max_length=2000)
     manager_email = serializers.EmailField(required=False, allow_blank=True)
     cc_emails = serializers.CharField(required=False, allow_blank=True, max_length=255)
@@ -151,7 +152,7 @@ class CompOffApplicationSerializer(serializers.ModelSerializer):
         fields = [
             "id", "employee", "employee_name",
             "worked_date", "worked_session_1", "worked_session_2", "count",
-            "reason", "status",
+            "reason", "manager_email", "cc_emails", "status",
             "approver", "approver_name", "approver_remarks",
             "applied_on", "decided_on",
         ]
@@ -167,6 +168,8 @@ class CompOffApplyInputSerializer(serializers.Serializer):
     worked_session_1 = serializers.IntegerField(min_value=0, max_value=1)
     worked_session_2 = serializers.IntegerField(min_value=0, max_value=1)
     reason = serializers.CharField(min_length=3, max_length=2000)
+    manager_email = serializers.EmailField(required=False, allow_blank=True)
+    cc_emails = serializers.CharField(required=False, allow_blank=True, max_length=255)
     # No `employee` field — see LeaveApplyInputSerializer. This one was
     # worse: the override had no permission check at all, so any user
     # could file a comp-off against any colleague.

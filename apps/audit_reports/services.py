@@ -77,7 +77,7 @@ def faculty_daily_computed(*, faculty, start: date, end: date) -> dict:
         last = min(la.to_date, end)
         while day <= last:
             if day.weekday() != 6:  # skip Sundays
-                if single and la.from_session in (1, 3, 4):
+                if single and la.from_session in LeaveApplication.PART_DAY_SESSIONS:
                     frac = Decimal("0.5")
                 else:
                     frac = Decimal("1.0")

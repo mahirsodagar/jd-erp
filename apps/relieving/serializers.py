@@ -48,6 +48,7 @@ class RelievingApplicationSerializer(serializers.ModelSerializer):
             "status",
             "rejected_at_level", "rejection_reason",
             "relieving_letter_no", "experience_letter_no",
+            "experience_letter_sent_at",
             "finalized_at",
             "finalized_by", "finalized_by_name",
             "submitted_by", "submitted_by_name", "submitted_at",
@@ -60,6 +61,7 @@ class RelievingApplicationSerializer(serializers.ModelSerializer):
             "status",
             "rejected_at_level", "rejection_reason",
             "relieving_letter_no", "experience_letter_no",
+            "experience_letter_sent_at",
             "finalized_at",
             "finalized_by", "finalized_by_name",
             "submitted_by", "submitted_by_name", "submitted_at",
@@ -82,6 +84,12 @@ class DecideSerializer(serializers.Serializer):
 
 class FinalizeSerializer(serializers.Serializer):
     last_working_date_approved = serializers.DateField()
+    set_inactive = serializers.BooleanField(default=True)
+
+
+class AcceptSerializer(serializers.Serializer):
+    last_working_date_approved = serializers.DateField()
+    remarks = serializers.CharField(required=False, allow_blank=True, max_length=2000)
     set_inactive = serializers.BooleanField(default=True)
 
 

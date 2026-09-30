@@ -116,7 +116,7 @@ class RelievingWorkflowTests(TestCase):
         self.assertEqual(app.finalized_by, self.hr.user_account)
         self.emp.refresh_from_db()
         self.assertEqual(self.emp.status, Employee.Status.INACTIVE)
-        self.assertEqual(len(mail.outbox), 2)  # relieving + experience
+        self.assertEqual(len(mail.outbox), 1)  # relieving only; experience is HR's button
 
         # The employee can open their letter immediately.
         r = self._client(self.emp).get(

@@ -28,7 +28,7 @@ Fill in:
 |---|---|
 | **Leave type** | Casual, comp-off and so on — the list your institute has set up |
 | **From** and **To** dates | |
-| **Session** | Half day (morning), full day, or one of the two permission slots |
+| **Session** | First half (morning), second half (afternoon), full day, or one of the two permission slots |
 | **Reason** | |
 | **CC** | Anyone else who should be told |
 
@@ -47,7 +47,7 @@ you, it is behaving as intended — check with HR before assuming it is a fault.
 
 For a **single day**:
 
-- Half day (morning) → **0.5**
+- First half or second half → **0.5**
 - Full day → **1**
 - Either permission slot → **0.5**
 
@@ -68,7 +68,14 @@ If you worked on a day you were not required to, claim it back:
 
 1. Record the **date you worked** and which session(s) — first, second or both.
 2. Give a reason.
-3. Your manager approves or rejects it.
+3. Check the **Manager email**. The form shows your reporting manager and
+   fills in their email; change it if the request should go to someone
+   else, and add anyone to **CC**. HR is always copied.
+4. That manager approves or rejects it (in the **Team Comp-Off —
+   Approvals** section of their Comp-Off page).
+
+If no reporting manager is set on your profile, you must type a manager
+email — or ask HR to set one.
 
 Once approved, the day joins your comp-off pool. You then **use** it by
 applying for leave with the comp-off leave type.

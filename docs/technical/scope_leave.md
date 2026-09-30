@@ -95,7 +95,7 @@ Yearly grant per employee, per leave type, per session.
 | `employee` | FK → `Employee` | |
 | `leave_type` | FK → `LeaveType` | |
 | `from_date` | Date | |
-| `from_session` | SmallInt | one of 1/2/3/4 (see §2) |
+| `from_session` | SmallInt | 1=first half, 2=full day, 3/4=permission slots, 5=second half |
 | `to_date` | Date | `>= from_date` |
 | `count` | Decimal(5,1) | server-computed, not trusted from client |
 | `reason` | Text | |
@@ -215,7 +215,7 @@ Base: `/api/v1/leaves/`. JWT-required.
 
 ### 5.2 Server-side count derivation
 - If `from_date == to_date`:
-  - `from_session in (1, 3, 4)` → `count = 0.5`
+  - `from_session in (1, 3, 4, 5)` → `count = 0.5`
   - `from_session == 2` → `count = 1.0`
 - Else: `count = (to_date − from_date).days + 1` (calendar days).
 - **Improvement over PHP**: a feature flag `LEAVES_EXCLUDE_HOLIDAYS_AND_WEEKENDS` (default `True`) makes `count` skip Sundays + holidays for the employee's campus. Today's PHP counts all days equally — keep the PHP behaviour available for parity if needed.

@@ -78,15 +78,21 @@ class LeaveApplication(models.Model):
     from_date = models.DateField()
     to_date = models.DateField()
     # Keep timings in sync with LEAVE_SESSION_LABELS in jd-erp-web api/endpoints/leaves.ts.
+    # 5 was added after 1–4, so the two halves aren't adjacent numbers;
+    # existing half days (1) read as first half.
     SESSION_LABELS = {
-        1: "Half day (10:00 AM – 1:30 PM)",
+        1: "First half (morning)",
         2: "Full day",
         3: "Permission (9:30 AM – 11:00 AM)",
         4: "Permission (4:00 PM – 5:30 PM)",
+        5: "Second half (afternoon)",
     }
+    # Sessions worth 0.5 day on a single-day request.
+    PART_DAY_SESSIONS = (1, 3, 4, 5)
 
     from_session = models.PositiveSmallIntegerField(
-        help_text="1=AM, 2=Full day, 3=Permission slot 1, 4=Permission slot 2",
+        help_text="1=First half, 2=Full day, 3=Permission slot 1, "
+                  "4=Permission slot 2, 5=Second half",
     )
     count = models.DecimalField(max_digits=5, decimal_places=1)
 
@@ -141,6 +147,10 @@ class CompOffApplication(models.Model):
     count = models.DecimalField(max_digits=3, decimal_places=1)
 
     reason = models.TextField()
+    # Same snapshot rule as LeaveApplication: routing follows the email
+    # given at apply time, not the reporting manager's later changes.
+    manager_email = models.EmailField(blank=True)
+    cc_emails = models.CharField(max_length=255, blank=True)
     status = models.PositiveSmallIntegerField(
         choices=Status.choices, default=Status.PENDING,
     )

@@ -152,12 +152,11 @@ def notify_leave_decision(application) -> None:
 
 def notify_compoff_applied(compoff) -> None:
     emp = compoff.employee
-    rm = emp.reporting_manager_1
-    to = (rm.email_primary if rm else HR_INBOX)
+    cc_list = _split_emails(compoff.cc_emails) + [HR_INBOX]
     send_email_now(
         template=TPL_COMPOFF_APPLIED,
-        to=to,
-        cc=HR_INBOX,
+        to=compoff.manager_email or HR_INBOX,
+        cc=", ".join(cc_list),
         subject=f"Comp-off application — {emp.full_name} ({compoff.worked_date})",
         body=(
             f"{emp.full_name} ({emp.emp_code}) has applied for comp-off.\n"
@@ -176,6 +175,7 @@ def notify_compoff_decision(compoff) -> None:
     send_email_now(
         template=TPL_COMPOFF_DECISION,
         to=emp.email_primary,
+        cc=compoff.manager_email,
         subject=f"Comp-off {decision} — {compoff.worked_date}",
         body=(
             f"Your comp-off for {compoff.worked_date} has been {decision}.\n"

@@ -5,8 +5,9 @@ from django.db import models
 class RelievingApplication(models.Model):
     """Exit workflow. Submitted by the employee (or by HR on behalf),
     walks through up to 4 approvals snapshotted at submission time
-    (RM1, RM2, Principal, HR). The final approval completes it and
-    issues the relieving + experience letters.
+    (RM1, RM2, Principal, HR), or is accepted directly by HR. Completion
+    issues both letter numbers and mails the relieving letter; HR sends
+    the experience letter separately.
     """
 
     class Status(models.TextChoices):
@@ -40,6 +41,9 @@ class RelievingApplication(models.Model):
     # Letter artefacts (numbers stamped at finalize; PDFs rendered on demand)
     relieving_letter_no = models.CharField(max_length=40, blank=True)
     experience_letter_no = models.CharField(max_length=40, blank=True)
+    # The experience letter is mailed separately by HR (legacy parity:
+    # a manual button, typically after full & final settlement).
+    experience_letter_sent_at = models.DateTimeField(null=True, blank=True)
     finalized_at = models.DateTimeField(null=True, blank=True)
     finalized_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True,

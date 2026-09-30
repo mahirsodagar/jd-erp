@@ -15,6 +15,7 @@ from .views import (
     LeaveReportSummaryView,
     LeaveTypeDetailView,
     LeaveTypeListCreateView,
+    ReportingManagerView,
 )
 
 urlpatterns = [
@@ -30,6 +31,8 @@ urlpatterns = [
     path("applications/dashboard/", LeaveDashboardView.as_view(), name="application-dashboard"),
     path("applications/<int:pk>/", LeaveApplicationDetailView.as_view(), name="application-detail"),
     path("applications/<int:pk>/decision/", LeaveDecisionView.as_view(), name="application-decision"),
+
+    path("reporting-manager/", ReportingManagerView.as_view(), name="reporting-manager"),
 
     path("comp-off/", CompOffListCreateView.as_view(), name="compoff-list-create"),
     path("comp-off/balance/", CompOffBalanceView.as_view(), name="compoff-balance"),

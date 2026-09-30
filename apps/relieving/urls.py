@@ -1,9 +1,10 @@
 from django.urls import path
 
 from .views import (
-    ExperienceLetterPdfView, MyRelievingView,
+    ExperienceLetterPdfView, MyRelievingView, RelievingAcceptView,
     RelievingDecideView, RelievingDetailView, RelievingFinalizeView,
     RelievingLetterPdfView, RelievingListCreateView, RelievingWithdrawView,
+    SendExperienceLetterView,
 )
 
 urlpatterns = [
@@ -14,6 +15,10 @@ urlpatterns = [
          name="relieving-decide"),
     path("<int:pk>/finalize/", RelievingFinalizeView.as_view(),
          name="relieving-finalize"),
+    path("<int:pk>/accept/", RelievingAcceptView.as_view(),
+         name="relieving-accept"),
+    path("<int:pk>/send-experience-letter/", SendExperienceLetterView.as_view(),
+         name="relieving-send-experience-letter"),
     path("<int:pk>/withdraw/", RelievingWithdrawView.as_view(),
          name="relieving-withdraw"),
     path("<int:pk>/relieving-letter.pdf", RelievingLetterPdfView.as_view(),

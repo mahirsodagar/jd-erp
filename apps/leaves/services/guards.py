@@ -13,6 +13,13 @@ from apps.leaves.services.balance import compute_balance
 
 FULL_DAY = 2
 _LIVE = (LeaveApplication.Status.PENDING, LeaveApplication.Status.APPROVED)
+# Part-day sessions that fall inside one another: permission slot 1
+# (9:30–11) is in the first half, slot 2 (4:00–5:30) in the second.
+_NESTED = {frozenset({1, 3}), frozenset({5, 4})}
+
+
+def _sessions_clash(a: int, b: int) -> bool:
+    return a == b or frozenset({a, b}) in _NESTED
 
 
 def find_overlap(*, employee, from_date, to_date, from_session,
@@ -21,7 +28,8 @@ def find_overlap(*, employee, from_date, to_date, from_session,
     pending/approved) that clashes with the requested range, or None.
 
     Two single-day, part-day requests on the same date only clash when they
-    use the same session (e.g. permission slot 1 + slot 2 can coexist).
+    use the same session or one sits inside the other (first half +
+    second half can coexist; first half + permission slot 1 cannot).
     Anything involving a full day or a multi-day span clashes on any shared
     date.
     """
@@ -37,7 +45,8 @@ def find_overlap(*, employee, from_date, to_date, from_session,
         other_is_part_day = (
             other.from_date == other.to_date and other.from_session != FULL_DAY
         )
-        if new_is_part_day and other_is_part_day and other.from_session != from_session:
+        if (new_is_part_day and other_is_part_day
+                and not _sessions_clash(other.from_session, from_session)):
             continue
         return other
     return None
