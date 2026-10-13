@@ -114,6 +114,20 @@ class BatchDownloadTests(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertTrue(res.content.startswith(b"%PDF"))
 
+    @staticmethod
+    def _pages(pdf: bytes) -> int:
+        return pdf.count(b"/Type /Page") - pdf.count(b"/Type /Pages")
+
+    def test_single_letter_has_no_summary_page(self):
+        # Letter + the student's own subject-wise table, one page.
+        res = self._letter(student=self.short.pk)
+        self.assertEqual(self._pages(res.content), 1)
+
+    def test_bulk_letters_end_with_summary_page(self):
+        # One shortage student → their letter + the closing summary.
+        res = self._letter()
+        self.assertEqual(self._pages(res.content), 2)
+
     def test_photos_zip_names_and_missing_list(self):
         self.good.photo.save("x.jpg", ContentFile(b"\xff\xd8fakejpeg"))
         res = self.client.get(reverse("batch-report-photos",

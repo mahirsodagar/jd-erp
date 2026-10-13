@@ -124,9 +124,10 @@ class ShortageLetterView(APIView):
         p = request.query_params
         to_date = parse_date(p.get("to") or "") or None
         student = _int(p, "student")
-        rows = shortage_letter.shortage_rows(
+        from_date = parse_date(p.get("from") or "") or None
+        subjects, rows = shortage_letter.shortage_rows(
             batch=batch,
-            from_date=parse_date(p.get("from") or "") or None,
+            from_date=from_date,
             to_date=to_date,
             semester=_int(p, "semester"),
             student_id=student,
@@ -141,7 +142,8 @@ class ShortageLetterView(APIView):
         from datetime import date
         as_of = min(to_date, date.today()) if to_date else date.today()
         pdf = shortage_letter.render_shortage_letters(
-            batch=batch, rows=rows, as_of=as_of)
+            batch=batch, subjects=subjects, rows=rows, as_of=as_of,
+            from_date=from_date, summary=student is None)
         name = (f"shortage-of-attendance-{rows[0]['application_form_id'] or student}.pdf"
                 if student else f"shortage-of-attendance-{batch.pk}.pdf")
         resp = HttpResponse(pdf, content_type="application/pdf")

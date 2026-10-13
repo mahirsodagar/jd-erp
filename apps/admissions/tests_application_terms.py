@@ -197,8 +197,11 @@ class ConsentTests(_LeadFixture):
     def test_multipart_string_booleans_are_understood(self):
         """Multipart sends "false" as a *string*, which is truthy in
         Python — a naive read would record consent nobody gave."""
+        # Both consents are required, so the unticked one is reported
+        # missing — proof "false" wasn't read as a yes — and the ticked
+        # one is not.
         url = reverse("public-application", args=[self.lead.application_token])
-        self.client.post(url, {
+        r = self.client.post(url, {
             "student_name": "Asha Rao", "dob": "2006-01-01", "gender": "F",
             "student_mobile": "9000000000",
             "student_email": "asha@example.com",
@@ -206,9 +209,10 @@ class ConsentTests(_LeadFixture):
             "declaration_accepted": "false",
             "rules_accepted": "true",
         })
-        student = Student.objects.get(lead_origin=self.lead)
-        self.assertIsNone(student.declaration_accepted_at)
-        self.assertIsNotNone(student.rules_accepted_at)
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("Declaration", r.json()["detail"])
+        self.assertNotIn("Rules", r.json()["detail"])
+        self.assertFalse(Student.objects.filter(lead_origin=self.lead).exists())
 
 
 class PublicPrefillTermsTests(_LeadFixture):

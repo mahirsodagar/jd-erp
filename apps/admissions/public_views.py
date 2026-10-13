@@ -34,6 +34,102 @@ def _bool(value) -> bool:
     return str(value).strip().lower() in {"true", "1", "yes", "on"}
 
 
+# Every field the form marks required, with the label the student sees.
+# Mother's mobile/email are left out on purpose — plenty of applicants
+# have no second number or address to give.
+REQUIRED_FIELDS = {
+    "campus": "Campus",
+    "program": "Program",
+    "student_name": "Full name",
+    "dob": "Date of birth",
+    "gender": "Gender",
+    "category": "Category",
+    "study_medium": "Study medium",
+    "nationality": "Nationality",
+    "blood_group": "Blood group",
+    "father_name": "Father's name",
+    "mother_name": "Mother's name",
+    "father_mobile": "Father's mobile",
+    "father_email": "Father's email",
+    "father_occupation": "Father's occupation",
+    "mother_occupation": "Mother's occupation",
+    "student_mobile": "Mobile",
+    "student_email": "Email",
+    "current_address": "Current address",
+    "current_state": "Current state",
+    "current_city": "Current city",
+    "current_pincode": "Current PIN code",
+    "permanent_address": "Permanent address",
+    "permanent_state": "Permanent state",
+    "permanent_city": "Permanent city",
+    "permanent_pincode": "Permanent PIN code",
+}
+
+# Per education row. Certificate number is optional — not every
+# marksheet carries one.
+REQUIRED_DOC_FIELDS = {
+    "regno_yearpassing": "Reg/Year",
+    "school_college": "School / College",
+    "university_board": "Board / University",
+    "percent_obtained": "%",
+}
+
+
+def _missing_required(lead: Lead, payload: dict) -> list[str]:
+    """Labels of required fields the submit left blank.
+
+    Photo and certificate uploads count as present when an earlier
+    submit already stored them — the form can't re-send a file it never
+    downloaded, so a returning student isn't made to upload again.
+    """
+    def blank(v) -> bool:
+        return v is None or str(v).strip() == ""
+
+    missing = [
+        label for key, label in REQUIRED_FIELDS.items() if blank(payload.get(key))
+    ]
+    if payload.get("nationality") == "INDIAN" and blank(payload.get("aadhaar_number")):
+        missing.append("Aadhaar number")
+
+    existing = getattr(lead, "promoted_student", None)
+    if payload.get("_photo_file") is None and not (existing and existing.photo):
+        missing.append("Photo")
+
+    stored_files = set()
+    if existing is not None:
+        stored_files = set(
+            existing.documents.exclude(file="").exclude(file__isnull=True)
+            .values_list("header", flat=True)
+        )
+    # Files are index-aligned with the raw documents list, so keep the
+    # original index while skipping rows with no type picked.
+    docs = [
+        (i, d) for i, d in enumerate(payload["documents"])
+        if isinstance(d, dict) and d.get("header")
+    ]
+    if not docs:
+        missing.append("Education history (at least one row)")
+    files = payload["_document_files"]
+    for n, (i, d) in enumerate(docs, start=1):
+        row = f"Education row {n}"
+        for key, label in REQUIRED_DOC_FIELDS.items():
+            if blank(d.get(key)):
+                missing.append(f"{row}: {label}")
+        has_upload = i < len(files) and files[i] is not None
+        if not has_upload and d["header"] not in stored_files:
+            missing.append(f"{row}: Document")
+
+    if not payload.get("declaration_accepted") and not (
+        existing and existing.declaration_accepted_at
+    ):
+        missing.append("Declaration")
+    if not payload.get("rules_accepted") and not (
+        existing and existing.rules_accepted_at
+    ):
+        missing.append("Rules & Regulations")
+    return missing
+
+
 def _resolve_lead(token: str) -> Lead:
     try:
         lead = Lead.objects.select_related(
@@ -135,6 +231,15 @@ class PublicApplicationView(APIView):
                 for i in range(len(documents))
             ],
         }
+
+        # A closed form answers 403 below, whatever was left blank.
+        if not lead.application_locked_for_student:
+            missing = _missing_required(lead, payload)
+            if missing:
+                return Response(
+                    {"detail": "Please complete: " + ", ".join(missing) + "."},
+                    status=http.HTTP_400_BAD_REQUEST,
+                )
 
         try:
             student, creds = submit_application_from_lead(
@@ -319,12 +424,22 @@ def _prefill(lead: Lead) -> dict:
                 existing.rules_accepted_at.isoformat()
                 if existing.rules_accepted_at else None
             ),
-            "documents": list(
-                existing.documents.values(
-                    "id", "header", "regno_yearpassing", "school_college",
-                    "university_board", "certificate_no", "percent_obtained",
-                )
-            ),
+            # The form can't show the stored files themselves, only that
+            # they exist — enough to not demand a re-upload.
+            "has_photo": bool(existing.photo),
+            "documents": [
+                {
+                    "id": d.id,
+                    "header": d.header,
+                    "regno_yearpassing": d.regno_yearpassing,
+                    "school_college": d.school_college,
+                    "university_board": d.university_board,
+                    "certificate_no": d.certificate_no,
+                    "percent_obtained": d.percent_obtained,
+                    "has_file": bool(d.file),
+                }
+                for d in existing.documents.order_by("id")
+            ],
         }
 
     return {

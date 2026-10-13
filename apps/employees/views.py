@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import HasPerm
+from apps.common.csv_export import csv_response, fmt_date, wants_csv
 
 from .models import Department, Designation, Employee, EmployeeDocument, Holiday
 from .pagination import EmployeePagination
@@ -241,6 +242,62 @@ def _apply_ordering(qs, params):
     return qs.order_by(*(fields or ["-created_on"]), "-pk")
 
 
+def _employees_csv(qs):
+    """Every field HR keys in on the employee form, one row each.
+    Photos, QR codes and uploaded documents are files, so they're left
+    out."""
+    qs = qs.select_related(
+        "current_city", "current_state", "permanent_city", "permanent_state",
+        "reporting_manager_1", "reporting_manager_2",
+        "reporting_manager_3", "reporting_manager_4",
+        "user_account",
+    )
+
+    def name(e):
+        return e.full_name if e else ""
+
+    def row(i, e):
+        return [
+            i, e.emp_code, e.first_name, e.middle_name, e.family_name,
+            fmt_date(e.dob), e.get_gender_display(),
+            e.get_nationality_display(), e.blood_group, e.qualification,
+            e.get_employment_type_display(),
+            e.get_employment_category_display() if e.employment_category else "",
+            fmt_date(e.date_of_appointment), fmt_date(e.date_of_joining),
+            e.designation.name, e.department.name, e.campus.name,
+            e.institute.name,
+            name(e.reporting_manager_1), name(e.reporting_manager_2),
+            name(e.reporting_manager_3), name(e.reporting_manager_4),
+            e.mobile_primary, e.mobile_alternate,
+            e.email_primary, e.email_alternate,
+            e.current_address,
+            e.current_city.name if e.current_city else "",
+            e.current_state.name if e.current_state else "",
+            e.permanent_address,
+            e.permanent_city.name if e.permanent_city else "",
+            e.permanent_state.name if e.permanent_state else "",
+            e.get_status_display(), e.status_reason,
+            e.user_account.username if e.user_account else "",
+            fmt_date(e.created_on),
+        ]
+
+    return csv_response(
+        "Employee Master.csv",
+        ["Sl no", "Emp code", "First name", "Middle name", "Family name",
+         "DOB", "Gender", "Nationality", "Blood group", "Qualification",
+         "Employment type", "Employment category", "Date of appointment",
+         "Date of joining", "Designation", "Department", "Campus",
+         "Institute", "Reporting manager 1", "Reporting manager 2",
+         "Reporting manager 3", "Reporting manager 4", "Mobile",
+         "Alternate mobile", "Email", "Alternate email", "Current address",
+         "Current city", "Current state", "Permanent address",
+         "Permanent city", "Permanent state", "Status", "Status reason",
+         "Portal login", "Created on"],
+        (row(i, e) for i, e in
+         enumerate(qs.iterator(chunk_size=2000), start=1)),
+    )
+
+
 class EmployeeListCreateView(APIView):
     parser_classes = [JSONParser, FormParser, MultiPartParser]
     pagination_class = EmployeePagination
@@ -268,6 +325,11 @@ class EmployeeListCreateView(APIView):
         qs = qs.select_related(
             "designation", "department", "campus", "institute",
         )
+
+        # Same filters and campus scoping as the list, but every matching
+        # row rather than one page.
+        if wants_csv(request):
+            return _employees_csv(qs)
 
         paginator = EmployeePagination()
         page = paginator.paginate_queryset(qs, request, view=self)

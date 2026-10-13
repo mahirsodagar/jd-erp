@@ -13,7 +13,7 @@ the user is looking at, so the letter always matches the table.
 
 from datetime import date
 
-from fpdf import FPDF
+from fpdf import FPDF, FontFace
 
 from apps.admissions.models import Enrollment
 
@@ -38,14 +38,73 @@ def _address(s) -> str:
 
 
 def shortage_rows(*, batch, from_date=None, to_date=None, semester=None,
-                  student_id=None) -> list[dict]:
-    """Batch-wise rows flagged `shortage`, optionally one student."""
+                  student_id=None) -> tuple[list[dict], list[dict]]:
+    """(subjects, batch-wise rows flagged `shortage`), optionally one
+    student."""
     report = batch_wise_report(batch=batch, from_date=from_date,
                                to_date=to_date, semester=semester)
     rows = [r for r in report["rows"] if r["shortage"]]
     if student_id is not None:
         rows = [r for r in rows if r["student_id"] == student_id]
-    return rows
+    return report["subjects"], rows
+
+
+def _period(from_date: date | None, as_of: date) -> str:
+    till = as_of.strftime("%d-%m-%y")
+    if from_date:
+        return f"{from_date.strftime('%d-%m-%y')} to {till}"
+    return f"till {till}"
+
+
+def _student_report(pdf: FPDF, *, subjects: list[dict], row: dict,
+                    period: str):
+    """Subject-wise attendance of the letter's student, under the
+    signatures."""
+    pdf.ln(10)
+    pdf.set_font(FONT, "B", 12)
+    pdf.cell(0, 7, _safe(f"Attendance Report ({period})"),
+             new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(1)
+    pdf.set_font(FONT, "", 10)
+    with pdf.table(col_widths=(20, 80, 30, 20),
+                   text_align=("LEFT", "LEFT", "CENTER", "RIGHT"),
+                   line_height=6) as table:
+        table.row(["Code", "Subject", "Present / Total", "%"])
+        for subj in subjects:
+            c = row["cells"][subj["id"]]
+            if not c["total"]:
+                continue
+            table.row([_safe(subj["code"]), _safe(subj["name"]),
+                       f"{c['present']} / {c['total']}",
+                       f"{_pct_text(c['pct'])}%"])
+        table.row(["", "Overall",
+                   f"{row['total_present']} / {row['total_marked']}",
+                   f"{_pct_text(row['overall_pct'])}%"],
+                  style=FontFace(emphasis="BOLD"))
+    pdf.set_font(FONT, "", 12)
+
+
+def _summary(pdf: FPDF, *, batch, rows: list[dict], period: str):
+    """Closing page of the bulk PDF: every student below 75%."""
+    pdf.add_page()
+    pdf.set_font(FONT, "B", 14)
+    pdf.cell(0, 8, "Attendance Report - Students below 75%", align="C",
+             new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font(FONT, "", 11)
+    pdf.cell(0, 7, _safe(f"Batch: {batch.name}    Period: {period}"),
+             align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+    pdf.set_font(FONT, "", 10)
+    with pdf.table(col_widths=(10, 30, 60, 30, 20),
+                   text_align=("CENTER", "LEFT", "LEFT", "CENTER", "RIGHT"),
+                   line_height=6) as table:
+        table.row(["#", "App ID", "Student", "Present / Total", "Overall %"])
+        for i, r in enumerate(sorted(rows, key=lambda r: r["overall_pct"]),
+                              start=1):
+            table.row([str(i), _safe(r["application_form_id"] or "-"),
+                       _safe(r["name"]),
+                       f"{r['total_present']} / {r['total_marked']}",
+                       f"{_pct_text(r['overall_pct'])}%"])
 
 
 def _letter(pdf: FPDF, *, enrollment, pct: float, as_of: date):
@@ -103,10 +162,15 @@ def _letter(pdf: FPDF, *, enrollment, pct: float, as_of: date):
              new_x="LMARGIN", new_y="NEXT")
 
 
-def render_shortage_letters(*, batch, rows: list[dict],
-                            as_of: date | None = None) -> bytes:
-    """One page per row (rows from `shortage_rows`)."""
+def render_shortage_letters(*, batch, subjects: list[dict], rows: list[dict],
+                            as_of: date | None = None, from_date=None,
+                            summary: bool = False) -> bytes:
+    """One letter per row (subjects/rows from `shortage_rows`), each
+    ending with that student's subject-wise attendance. `summary` adds a
+    closing page listing every row — only for the bulk PDF, so a single
+    parent's letter never shows other students."""
     as_of = as_of or date.today()
+    period = _period(from_date, as_of)
     enrollments = {
         e.student_id: e
         for e in Enrollment.objects.filter(
@@ -125,4 +189,7 @@ def render_shortage_letters(*, batch, rows: list[dict],
         e = enrollments.get(r["student_id"])
         if e is not None:
             _letter(pdf, enrollment=e, pct=r["overall_pct"], as_of=as_of)
+            _student_report(pdf, subjects=subjects, row=r, period=period)
+    if summary:
+        _summary(pdf, batch=batch, rows=rows, period=period)
     return bytes(pdf.output())

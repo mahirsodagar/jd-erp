@@ -5,6 +5,7 @@ arrives after the rest of the form) but must be stored unformatted, so a
 search matches however the student typed it.
 """
 
+import tempfile
 import uuid
 
 from django.core.exceptions import ValidationError
@@ -65,11 +66,24 @@ class AadhaarTests(TestCase):
 
     def test_spacing_is_stripped_by_the_public_endpoint(self):
         """Students paste it off the card as '1234 5678 9012'."""
+        from django.test import override_settings
+
+        from apps.master.models import City, State
+
+        from .tests_required_fields import complete_payload
+
         lead = self._lead()
-        r = self.client.post(
-            f"/api/public/application/{lead.application_token}/",
-            data={**self._payload(), "aadhaar_number": "2345 6789-0123"},
-        )
+        state = State.objects.create(name="Karnataka", code="KA")
+        city = City.objects.create(name="Bengaluru", state=state)
+        with tempfile.TemporaryDirectory() as media, \
+                override_settings(MEDIA_ROOT=media):
+            r = self.client.post(
+                f"/api/public/application/{lead.application_token}/",
+                data=complete_payload(
+                    campus=self.campus, program=self.program, city=city,
+                    aadhaar_number="2345 6789-0123",
+                ),
+            )
         self.assertEqual(r.status_code, 201, r.content)
         self.assertEqual(
             Student.objects.get(lead_origin=lead).aadhaar_number,
