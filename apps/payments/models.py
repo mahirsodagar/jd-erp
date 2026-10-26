@@ -1,6 +1,6 @@
 """Online payment requests, orders and webhook events.
 
-Built for HDFC SmartGateway; Razorpay Payment Links (JDSD's application
+Built for HDFC SmartGateway; Razorpay Payment Links (JDIFT's registration
 fee) ride the same tables — `PaymentRequest.gateway` says which, and
 `routing.py` decides. Everything below about sessions expiring applies
 to both.

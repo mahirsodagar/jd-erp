@@ -189,7 +189,9 @@ class PayReturnView(APIView):
         if is_razorpay:
             # Razorpay's callback: razorpay_payment_link_status is "paid"
             # on success; mapped onto our vocabulary for the fallback below.
-            signed_ok = razorpay.verify_callback_signature(params)
+            signed_ok = razorpay.verify_callback_signature(
+                params, payment_request.account,
+            )
             signed_status = razorpay.LINK_STATUS_MAP.get(
                 str(params.get("razorpay_payment_link_status") or "").lower(), "",
             )
@@ -216,7 +218,7 @@ class PayReturnView(APIView):
                 "payments: return_url signature did NOT validate for %s "
                 "(order %s). Check %s.",
                 token, order.order_id,
-                "RAZORPAY_KEY_SECRET" if is_razorpay
+                f"RAZORPAY_{payment_request.account}_KEY_SECRET" if is_razorpay
                 else "SMARTGATEWAY_RESPONSE_KEY",
             )
 
@@ -399,19 +401,25 @@ class SmartGatewayStatusView(APIView):
             ],
             "routes": routing.routes(),
             "razorpay": {
-                "enabled": razorpay.is_enabled(),
-                "misconfigured": bool(
-                    getattr(settings, "RAZORPAY_ENABLED", False)
-                    and razorpay.missing_settings(),
-                ),
-                "missing_settings": razorpay.missing_settings(),
-                "mode": (
-                    ("test" if razorpay.is_test_mode() else "live")
-                    if razorpay.is_enabled() else None
-                ),
-                "webhook_configured": bool(
-                    getattr(settings, "RAZORPAY_WEBHOOK_SECRET", ""),
-                ),
+                "enabled": bool(getattr(settings, "RAZORPAY_ENABLED", False)),
+                # Same shape as SmartGateway's rows: each Razorpay account
+                # is its own merchant with its own keys and webhook secret.
+                "accounts": [
+                    {
+                        "key": key,
+                        "label": routing.account_label(key),
+                        "enabled": razorpay.is_enabled(key),
+                        "missing_settings": razorpay.missing_settings(key),
+                        "mode": (
+                            ("test" if razorpay.is_test_mode(key) else "live")
+                            if razorpay.is_enabled(key) else None
+                        ),
+                        "webhook_configured": bool(
+                            razorpay.account_config(key).webhook_secret,
+                        ),
+                    }
+                    for key in razorpay.configured_accounts()
+                ],
             },
         })
 
@@ -435,7 +443,7 @@ class RazorpayWebhookView(APIView):
         ):
             logger.warning(
                 "payments: rejected Razorpay webhook with a bad/missing "
-                "signature (or RAZORPAY_WEBHOOK_SECRET unset).",
+                "signature (or no RAZORPAY_*_WEBHOOK_SECRET set).",
             )
             return Response(
                 {"detail": "Invalid signature."},

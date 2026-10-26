@@ -41,12 +41,14 @@ re-rendering is idempotent because the source data is in the DB.
 from __future__ import annotations
 
 from decimal import Decimal
+from pathlib import Path
 
 from django.conf import settings
 from django.core.mail import EmailMessage
 from django.db.models import Sum
 from django.utils import timezone
 from fpdf import FPDF
+from PIL import Image
 
 from apps.common.pdf_theme import (
     BODY_W,
@@ -72,6 +74,15 @@ _MIN_BALANCE_ROWS = 5
 #: Label column width; the value column takes the rest of the body.
 _LABEL_W = 78.0
 _ROW_H = 7.0
+
+#: Masthead logo per institute code. The copies bundled with the code
+#: (identical to media/institute/logos/) — media/ isn't deployed, so an
+#: upload missing on a server must not drop the logo to plain text.
+_LOGO_DIR = Path(__file__).resolve().parents[1] / "master" / "seed_assets"
+_HEADER_LOGOS = {
+    "JDIFT": _LOGO_DIR / "jdift-logo.png",
+    "JDSD": _LOGO_DIR / "jdsd-logo.png",
+}
 
 
 def _amount(v) -> str:
@@ -219,10 +230,25 @@ def _draw_header(pdf: FPDF, institute) -> None:
     """Logo left, magenta UNDERTAKING banner right — the printed form's
     masthead."""
     top = 12.0
-    logo_bottom = draw_logo(pdf, institute, x=MARGIN, y=top, height=22,
-                            fallback_width=95)
-
     band_w, band_h = 70.0, 26.0
+
+    # The institute's own logo file, fitted to the banner's height and
+    # kept clear of it; anything else falls back to the uploaded logo.
+    logo = _HEADER_LOGOS.get(getattr(institute, "code", ""))
+    if logo is not None and logo.is_file():
+        # Size from the image's own ratio (not keep_aspect_ratio, which
+        # centres it in the box) so it sits flush with the left margin.
+        with Image.open(logo) as im:
+            ratio = im.width / im.height
+        max_w = PAGE_W - 2 * MARGIN - band_w - 8
+        h = min(band_h, max_w / ratio)
+        pdf.image(str(logo), x=MARGIN, y=top + (band_h - h) / 2,
+                  w=h * ratio, h=h)
+        logo_bottom = top + band_h
+    else:
+        logo_bottom = draw_logo(pdf, institute, x=MARGIN, y=top, height=22,
+                                fallback_width=95)
+
     band_x = PAGE_W - MARGIN - band_w
     pdf.set_fill_color(*BRAND_MAGENTA)
     pdf.rect(band_x, top, band_w, band_h, style="F")

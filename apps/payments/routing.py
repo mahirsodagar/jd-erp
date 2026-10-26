@@ -1,22 +1,22 @@
 """Which gateway and which bank account a fee is paid into.
 
-JD collects into three HDFC current accounts, owned by two legal
-entities, and the client's rule for choosing between them (2026-09-11):
+JD collects into three bank accounts, owned by two legal entities, and
+the client's rule for choosing between them (2026-10-26, narrowing the
+2026-10-14 rule, which also sent JDIFT's BLR/GOA application fee and
+installments to Razorpay on the JDIFT main account):
 
 1. **JDSD** (B.Sc / M.Sc / B.Des / M.Des) — JD Educational Trust,
-   A/c 50100515602102: application fee, registration fee and every
-   installment. The application fee alone goes through **Razorpay**; the
-   rest through SmartGateway.
-2. **JDIFT** (all diplomas)
-   a. Registration fee at *every* centre — JD Institute of Fashion
-      Technology ROYALTY, A/c 50200123417910.
-   b. Application fee and installments at Bangalore and Goa — JD Institute
-      of Fashion Technology, A/c 59245987654321.
+   A/c 50100515602102, through **HDFC SmartGateway**: application fee,
+   registration fee and every installment.
+2. **JDIFT** (all diplomas) — only the registration fee (₹10,000 + 18%
+   GST) is online, through **Razorpay**, at *every* centre — JD Institute
+   of Fashion Technology ROYALTY, A/c 50200123417910.
 
-Anything the table does not cover (a JDIFT application fee at a centre
-other than BLR/GOA, a program with no institute) resolves to **no
-route**, which means "no online payment": the caller falls back to the
-manual fee link. That is on hold on purpose, not an oversight.
+Anything the table does not cover (every other JDIFT fee, a program with
+no institute) resolves to **no route**, which means "no online payment":
+the caller falls back to the manual fee link. That is on hold on purpose,
+not an oversight. A zero registration fee never gets this far — no
+installment is laid down for it (`fees.services.registration`).
 
 Institute is read off the *program* — Program.institute is the only
 place the ERP records it — never off the campus or the degree name.
@@ -46,7 +46,7 @@ FEE_REGISTRATION = "REGISTRATION"
 FEE_INSTALLMENT = "INSTALLMENT"
 
 #: Settlement accounts. `bank_account` is for humans reading receipts and
-#: the admin — the bank decides where money settles from the merchant /
+#: the admin — the gateway decides where money settles from the merchant /
 #: TID configuration, not from anything we send.
 ACCOUNTS = {
     "JDSD_TRUST": {
@@ -68,21 +68,13 @@ ACCOUNTS = {
 #: per environment with settings.PAYMENT_ROUTES.
 DEFAULT_ROUTES = [
     {
-        "institute": "JDSD", "fee": FEE_APPLICATION,
-        "gateway": GATEWAY_RAZORPAY, "account": "JDSD_TRUST",
-    },
-    {
-        "institute": "JDSD", "fee": [FEE_REGISTRATION, FEE_INSTALLMENT],
+        "institute": "JDSD",
+        "fee": [FEE_APPLICATION, FEE_REGISTRATION, FEE_INSTALLMENT],
         "gateway": GATEWAY_SMARTGATEWAY, "account": "JDSD_TRUST",
     },
     {
         "institute": "JDIFT", "fee": FEE_REGISTRATION,
-        "gateway": GATEWAY_SMARTGATEWAY, "account": "JDIFT_ROYALTY",
-    },
-    {
-        "institute": "JDIFT", "campus": ["BLR", "GOA"],
-        "fee": [FEE_APPLICATION, FEE_INSTALLMENT],
-        "gateway": GATEWAY_SMARTGATEWAY, "account": "JDIFT_MAIN",
+        "gateway": GATEWAY_RAZORPAY, "account": "JDIFT_ROYALTY",
     },
 ]
 

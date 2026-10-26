@@ -161,7 +161,7 @@ class NoOnlineRoute(PaymentGatewayError):
 def gateway_usable(gateway: str, account: str = "") -> bool:
     """Whether a request on this gateway/account can be paid right now."""
     if gateway == routing.GATEWAY_RAZORPAY:
-        return razorpay.is_enabled()
+        return razorpay.is_enabled(account)
     if gateway == routing.GATEWAY_SMARTGATEWAY:
         return is_enabled(account)
     return False
@@ -169,7 +169,7 @@ def gateway_usable(gateway: str, account: str = "") -> bool:
 
 def gateway_missing_settings(gateway: str, account: str = "") -> list[str]:
     if gateway == routing.GATEWAY_RAZORPAY:
-        return razorpay.missing_settings()
+        return razorpay.missing_settings(account)
     return missing_settings(account)
 
 
@@ -508,7 +508,9 @@ def _retire_razorpay_link(order: PaymentOrder) -> bool:
         return True
     if not order.is_terminal:
         try:
-            body = razorpay.cancel_payment_link(order.sg_order_ref)
+            body = razorpay.cancel_payment_link(
+                order.sg_order_ref, account=order.request.account,
+            )
             apply_order_body(order, razorpay.normalise_link(body))
         except PaymentGatewayError as e:
             logger.warning(
@@ -540,6 +542,7 @@ def _mint_razorpay_link(
                 "customer_id": payer["customer_id"],
                 "request": payment_request.pk,
             },
+            account=payment_request.account,
         )
     except PaymentGatewayError as e:
         order.status = PaymentOrder.Status.CANCELLED
@@ -829,7 +832,10 @@ def reconcile_order(order: PaymentOrder) -> PaymentOrder:
             raise razorpay.RazorpayError(
                 f"Order {order.order_id} never got a Razorpay link id.",
             )
-        link = razorpay.fetch_payment_link(order.sg_order_ref)
+        # The merchant that minted the link; any other's keys 404 it.
+        link = razorpay.fetch_payment_link(
+            order.sg_order_ref, account=order.request.account,
+        )
         return apply_order_body(order, razorpay.normalise_link(link))
 
     body = fetch_order(

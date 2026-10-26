@@ -1,4 +1,4 @@
-"""Razorpay Payment Links client — JDSD's application fee.
+"""Razorpay Payment Links client — JDIFT's registration and diploma fees.
 
 Why Payment Links rather than Standard Checkout: our fee link goes out by
 SMS and is opened days later on a phone, with no page of ours to host
@@ -37,6 +37,7 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass
 from datetime import datetime, timezone as dt_timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
@@ -86,24 +87,92 @@ REQUIRED_SETTINGS = {
     ),
 }
 
+#: Per-merchant fields. A Razorpay account settles into exactly one bank
+#: account, so each settlement account (see `routing.ACCOUNTS`) that
+#: takes Razorpay needs its own merchant and keys, set in
+#: settings.RAZORPAY_ACCOUNTS[key]. A blank one falls back to the shared
+#: RAZORPAY_<FIELD> — handy for a single rzp_test_ key in development,
+#: which is why an account must also be marked live (see account_config).
+ACCOUNT_FIELDS = ("key_id", "key_secret", "webhook_secret")
 
-def missing_settings() -> list[str]:
-    return [n for n in REQUIRED_SETTINGS if not getattr(settings, n, "")]
+
+@dataclass(frozen=True)
+class AccountConfig:
+    """The effective keys for one settlement account.
+
+    `account == ""` is the legacy single-merchant config, which requests
+    raised before per-account keys existed still use.
+    """
+
+    account: str
+    live: bool
+    key_id: str = ""
+    key_secret: str = ""
+    webhook_secret: str = ""
+
+    @property
+    def is_test_mode(self) -> bool:
+        return self.key_id.startswith("rzp_test_")
 
 
-def is_enabled() -> bool:
-    """Switched on (`RAZORPAY_ENABLED`) and fully configured."""
+def _account_overrides(account: str) -> dict:
+    return (getattr(settings, "RAZORPAY_ACCOUNTS", {}) or {}).get(account) or {}
+
+
+def account_config(account: str = "") -> AccountConfig:
+    overrides = _account_overrides(account) if account else {}
+    values = {
+        field: (
+            overrides.get(field)
+            or getattr(settings, f"RAZORPAY_{field.upper()}", "")
+            or ""
+        )
+        for field in ACCOUNT_FIELDS
+    }
+    # Same rule as SmartGateway: falling back to the shared keys must
+    # never, by itself, start settling Royalty fees into whichever bank
+    # account the shared merchant pays out to.
+    live = True if not account else bool(overrides.get("live"))
+    return AccountConfig(account=account, live=live, **values)
+
+
+def configured_accounts() -> list[str]:
+    """Account keys that have a RAZORPAY_ACCOUNTS entry."""
+    return list((getattr(settings, "RAZORPAY_ACCOUNTS", {}) or {}).keys())
+
+
+def missing_settings(account: str = "") -> list[str]:
+    cfg = account_config(account)
+    missing = []
+    for name in REQUIRED_SETTINGS:
+        if name == "SMARTGATEWAY_PUBLIC_BASE_URL":
+            if not getattr(settings, name, ""):
+                missing.append(name)
+            continue
+        field = name.removeprefix("RAZORPAY_").lower()
+        if not getattr(cfg, field):
+            missing.append(
+                f"RAZORPAY_{account}_{field.upper()}" if account else name,
+            )
+    if account and not cfg.live:
+        missing.append(f"RAZORPAY_{account}_LIVE")
+    return missing
+
+
+def is_enabled(account: str = "") -> bool:
+    """Switched on (`RAZORPAY_ENABLED`) and fully configured — for that
+    account, which must also be marked live."""
     if not getattr(settings, "RAZORPAY_ENABLED", False):
         return False
-    return not missing_settings()
+    return not missing_settings(account)
 
 
-def is_test_mode() -> bool:
-    return str(getattr(settings, "RAZORPAY_KEY_ID", "")).startswith("rzp_test_")
+def is_test_mode(account: str = "") -> bool:
+    return account_config(account).is_test_mode
 
 
-def _auth_header() -> str:
-    raw = f"{settings.RAZORPAY_KEY_ID}:{settings.RAZORPAY_KEY_SECRET}"
+def _auth_header(cfg: AccountConfig) -> str:
+    raw = f"{cfg.key_id}:{cfg.key_secret}"
     return "Basic " + base64.b64encode(raw.encode("utf-8")).decode("ascii")
 
 
@@ -144,10 +213,14 @@ def _iso(ts) -> str:
 # HTTP
 # ---------------------------------------------------------------------
 
-def _request(method: str, path: str, *, payload: dict | None = None) -> dict:
+def _request(
+    method: str, path: str, *, account: str = "", payload: dict | None = None,
+) -> dict:
+    """Call the API as `account`'s merchant — a link minted by one
+    merchant is a 404 to every other."""
     url = f"{BASE_URL}/{path.lstrip('/')}"
     headers = {
-        "Authorization": _auth_header(),
+        "Authorization": _auth_header(account_config(account)),
         "Accept": "application/json",
         "User-Agent": _USER_AGENT,
     }
@@ -198,6 +271,7 @@ def create_payment_link(
     expire_by: datetime | None = None,
     notes: dict | None = None,
     currency: str = "INR",
+    account: str = "",
 ) -> dict:
     """Mint a hosted payment link; `short_url` is where the payer goes.
 
@@ -234,7 +308,7 @@ def create_payment_link(
         payload["expire_by"] = int(expire_by.timestamp())
 
     try:
-        return _request("POST", "/payment_links", payload=payload)
+        return _request("POST", "/payment_links", account=account, payload=payload)
     except RazorpayError as e:
         # Razorpay validates prefill hard ("Recurring digits in customer
         # contact are disallowed" for 9999999999, malformed emails…) and
@@ -242,25 +316,29 @@ def create_payment_link(
         # bad one must not cost the payment: retry once without it.
         if e.status == 400 and "customer" in payload and "customer" in str(e).lower():
             payload.pop("customer")
-            return _request("POST", "/payment_links", payload=payload)
+            return _request(
+                "POST", "/payment_links", account=account, payload=payload,
+            )
         raise
 
 
-def fetch_payment_link(link_id: str) -> dict:
+def fetch_payment_link(link_id: str, account: str = "") -> dict:
     """GET /v1/payment_links/{id} — the authoritative status."""
     if not link_id:
         raise RazorpayError("No Razorpay payment link id to fetch.")
-    return _request("GET", f"/payment_links/{urllib.parse.quote(link_id)}")
+    return _request(
+        "GET", f"/payment_links/{urllib.parse.quote(link_id)}", account=account,
+    )
 
 
-def cancel_payment_link(link_id: str) -> dict:
+def cancel_payment_link(link_id: str, account: str = "") -> dict:
     """POST /v1/payment_links/{id}/cancel — so a superseded link can't be
     paid. Razorpay refuses this for a link already paid or expired."""
     if not link_id:
         raise RazorpayError("No Razorpay payment link id to cancel.")
     return _request(
         "POST", f"/payment_links/{urllib.parse.quote(link_id)}/cancel",
-        payload={},
+        account=account, payload={},
     )
 
 
@@ -301,15 +379,17 @@ def _hmac_hex(secret: str, message: bytes) -> str:
     return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 
-def verify_callback_signature(params: dict) -> bool:
+def verify_callback_signature(params: dict, account: str = "") -> bool:
     """Validate the params Razorpay appends to callback_url.
 
         signature = HMAC_SHA256(
             link_id|reference_id|link_status|payment_id, key_secret)
 
-    Fails closed when anything is missing.
+    Signed with the key secret of the merchant that minted the link, so
+    `account` must be the request's own. Fails closed when anything is
+    missing.
     """
-    secret = getattr(settings, "RAZORPAY_KEY_SECRET", "")
+    secret = account_config(account).key_secret
     received = params.get("razorpay_signature") or ""
     parts = [
         params.get("razorpay_payment_link_id"),
@@ -328,8 +408,25 @@ def verify_webhook_signature(raw_body: bytes, signature: str) -> bool:
 
     Computed over the exact bytes received — re-serialising the JSON
     would change whitespace and never match.
+
+    Each merchant's dashboard has its own webhook secret and all of them
+    post to the same URL, so a body signed by any configured account is
+    accepted. That is safe for the same reason as SmartGateway's webhook:
+    it only triggers a re-read of the link, made with the order's own
+    account keys.
     """
-    secret = getattr(settings, "RAZORPAY_WEBHOOK_SECRET", "")
-    if not secret or not signature:
+    if not signature:
         return False
-    return hmac.compare_digest(_hmac_hex(secret, raw_body), signature)
+    secrets = {
+        cfg.webhook_secret
+        for cfg in (
+            account_config(""),
+            *(account_config(a) for a in configured_accounts()),
+        )
+        if cfg.webhook_secret
+    }
+    ok = False
+    for secret in secrets:
+        # Every secret is tried, so timing doesn't reveal which matched.
+        ok = hmac.compare_digest(_hmac_hex(secret, raw_body), signature) or ok
+    return ok

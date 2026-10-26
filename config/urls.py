@@ -36,7 +36,7 @@ urlpatterns = [
     # credentials configured in the SmartGateway dashboard.
     path("api/public/smartgateway/webhook/",
          SmartGatewayWebhookView.as_view(), name="smartgateway-webhook"),
-    # Razorpay webhook (JDSD application fee). No JWT — authenticated by
+    # Razorpay webhook (JDIFT registration fee). No JWT — authenticated by
     # the X-Razorpay-Signature HMAC over the body.
     path("api/public/razorpay/webhook/",
          RazorpayWebhookView.as_view(), name="razorpay-webhook"),

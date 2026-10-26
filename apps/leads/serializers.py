@@ -170,6 +170,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     )
     utm = LeadUtmSerializer(read_only=True)
     application_fee_due = serializers.SerializerMethodField()
+    fee_link_url = serializers.SerializerMethodField()
 
     def get_application_fee_due(self, obj) -> str:
         """What master data says this lead owes — the counsellor's screen
@@ -190,6 +191,31 @@ class LeadDetailSerializer(serializers.ModelSerializer):
         fee = fees.get((obj.campus_id, obj.program_id))
         # A template charging zero is "no fee to quote", not "₹0 due".
         return str(fee) if fee else ""
+
+    def get_fee_link_url(self, obj) -> str:
+        """The fee link the counsellor would send, for the lead page to
+        preview — mirrors `send_links._fee_link_url` without raising a
+        new request.
+
+        The lead's open per-lead pay link (SmartGateway / Razorpay) when
+        one exists, else the static per-institute short URL for the
+        lead's program. Blank in lists: it costs queries per row and the
+        list screen never shows it.
+        """
+        if isinstance(self.parent, serializers.ListSerializer):
+            return ""
+        from django.conf import settings
+
+        from apps.payments.services import (
+            open_application_fee_request, pay_url_for,
+        )
+
+        request = open_application_fee_request(obj)
+        if request:
+            return pay_url_for(request)
+        program = obj.program if obj.program_id else None
+        institute = getattr(getattr(program, "institute", None), "code", "")
+        return (getattr(settings, "FEE_LINK_URLS", {}) or {}).get(institute, "")
 
     class Meta:
         model = Lead
@@ -215,7 +241,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
             "application_fee_recorded_by",
             "application_fee_recorded_by_name",
             "application_fee_due",
-            "fee_link_sent_at",
+            "fee_link_sent_at", "fee_link_url",
             "created_by", "created_by_name",
             "created_at", "updated_at",
             "utm",

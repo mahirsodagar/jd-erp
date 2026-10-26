@@ -1,4 +1,4 @@
-"""Fee → gateway → settlement-account routing (client rule of 2026-09-11).
+"""Fee → gateway → settlement-account routing (client rule of 2026-10-14).
 
 The expensive mistakes here are silent ones: a JDSD fee settling into
 the JDIFT account, an in-flight order checked against the wrong
@@ -22,6 +22,7 @@ from apps.master.models import (
     AcademicYear, Batch, Campus, Institute, LeadSource, Program, Semester,
 )
 from apps.payments import gateway, routing, services
+from apps.payments.errors import PaymentGatewayError
 from apps.payments.models import PaymentOrder, PaymentRequest
 from apps.payments.routing import (
     FEE_APPLICATION, FEE_INSTALLMENT, FEE_REGISTRATION, Route,
@@ -29,7 +30,7 @@ from apps.payments.routing import (
 
 ACCOUNT_KEYS = ("JDSD_TRUST", "JDIFT_MAIN", "JDIFT_ROYALTY")
 
-SG_ON = dict(
+ROUTING_ON = dict(
     SMARTGATEWAY_ENABLED=True,
     SMARTGATEWAY_API_KEY="shared_key",
     SMARTGATEWAY_MERCHANT_ID="shared_mid",
@@ -40,9 +41,15 @@ SG_ON = dict(
     SMARTGATEWAY_PUBLIC_BASE_URL="https://api.jd.test",
     SMARTGATEWAY_AUTOSEND_APPLICATION_LINK=False,
     SMARTGATEWAY_ACCOUNTS={a: {"live": True} for a in ACCOUNT_KEYS},
-    # Pinned off so a developer's .env can't change what these assert;
-    # tests_razorpay.py covers the switched-on path.
-    RAZORPAY_ENABLED=False,
+    # Pinned so a developer's .env can't change what these assert; the
+    # Razorpay mechanics themselves are covered in tests_razorpay.py.
+    RAZORPAY_ENABLED=True,
+    RAZORPAY_KEY_ID="rzp_test_shared",
+    RAZORPAY_KEY_SECRET="rzp_shared_secret",
+    RAZORPAY_WEBHOOK_SECRET="",
+    RAZORPAY_ACCOUNTS={
+        a: {"live": True} for a in ("JDIFT_ROYALTY", "JDIFT_MAIN")
+    },
 )
 
 
@@ -50,17 +57,15 @@ def _sg(account):
     return Route(routing.GATEWAY_SMARTGATEWAY, account)
 
 
+def _rzp(account):
+    return Route(routing.GATEWAY_RAZORPAY, account)
+
+
 class RouteTableTests(TestCase):
     """The client's table, rule by rule."""
 
-    def test_jdsd_application_fee_goes_to_razorpay_trust(self):
-        self.assertEqual(
-            routing.resolve(fee=FEE_APPLICATION, institute="JDSD", campus="BLR"),
-            Route(routing.GATEWAY_RAZORPAY, "JDSD_TRUST"),
-        )
-
-    def test_jdsd_registration_and_installments_go_to_trust_at_any_centre(self):
-        for fee in (FEE_REGISTRATION, FEE_INSTALLMENT):
+    def test_every_jdsd_fee_goes_to_smartgateway_trust_at_any_centre(self):
+        for fee in (FEE_APPLICATION, FEE_REGISTRATION, FEE_INSTALLMENT):
             for campus in ("BLR", "GOA", "PUNE", ""):
                 self.assertEqual(
                     routing.resolve(fee=fee, institute="JDSD", campus=campus),
@@ -73,22 +78,16 @@ class RouteTableTests(TestCase):
                 routing.resolve(
                     fee=FEE_REGISTRATION, institute="JDIFT", campus=campus,
                 ),
-                _sg("JDIFT_ROYALTY"), campus,
+                _rzp("JDIFT_ROYALTY"), campus,
             )
 
-    def test_jdift_app_fee_and_installments_at_blr_goa_go_to_main(self):
+    def test_jdift_app_fee_and_installments_are_on_hold_at_every_centre(self):
         for fee in (FEE_APPLICATION, FEE_INSTALLMENT):
-            for campus in ("BLR", "GOA", "goa"):
-                self.assertEqual(
+            for campus in ("BLR", "GOA", "PUNE", ""):
+                self.assertIsNone(
                     routing.resolve(fee=fee, institute="JDIFT", campus=campus),
-                    _sg("JDIFT_MAIN"), (fee, campus),
+                    (fee, campus),
                 )
-
-    def test_jdift_app_fee_and_installments_elsewhere_are_on_hold(self):
-        for fee in (FEE_APPLICATION, FEE_INSTALLMENT):
-            self.assertIsNone(
-                routing.resolve(fee=fee, institute="JDIFT", campus="PUNE"),
-            )
 
     def test_program_without_institute_has_no_route(self):
         self.assertIsNone(
@@ -105,7 +104,7 @@ class RouteTableTests(TestCase):
         )
 
 
-@override_settings(**SG_ON)
+@override_settings(**ROUTING_ON)
 class MerchantConfigTests(TestCase):
 
     def test_blank_account_fields_fall_back_to_shared(self):
@@ -218,23 +217,33 @@ class _Fixture(TestCase):
         )
 
 
-@override_settings(**SG_ON)
+@override_settings(**ROUTING_ON)
 class ApplicationFeeRoutingTests(_Fixture):
 
-    def test_jdift_blr_lead_request_is_frozen_to_main(self):
-        pr = services.application_fee_request_for(
-            self._lead(self.diploma, self.blr), amount="500",
-            institute_key="JDIFT",
-        )
-        self.assertEqual((pr.gateway, pr.account), ("smartgateway", "JDIFT_MAIN"))
+    def test_jdift_blr_lead_gets_the_manual_link(self):
+        from apps.leads.send_links import send_fee_link
 
-    def test_jdsd_lead_never_gets_a_smartgateway_link(self):
-        """JDSD's application fee belongs to Razorpay; with Razorpay off
+        result = send_fee_link(
+            lead=self._lead(self.diploma, self.blr), institute_key="JDIFT",
+        )
+        self.assertEqual(result["gateway"], "manual")
+        self.assertEqual(PaymentRequest.objects.count(), 0)
+
+    def test_jdsd_lead_request_is_frozen_to_smartgateway_trust(self):
+        pr = services.application_fee_request_for(
+            self._lead(self.bdes, self.blr), amount="500",
+            institute_key="JDSD",
+        )
+        self.assertEqual((pr.gateway, pr.account), ("smartgateway", "JDSD_TRUST"))
+
+    @override_settings(RAZORPAY_ENABLED=False)
+    def test_jdift_lead_never_gets_a_smartgateway_link(self):
+        """JDIFT's application fee belongs to Razorpay; with Razorpay off
         it must fall back to the manual link, not onto SmartGateway."""
         from apps.leads.send_links import send_fee_link
 
         result = send_fee_link(
-            lead=self._lead(self.bdes, self.blr), institute_key="JDSD",
+            lead=self._lead(self.diploma, self.blr), institute_key="JDIFT",
         )
         self.assertEqual(result["gateway"], "manual")
         self.assertEqual(PaymentRequest.objects.count(), 0)
@@ -253,7 +262,7 @@ class ApplicationFeeRoutingTests(_Fixture):
         self.assertEqual(
             routing.route_for_lead(lead, "JDSD").account, "JDSD_TRUST",
         )
-        self.assertEqual(routing.route_for_lead(lead).account, "JDIFT_MAIN")
+        self.assertIsNone(routing.route_for_lead(lead))
 
     @override_settings(SMARTGATEWAY_ACCOUNTS={})
     def test_account_not_live_falls_back_loudly(self):
@@ -261,40 +270,40 @@ class ApplicationFeeRoutingTests(_Fixture):
 
         with self.assertLogs("apps.leads", level="ERROR") as logs:
             result = send_fee_link(
-                lead=self._lead(self.diploma, self.blr), institute_key="JDIFT",
+                lead=self._lead(self.bdes, self.blr), institute_key="JDSD",
             )
         self.assertEqual(result["gateway"], "manual")
-        self.assertIn("SMARTGATEWAY_JDIFT_MAIN_LIVE", "\n".join(logs.output))
+        self.assertIn("SMARTGATEWAY_JDSD_TRUST_LIVE", "\n".join(logs.output))
 
     def test_open_request_on_another_account_is_not_reused(self):
-        lead = self._lead(self.diploma, self.blr)
+        lead = self._lead(self.bdes, self.blr)
         legacy = PaymentRequest.objects.create(
             lead=lead, amount=Decimal("500"), account="",
         )
         pr = services.application_fee_request_for(
-            lead, amount="500", institute_key="JDIFT",
+            lead, amount="500", institute_key="JDSD",
         )
         self.assertNotEqual(pr.pk, legacy.pk)
-        self.assertEqual(pr.account, "JDIFT_MAIN")
+        self.assertEqual(pr.account, "JDSD_TRUST")
 
     def test_order_and_status_check_use_the_requests_account(self):
         pr = services.application_fee_request_for(
-            self._lead(self.diploma, self.blr), amount="500",
-            institute_key="JDIFT",
+            self._lead(self.bdes, self.blr), amount="500",
+            institute_key="JDSD",
         )
         session = {"id": "ordeh_1", "status": "NEW", "payment_links": {
             "web": "https://bank.test/pay", "expiry": None,
         }}
         with patch.object(services, "create_session", return_value=session) as cs:
             order = services.start_or_resume_order(pr)
-        self.assertEqual(cs.call_args.kwargs["account"], "JDIFT_MAIN")
-        self.assertEqual(cs.call_args.kwargs["udf"]["udf3"], "JDIFT_MAIN")
+        self.assertEqual(cs.call_args.kwargs["account"], "JDSD_TRUST")
+        self.assertEqual(cs.call_args.kwargs["udf"]["udf3"], "JDSD_TRUST")
 
         with patch.object(
             services, "fetch_order", return_value={"status": "CHARGED"},
         ) as fo:
             services.reconcile_order(order)
-        self.assertEqual(fo.call_args.kwargs["account"], "JDIFT_MAIN")
+        self.assertEqual(fo.call_args.kwargs["account"], "JDSD_TRUST")
         order.refresh_from_db()
         self.assertEqual(order.status, PaymentOrder.Status.CHARGED)
 
@@ -311,7 +320,7 @@ class ApplicationFeeRoutingTests(_Fixture):
         self.assertEqual(resp["Location"], "https://bank.test/p")
 
 
-@override_settings(**SG_ON)
+@override_settings(**ROUTING_ON)
 class InstallmentRoutingTests(_Fixture):
 
     def _installment(self, program, campus, kind=Installment.Kind.COURSE):
@@ -350,22 +359,53 @@ class InstallmentRoutingTests(_Fixture):
             self.bdes, self.pune, Installment.Kind.REGISTRATION,
         )
         pr = services.installment_request_for(inst, amount="10000")
-        self.assertEqual(pr.account, "JDSD_TRUST")
+        self.assertEqual((pr.gateway, pr.account), ("smartgateway", "JDSD_TRUST"))
 
     def test_jdift_registration_at_any_centre_settles_to_royalty(self):
         inst, _ = self._installment(
             self.diploma, self.pune, Installment.Kind.REGISTRATION,
         )
-        pr = services.installment_request_for(inst, amount="10000")
-        self.assertEqual(pr.account, "JDIFT_ROYALTY")
+        pr = services.installment_request_for(inst, amount="11800")
+        self.assertEqual((pr.gateway, pr.account), ("razorpay", "JDIFT_ROYALTY"))
 
-    def test_jdift_course_installment_at_blr_settles_to_main(self):
-        inst, _ = self._installment(self.diploma, self.blr)
-        pr = services.installment_request_for(inst, amount="10000")
-        self.assertEqual(pr.account, "JDIFT_MAIN")
+    def test_jdift_registration_link_is_minted_on_the_royalty_merchant(self):
+        from apps.payments import razorpay
 
-    def test_jdift_course_installment_elsewhere_is_not_payable_online(self):
-        inst, user = self._installment(self.diploma, self.pune)
+        inst, _ = self._installment(
+            self.diploma, self.blr, Installment.Kind.REGISTRATION,
+        )
+        pr = services.installment_request_for(inst, amount="11800")
+        link = {"id": "plink_r", "status": "created",
+                "short_url": "https://rzp.io/i/plink_r"}
+        with patch.object(razorpay, "create_payment_link", return_value=link) as c:
+            resp = self.client.get(reverse("public-pay", args=[pr.token]))
+
+        self.assertEqual(resp["Location"], "https://rzp.io/i/plink_r")
+        self.assertEqual(c.call_args.kwargs["account"], "JDIFT_ROYALTY")
+        self.assertEqual(Decimal(c.call_args.kwargs["amount"]), Decimal("11800"))
+
+    @override_settings(RAZORPAY_ACCOUNTS={})
+    def test_royalty_not_live_is_not_payable_online(self):
+        """The shared rzp keys are filled in, but nobody has said they
+        pay into the Royalty account."""
+        inst, _ = self._installment(
+            self.diploma, self.blr, Installment.Kind.REGISTRATION,
+        )
+        with self.assertLogs("apps.payments", level="WARNING") as logs, \
+                self.assertRaises(PaymentGatewayError):
+            services.installment_request_for(inst, amount="11800")
+        self.assertIn("RAZORPAY_JDIFT_ROYALTY_LIVE", "\n".join(logs.output))
+
+    def test_zero_registration_fee_raises_no_request(self):
+        inst, _ = self._installment(
+            self.diploma, self.blr, Installment.Kind.REGISTRATION,
+        )
+        with self.assertRaises(PaymentGatewayError):
+            services.installment_request_for(inst, amount="0")
+        self.assertEqual(PaymentRequest.objects.count(), 0)
+
+    def _assert_not_payable_online(self, campus):
+        inst, user = self._installment(self.diploma, campus)
         client = APIClient()
         client.force_authenticate(user=user)
 
@@ -377,6 +417,12 @@ class InstallmentRoutingTests(_Fixture):
         )
         self.assertEqual(resp.status_code, 503)
         self.assertEqual(PaymentRequest.objects.count(), 0)
+
+    def test_jdift_course_installment_at_blr_is_not_payable_online(self):
+        self._assert_not_payable_online(self.blr)
+
+    def test_jdift_course_installment_elsewhere_is_not_payable_online(self):
+        self._assert_not_payable_online(self.pune)
 
     def test_receipt_names_the_settlement_account(self):
         from apps.fees.models import FeeReceipt

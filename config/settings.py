@@ -379,12 +379,14 @@ SMARTGATEWAY_ACCOUNTS = {
 
 
 # --- Razorpay (Payment Links) -------------------------------------------
-# Routed to by apps/payments/routing.py — today only JDSD's application
-# fee, which settles to the JD Educational Trust's Razorpay account. Reuses
+# Routed to by apps/payments/routing.py — only JDIFT's registration fee
+# (Royalty account); JDIFT_MAIN is kept configurable but nothing routes
+# to it since 2026-10-26. Reuses
 # SMARTGATEWAY_PUBLIC_BASE_URL (the public origin of this API) for the pay
 # link and callback_url. Keys from Dashboard → Account & Settings → API
 # keys; rzp_test_… keys run the whole flow in test mode.
 RAZORPAY_ENABLED = env.bool("RAZORPAY_ENABLED", default=False)
+# Shared fallback keys — blank per-account fields below fall back to these.
 RAZORPAY_KEY_ID = env("RAZORPAY_KEY_ID", default="")
 RAZORPAY_KEY_SECRET = env("RAZORPAY_KEY_SECRET", default="")
 # The secret typed when creating the webhook in the dashboard (URL
@@ -392,6 +394,23 @@ RAZORPAY_KEY_SECRET = env("RAZORPAY_KEY_SECRET", default="")
 # Distinct from the key secret. Blank = every webhook is rejected, and
 # payments settle only via the callback redirect or the reconcile command.
 RAZORPAY_WEBHOOK_SECRET = env("RAZORPAY_WEBHOOK_SECRET", default="")
+
+# Settlement accounts. A Razorpay merchant pays out to one bank account,
+# so Royalty and JDIFT main are two merchants with two key pairs, read
+# from RAZORPAY_<ACCOUNT>_<FIELD>. Both point their webhook at the same
+# URL, each with its own secret. An account takes no payments until
+# RAZORPAY_<ACCOUNT>_LIVE=True — set it only after a live test payment
+# has landed in the right bank account.
+RAZORPAY_ACCOUNTS = {
+    account: {
+        "live": env.bool(f"RAZORPAY_{account}_LIVE", default=False),
+        **{
+            field: env(f"RAZORPAY_{account}_{field.upper()}", default="")
+            for field in ("key_id", "key_secret", "webhook_secret")
+        },
+    }
+    for account in ("JDIFT_ROYALTY", "JDIFT_MAIN")
+}
 # How long a minted link stays payable. A fresh one is minted (and the old
 # one cancelled) when the lead opens our pay link after this.
 RAZORPAY_LINK_EXPIRY_MINUTES = env.int("RAZORPAY_LINK_EXPIRY_MINUTES", default=1440)

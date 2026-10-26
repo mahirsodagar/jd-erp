@@ -1,9 +1,10 @@
-"""Razorpay Payment Links — JDSD's application fee.
+"""Razorpay Payment Links — JDIFT's registration fee.
 
-What matters: the fee lands on Razorpay (not SmartGateway) for JDSD, a
-callback or webhook can't settle anything without a valid signature, the
-lead is marked paid from the API's answer, and a superseded link is
-cancelled so nobody pays twice. No network — the client is patched.
+What matters: each request is served on its own merchant's keys — a link
+minted on one Razorpay account is invisible to any other — a callback
+or webhook can't settle anything without a valid signature, the lead is
+marked paid from the API's answer, and a superseded link is cancelled so
+nobody pays twice. No network — the client is patched.
 """
 
 import hashlib
@@ -26,12 +27,28 @@ from apps.payments.models import (
 
 KEY_SECRET = "rzp_secret_for_tests"
 WEBHOOK_SECRET = "rzp_webhook_secret"
+ROYALTY_KEY_SECRET = "rzp_royalty_secret"
+ROYALTY_WEBHOOK_SECRET = "rzp_royalty_webhook_secret"
+
+ACCOUNTS = {
+    "JDIFT_MAIN": {
+        "live": True, "key_id": "rzp_test_main",
+        "key_secret": KEY_SECRET, "webhook_secret": WEBHOOK_SECRET,
+    },
+    "JDIFT_ROYALTY": {
+        "live": True, "key_id": "rzp_test_royalty",
+        "key_secret": ROYALTY_KEY_SECRET,
+        "webhook_secret": ROYALTY_WEBHOOK_SECRET,
+    },
+}
 
 RZP_ON = dict(
     RAZORPAY_ENABLED=True,
-    RAZORPAY_KEY_ID="rzp_test_abc",
-    RAZORPAY_KEY_SECRET=KEY_SECRET,
-    RAZORPAY_WEBHOOK_SECRET=WEBHOOK_SECRET,
+    # No shared keys: every account must stand on its own.
+    RAZORPAY_KEY_ID="",
+    RAZORPAY_KEY_SECRET="",
+    RAZORPAY_WEBHOOK_SECRET="",
+    RAZORPAY_ACCOUNTS=ACCOUNTS,
     SMARTGATEWAY_PUBLIC_BASE_URL="https://api.jd.test",
     SMARTGATEWAY_ENABLED=False,
     SMARTGATEWAY_AUTOSEND_APPLICATION_LINK=False,
@@ -87,12 +104,15 @@ class HelperTests(TestCase):
             KEY_SECRET.encode(),
             b"plink_1|AF1N01|paid|pay_ABC", hashlib.sha256,
         ).hexdigest()
-        self.assertTrue(razorpay.verify_callback_signature(params))
+        self.assertTrue(razorpay.verify_callback_signature(params, "JDIFT_MAIN"))
+        # Signed with the main account's secret, so not Royalty's.
+        self.assertFalse(razorpay.verify_callback_signature(params, "JDIFT_ROYALTY"))
 
         tampered = {**params, "razorpay_payment_link_status": "PAID "}
-        self.assertFalse(razorpay.verify_callback_signature(tampered))
+        self.assertFalse(razorpay.verify_callback_signature(tampered, "JDIFT_MAIN"))
         self.assertFalse(razorpay.verify_callback_signature(
             {k: v for k, v in params.items() if k != "razorpay_payment_id"},
+            "JDIFT_MAIN",
         ))
 
     @override_settings(**RZP_ON)
@@ -104,7 +124,18 @@ class HelperTests(TestCase):
             b'{"event":"payment_link.paid"}', sig,
         ))
 
-    @override_settings(**{**RZP_ON, "RAZORPAY_WEBHOOK_SECRET": ""})
+    @override_settings(**RZP_ON)
+    def test_webhook_signed_by_either_account_is_accepted(self):
+        raw = b'{"event": "payment_link.paid"}'
+        for secret in (WEBHOOK_SECRET, ROYALTY_WEBHOOK_SECRET):
+            sig = hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
+            self.assertTrue(razorpay.verify_webhook_signature(raw, sig))
+        sig = hmac.new(b"someone-else", raw, hashlib.sha256).hexdigest()
+        self.assertFalse(razorpay.verify_webhook_signature(raw, sig))
+
+    @override_settings(**{**RZP_ON, "RAZORPAY_ACCOUNTS": {
+        a: {**cfg, "webhook_secret": ""} for a, cfg in ACCOUNTS.items()
+    }})
     def test_unset_webhook_secret_rejects_everything(self):
         self.assertFalse(razorpay.verify_webhook_signature(b"{}", "anything"))
 
@@ -151,15 +182,93 @@ class HelperTests(TestCase):
         self.assertEqual(req.call_count, 1)
 
 
-@override_settings(**RZP_ON)
-class JdsdApplicationFeeTests(TestCase):
+class AccountConfigTests(TestCase):
+
+    @override_settings(
+        RAZORPAY_KEY_ID="rzp_test_shared", RAZORPAY_KEY_SECRET="shared",
+        RAZORPAY_ACCOUNTS={"JDIFT_MAIN": {"live": True, "key_id": "rzp_live_main"}},
+    )
+    def test_blank_account_fields_fall_back_to_shared(self):
+        cfg = razorpay.account_config("JDIFT_MAIN")
+        self.assertEqual((cfg.key_id, cfg.key_secret), ("rzp_live_main", "shared"))
+        self.assertFalse(cfg.is_test_mode)
+
+    @override_settings(
+        RAZORPAY_ENABLED=True, SMARTGATEWAY_PUBLIC_BASE_URL="https://api.jd.test",
+        RAZORPAY_KEY_ID="rzp_test_shared", RAZORPAY_KEY_SECRET="shared",
+        RAZORPAY_ACCOUNTS={"JDIFT_ROYALTY": {"live": False}},
+    )
+    def test_account_is_not_usable_until_marked_live(self):
+        """Full shared keys must not, on their own, make an account take
+        money — they pay out to whichever bank account that merchant has."""
+        self.assertFalse(razorpay.is_enabled("JDIFT_ROYALTY"))
+        self.assertEqual(
+            razorpay.missing_settings("JDIFT_ROYALTY"),
+            ["RAZORPAY_JDIFT_ROYALTY_LIVE"],
+        )
+        self.assertFalse(razorpay.is_enabled("JDIFT_MAIN"))
+        self.assertTrue(razorpay.is_enabled(""))
+
+    @override_settings(**{**RZP_ON, "RAZORPAY_ACCOUNTS": {
+        "JDIFT_ROYALTY": {**ACCOUNTS["JDIFT_ROYALTY"], "key_secret": ""},
+    }})
+    def test_missing_settings_name_the_account_variable(self):
+        self.assertEqual(
+            razorpay.missing_settings("JDIFT_ROYALTY"),
+            ["RAZORPAY_JDIFT_ROYALTY_KEY_SECRET"],
+        )
+
+    @override_settings(**RZP_ON)
+    def test_each_call_authenticates_as_its_own_account(self):
+        import base64
+
+        sent = []
+
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return b"{}"
+
+        def fake_urlopen(req, timeout=None):
+            sent.append(req.get_header("Authorization"))
+            return _Resp()
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            razorpay.fetch_payment_link("plink_1", account="JDIFT_ROYALTY")
+            razorpay.fetch_payment_link("plink_1", account="JDIFT_MAIN")
+
+        decoded = [base64.b64decode(h.split()[1]).decode() for h in sent]
+        self.assertEqual(decoded, [
+            f"rzp_test_royalty:{ROYALTY_KEY_SECRET}",
+            f"rzp_test_main:{KEY_SECRET}",
+        ])
+
+
+@override_settings(
+    **RZP_ON,
+    # The live table no longer sends any application fee to Razorpay
+    # (only JDIFT registration, see tests_routing.py). The link mechanics
+    # don't depend on the fee kind, so they are pinned to the earlier
+    # JDIFT-main rule to keep the lead flow — and a second merchant —
+    # covered.
+    PAYMENT_ROUTES=[{
+        "institute": "JDIFT", "fee": "APPLICATION_FEE",
+        "gateway": "razorpay", "account": "JDIFT_MAIN",
+    }],
+)
+class JdiftApplicationFeeTests(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        cls.jdsd = Institute.objects.create(name="JDSD", code="JDSD")
+        cls.jdift = Institute.objects.create(name="JDIFT", code="JDIFT")
         cls.campus = Campus.objects.create(name="Bangalore", code="BLR")
         cls.program = Program.objects.create(
-            name="B.Des", code="BDES", institute=cls.jdsd,
+            name="Diploma in Fashion Design", code="DFD", institute=cls.jdift,
         )
         cls.source = LeadSource.objects.create(name="Website", slug="website")
 
@@ -171,7 +280,7 @@ class JdsdApplicationFeeTests(TestCase):
 
     def _request(self):
         return services.application_fee_request_for(
-            self.lead, amount="500", institute_key="JDSD",
+            self.lead, amount="500", institute_key="JDIFT",
         )
 
     def _open(self, pr, link):
@@ -181,13 +290,13 @@ class JdsdApplicationFeeTests(TestCase):
 
     # --- raising and opening -----------------------------------------
 
-    def test_fee_link_uses_razorpay_on_the_trust_account(self):
+    def test_fee_link_uses_razorpay_on_the_main_account(self):
         from apps.leads.send_links import send_fee_link
 
-        result = send_fee_link(lead=self.lead, institute_key="JDSD")
+        result = send_fee_link(lead=self.lead, institute_key="JDIFT")
         self.assertEqual(result["gateway"], "razorpay")
         pr = PaymentRequest.objects.get(pk=result["payment_request_id"])
-        self.assertEqual((pr.gateway, pr.account), ("razorpay", "JDSD_TRUST"))
+        self.assertEqual((pr.gateway, pr.account), ("razorpay", "JDIFT_MAIN"))
         self.assertIn("/api/public/pay/", result["url"])
 
     @override_settings(RAZORPAY_ENABLED=False)
@@ -195,18 +304,21 @@ class JdsdApplicationFeeTests(TestCase):
         from apps.leads.send_links import send_fee_link
 
         with self.assertNoLogs("apps.leads", level="ERROR"):
-            result = send_fee_link(lead=self.lead, institute_key="JDSD")
+            result = send_fee_link(lead=self.lead, institute_key="JDIFT")
         self.assertEqual(result["gateway"], "manual")
         self.assertEqual(PaymentRequest.objects.count(), 0)
 
-    @override_settings(RAZORPAY_KEY_SECRET="")
+    @override_settings(RAZORPAY_ACCOUNTS={
+        **ACCOUNTS,
+        "JDIFT_MAIN": {**ACCOUNTS["JDIFT_MAIN"], "key_secret": ""},
+    })
     def test_switched_on_but_misconfigured_falls_back_loudly(self):
         from apps.leads.send_links import send_fee_link
 
         with self.assertLogs("apps.leads", level="ERROR") as logs:
-            result = send_fee_link(lead=self.lead, institute_key="JDSD")
+            result = send_fee_link(lead=self.lead, institute_key="JDIFT")
         self.assertEqual(result["gateway"], "manual")
-        self.assertIn("RAZORPAY_KEY_SECRET", "\n".join(logs.output))
+        self.assertIn("RAZORPAY_JDIFT_MAIN_KEY_SECRET", "\n".join(logs.output))
 
     def test_opening_the_link_mints_a_razorpay_link_and_redirects(self):
         pr = self._request()
@@ -215,6 +327,7 @@ class JdsdApplicationFeeTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp["Location"], "https://rzp.io/i/plink_1")
         kwargs = create.call_args.kwargs
+        self.assertEqual(kwargs["account"], "JDIFT_MAIN")
         self.assertEqual(kwargs["reference_id"], f"AF{pr.pk}N01")
         self.assertTrue(kwargs["callback_url"].endswith(f"/pay/{pr.token}/return/"))
         order = pr.orders.get()
@@ -240,7 +353,7 @@ class JdsdApplicationFeeTests(TestCase):
                 ) as cancel:
             resp, create = self._open(pr, _link(link_id="plink_2"))
 
-        cancel.assert_called_once_with("plink_1")
+        cancel.assert_called_once_with("plink_1", account="JDIFT_MAIN")
         create.assert_called_once()
         self.assertEqual(resp["Location"], "https://rzp.io/i/plink_2")
         statuses = list(pr.orders.order_by("created_on").values_list("status", flat=True))
@@ -285,18 +398,22 @@ class JdsdApplicationFeeTests(TestCase):
         with patch.object(
             razorpay, "fetch_payment_link",
             return_value=_link("paid", payments=PAID_UPI),
-        ):
+        ) as fetch:
             resp = self.client.get(
                 reverse("public-pay-return", args=[pr.token]),
                 self._signed_callback(order.order_id),
             )
 
+        self.assertEqual(fetch.call_args.kwargs["account"], "JDIFT_MAIN")
         self.assertIn("status=success", resp["Location"])
         self.lead.refresh_from_db()
         self.assertIsNotNone(self.lead.application_fee_paid_at)
         self.assertEqual(self.lead.application_fee_mode, "UPI")
         self.assertEqual(self.lead.application_fee_ref, "pay_ABC")
-        self.assertIn("Razorpay — JD Educational Trust", self.lead.application_fee_notes)
+        self.assertIn(
+            "Razorpay — JD Institute of Fashion Technology",
+            self.lead.application_fee_notes,
+        )
 
     def test_signed_callback_is_the_fallback_when_the_api_read_fails(self):
         pr = self._request()

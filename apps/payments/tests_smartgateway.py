@@ -262,7 +262,9 @@ class _LeadFixture(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        cls.institute = Institute.objects.create(name="JD Fashion", code="JDIFT")
+        # JDSD: the institute whose application fee goes through
+        # SmartGateway (JDIFT's goes through Razorpay).
+        cls.institute = Institute.objects.create(name="JD School of Design", code="JDSD")
         cls.campus = Campus.objects.create(
             name="Bengaluru", code="BLR",
         )
@@ -714,7 +716,7 @@ class FeeLinkIntegrationTests(_LeadFixture):
     def test_pay_url_is_used_when_enabled(self):
         from apps.leads.send_links import send_fee_link
 
-        result = send_fee_link(lead=self.lead, institute_key="JDIFT")
+        result = send_fee_link(lead=self.lead, institute_key="JDSD")
 
         self.assertEqual(result["gateway"], "smartgateway")
         self.assertIsNotNone(result["payment_request_id"])
@@ -727,7 +729,7 @@ class FeeLinkIntegrationTests(_LeadFixture):
             services, "application_fee_request_for",
             side_effect=SmartGatewayError("misconfigured"),
         ):
-            result = send_fee_link(lead=self.lead, institute_key="JDIFT")
+            result = send_fee_link(lead=self.lead, institute_key="JDSD")
 
         self.assertEqual(result["gateway"], "manual")
         self.assertIsNone(result["payment_request_id"])
@@ -737,7 +739,7 @@ class FeeLinkIntegrationTests(_LeadFixture):
     def test_disabled_gateway_uses_static_url(self):
         from apps.leads.send_links import send_fee_link
 
-        result = send_fee_link(lead=self.lead, institute_key="JDIFT")
+        result = send_fee_link(lead=self.lead, institute_key="JDSD")
         self.assertEqual(result["gateway"], "manual")
         self.assertEqual(PaymentRequest.objects.count(), 0)
 
@@ -748,7 +750,7 @@ class FeeLinkIntegrationTests(_LeadFixture):
         from apps.leads.send_links import send_fee_link
 
         with self.assertLogs("apps.leads", level="ERROR") as logs:
-            result = send_fee_link(lead=self.lead, institute_key="JDIFT")
+            result = send_fee_link(lead=self.lead, institute_key="JDSD")
 
         self.assertEqual(result["gateway"], "manual")
         self.assertEqual(PaymentRequest.objects.count(), 0)

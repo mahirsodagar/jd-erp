@@ -44,7 +44,7 @@ class PortalFeeTests(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        cls.institute = Institute.objects.create(name="JD", code="JDIFT")
+        cls.institute = Institute.objects.create(name="JD School of Design", code="JDSD")
         cls.campus = Campus.objects.create(
             name="Main", code="BLR",
         )
