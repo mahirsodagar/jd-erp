@@ -180,6 +180,14 @@ class RequiredFieldTests(RequiredFixture):
         self.assertTrue(student["has_photo"])
         self.assertTrue(student["documents"][0]["has_file"])
 
+    def test_prefill_carries_fathers_contact_from_the_lead(self):
+        self.lead.father_mobile = "+919811122233"
+        self.lead.father_email = "ravi@example.com"
+        self.lead.save(update_fields=["father_mobile", "father_email"])
+        data = self.client.get(self.url).json()
+        self.assertEqual(data["father_mobile"], "+919811122233")
+        self.assertEqual(data["father_email"], "ravi@example.com")
+
     def test_closed_form_still_answers_403(self):
         self.lead.application_locked_for_student = True
         self.lead.save(update_fields=["application_locked_for_student"])

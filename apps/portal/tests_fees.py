@@ -141,6 +141,19 @@ class PortalFeeTests(TestCase):
         self.assertIn("in order", r.json()["detail"])
         self.assertFalse(PaymentRequest.objects.exists())
 
+    def test_registration_fee_is_payable_first_whatever_its_sequence(self):
+        """The registration row is appended after the course plan, so it
+        carries the last sequence — it must not be locked behind it."""
+        reg = Installment.objects.create(
+            enrollment=self.enrollment, kind=Installment.Kind.REGISTRATION,
+            sequence=3, due_date=date(2026, 6, 1), amount=Decimal("10000"),
+        )
+        body = self.client.get(reverse("portal-fees")).json()
+        self.assertEqual(body["next_installment_id"], reg.id)
+        self.assertEqual(body["installments"][0]["id"], reg.id)
+        self.assertEqual(self._pay(self.i1).status_code, 409)
+        self.assertEqual(self._pay(reg).status_code, 200)
+
     def test_second_installment_unlocks_once_the_first_clears(self):
         FeeReceipt.objects.create(
             receipt_no="RCP-COUNTER-1", enrollment=self.enrollment,

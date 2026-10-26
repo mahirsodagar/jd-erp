@@ -446,6 +446,10 @@ def _prefill(lead: Lead) -> dict:
         "name": lead.name,
         "email": lead.email,
         "phone": lead.phone,
+        # Captured by the counsellor when the lead was added; the form
+        # seeds Father's mobile/email from these on a first visit.
+        "father_mobile": lead.father_mobile,
+        "father_email": lead.father_email,
         # Lock state — frontend uses this to render read-only when closed.
         "is_closed": lead.application_locked_for_student,
         "closed_at": (

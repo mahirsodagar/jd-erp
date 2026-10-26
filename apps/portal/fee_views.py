@@ -66,12 +66,18 @@ def _paid_by_installment(enrollment) -> dict[int, Decimal]:
 def _pay_state(enrollment):
     """`(installments, paid_map, next_payable)` for one enrollment.
 
-    `next_payable` is the lowest-sequence row with an outstanding
-    balance — the only one the student is allowed to pay — or None when
-    everything scheduled has been settled.
+    `next_payable` is the earliest row with an outstanding balance — the
+    only one the student is allowed to pay — or None when everything
+    scheduled has been settled.
+
+    The registration fee comes first whatever its sequence: it is due at
+    the start of the session, and it is usually appended *after* the
+    course plan is laid down, so ordering by sequence alone would lock it
+    behind every course installment.
     """
-    installments = list(
-        Installment.objects.filter(enrollment=enrollment).order_by("sequence", "id")
+    installments = sorted(
+        Installment.objects.filter(enrollment=enrollment),
+        key=lambda i: (i.kind != Installment.Kind.REGISTRATION, i.sequence, i.id),
     )
     paid_map = _paid_by_installment(enrollment)
     next_payable = next(
