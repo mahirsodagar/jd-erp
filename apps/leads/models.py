@@ -4,11 +4,24 @@ from django.db import models
 
 class Lead(models.Model):
     class Status(models.TextChoices):
+        # Pipeline stages, in order. A fresh lead starts at NEW_LEAD and
+        # the counsellor moves it along; APPLICATION_SUBMITTED and
+        # ENROLLED are set by the system when those events happen.
+        NEW_LEAD = "new_lead", "New Lead"
+        CONTACTED = "contacted", "Lead Contacted"
+        INTERESTED = "interested", "Interested"
+        COUNSELLING_SCHEDULED = "counselling_scheduled", "Counselling Scheduled"
         ACTIVE = "active", "Active"
-        INACTIVE = "inactive", "Inactive"
         NON_RESPONSIVE = "non_responsive", "Non Responsive"
         APPLICATION_SUBMITTED = "application_submitted", "Application Submitted"
+        INACTIVE = "inactive", "Inactive Lead"
         ENROLLED = "enrolled", "Enrolled"
+
+    # Statuses where the lead is still being worked — follow-ups are
+    # expected and an overdue hot follow-up counts.
+    OPEN_STATUSES = (
+        "new_lead", "contacted", "interested", "counselling_scheduled", "active",
+    )
 
     class Occurrence(models.IntegerChoices):
         PRIMARY = 1, "Primary"
@@ -108,7 +121,7 @@ class Lead(models.Model):
     )
 
     status = models.CharField(
-        max_length=32, choices=Status.choices, default=Status.ACTIVE, db_index=True,
+        max_length=32, choices=Status.choices, default=Status.NEW_LEAD, db_index=True,
     )
 
     remarks = models.TextField(blank=True)

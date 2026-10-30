@@ -21,6 +21,8 @@ from django.conf import settings
 from django.utils import timezone
 
 from apps.leaves.models import EmailDispatchLog
+from apps.notifications.inapp import notify, user_by_email
+from apps.notifications.models import InAppNotification
 
 
 HR_INBOX = getattr(settings, "LEAVES_HR_INBOX", "leave@jdinstitute.edu.in")
@@ -107,6 +109,14 @@ queue_email = send_email_now
 
 def notify_leave_applied(application) -> None:
     emp = application.employee
+    notify(
+        [user_by_email(application.manager_email)],
+        kind=InAppNotification.Kind.LEAVE,
+        title=f"Leave request from {emp.full_name}",
+        body=(f"{application.leave_type.name}, {application.from_date} to "
+              f"{application.to_date} ({application.count} day(s))."),
+        link="/leaves/team", exclude_user=emp.user_account,
+    )
     cc_list = _split_emails(application.cc_emails) + [HR_INBOX]
     body = (
         f"{emp.full_name} ({emp.emp_code}) has applied for "
@@ -135,6 +145,14 @@ def notify_leave_applied(application) -> None:
 def notify_leave_decision(application) -> None:
     emp = application.employee
     decision = "approved" if application.status == 2 else "rejected"
+    notify(
+        [emp.user_account], kind=InAppNotification.Kind.LEAVE,
+        title=f"Leave {decision}",
+        body=(f"{application.leave_type.name}, {application.from_date} to "
+              f"{application.to_date}. "
+              f"{application.approver_remarks or ''}").strip(),
+        link="/leaves/my",
+    )
     send_email_now(
         template=TPL_LEAVE_DECISION,
         to=emp.email_primary,
@@ -152,6 +170,13 @@ def notify_leave_decision(application) -> None:
 
 def notify_compoff_applied(compoff) -> None:
     emp = compoff.employee
+    notify(
+        [user_by_email(compoff.manager_email)],
+        kind=InAppNotification.Kind.LEAVE,
+        title=f"Comp-off request from {emp.full_name}",
+        body=f"Worked on {compoff.worked_date}, earning {compoff.count} day(s).",
+        link="/leaves/comp-off", exclude_user=emp.user_account,
+    )
     cc_list = _split_emails(compoff.cc_emails) + [HR_INBOX]
     send_email_now(
         template=TPL_COMPOFF_APPLIED,
@@ -172,6 +197,13 @@ def notify_compoff_applied(compoff) -> None:
 def notify_compoff_decision(compoff) -> None:
     emp = compoff.employee
     decision = "approved" if compoff.status == 2 else "rejected"
+    notify(
+        [emp.user_account], kind=InAppNotification.Kind.LEAVE,
+        title=f"Comp-off {decision}",
+        body=(f"Worked date {compoff.worked_date}. "
+              f"{compoff.approver_remarks or ''}").strip(),
+        link="/leaves/comp-off",
+    )
     send_email_now(
         template=TPL_COMPOFF_DECISION,
         to=emp.email_primary,

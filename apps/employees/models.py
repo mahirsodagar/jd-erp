@@ -244,6 +244,16 @@ class Employee(models.Model):
             self.updated_by = user
             fields.append("updated_by")
         self.save(update_fields=fields)
+        # An inactive employee must not be able to log in. Disabling the
+        # portal account makes JWTAuthentication reject the next request,
+        # so an open session is cut too. Reactivating does NOT re-enable
+        # the account: a user may be disabled for other reasons, so that
+        # stays a deliberate step in the Users list.
+        if status == self.Status.INACTIVE and self.user_account_id:
+            acct = self.user_account
+            if acct.is_active:
+                acct.is_active = False
+                acct.save(update_fields=["is_active"])
 
     def soft_delete(self, user=None):
         self.is_deleted = True

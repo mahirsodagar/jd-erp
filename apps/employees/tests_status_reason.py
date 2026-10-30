@@ -52,6 +52,45 @@ class EmployeeStatusReasonTests(TestCase):
         self.assertEqual(self.emp.status, Employee.Status.ACTIVE)
         self.assertEqual(self.emp.status_reason, "")
 
+    def test_deactivation_disables_portal_login(self):
+        """An inactive employee must not be able to log in: deactivating
+        switches off the linked user and the login endpoint refuses them.
+        Reactivating does not silently re-enable the account."""
+        acct = User.objects.create_user(
+            username="asha", email="asha@e.com", password="pw12345678",
+            full_name="Asha",
+        )
+        self.emp.user_account = acct
+        self.emp.save(update_fields=["user_account"])
+
+        r = self._post("deactivate", reason="Left the institute")
+        self.assertEqual(r.status_code, 200, r.content)
+        acct.refresh_from_db()
+        self.assertFalse(acct.is_active)
+
+        anon = APIClient()
+        r = anon.post("/api/auth/login/",
+                      {"identifier": "asha", "password": "pw12345678"},
+                      format="json")
+        self.assertEqual(r.status_code, 401, r.content)
+
+        # Even if the account were re-enabled by hand, HR status wins.
+        acct.is_active = True
+        acct.save(update_fields=["is_active"])
+        r = anon.post("/api/auth/login/",
+                      {"identifier": "asha", "password": "pw12345678"},
+                      format="json")
+        self.assertEqual(r.status_code, 401, r.content)
+        self.assertEqual(r.json()["detail"], ["Account disabled."])
+
+        self._post("activate")
+        acct.refresh_from_db()
+        self.assertTrue(acct.is_active)  # untouched by activate
+        r = anon.post("/api/auth/login/",
+                      {"identifier": "asha", "password": "pw12345678"},
+                      format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+
     def test_reactivation_replaces_the_old_reason(self):
         self._post("deactivate", reason="Contract ended in August")
         r = self._post("activate")

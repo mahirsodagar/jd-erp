@@ -8,6 +8,16 @@ from apps.roles.models import Permission
 User = get_user_model()
 
 
+def _linked_employee_inactive(user) -> bool:
+    """True when `user` is the portal account of an employee whose HR
+    status is Inactive. Imported lazily: employees depends on accounts."""
+    from apps.employees.models import Employee
+
+    return Employee.objects.filter(
+        user_account=user, status=Employee.Status.INACTIVE,
+    ).exists()
+
+
 class TenantTokenObtainSerializer(serializers.Serializer):
     """Login serializer — accepts username or email in `identifier`.
 
@@ -28,6 +38,10 @@ class TenantTokenObtainSerializer(serializers.Serializer):
         if user is None:
             raise serializers.ValidationError({"detail": "Invalid credentials."})
         if not user.is_active:
+            raise serializers.ValidationError({"detail": "Account disabled."})
+        # Belt and braces: an employee deactivated in HR is blocked even
+        # if their portal account was somehow left enabled.
+        if _linked_employee_inactive(user):
             raise serializers.ValidationError({"detail": "Account disabled."})
 
         refresh = RefreshToken.for_user(user)

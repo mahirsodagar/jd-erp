@@ -150,6 +150,10 @@ class ConversionFunnelView(_ReportBase):
         enrolled = status_counts.get(Lead.Status.ENROLLED, 0)
         funnel = {
             "total_leads": total,
+            "new_lead": status_counts.get(Lead.Status.NEW_LEAD, 0),
+            "contacted": status_counts.get(Lead.Status.CONTACTED, 0),
+            "interested": status_counts.get(Lead.Status.INTERESTED, 0),
+            "counselling_scheduled": status_counts.get(Lead.Status.COUNSELLING_SCHEDULED, 0),
             "active": status_counts.get(Lead.Status.ACTIVE, 0),
             "inactive": status_counts.get(Lead.Status.INACTIVE, 0),
             "non_responsive": status_counts.get(Lead.Status.NON_RESPONSIVE, 0),
@@ -381,7 +385,7 @@ class SummaryView(_ReportBase):
         overdue = LeadFollowup.objects.filter(
             outcome_category=LeadFollowup.Outcome.HOT,
             next_followup_date__lt=now.date(),
-            lead__status=Lead.Status.ACTIVE,
+            lead__status__in=Lead.OPEN_STATUSES,
         ).count()
 
         return Response({

@@ -13,8 +13,13 @@ survives only as the fallback for an institute we don't know yet.
   UNDERTAKING": eleven numbered sections, its own undertaking, and a fee
   note. See `_JDSD_2026_*`.
 * **JDIFT** — "RULES & REGULATIONS, FEE POLICY AND STUDENT UNDERTAKING":
-  nine sections lettered A–I, its own student/parent declaration, no fee
-  note. See `_JDIFT_2026_*`.
+  ten sections lettered A, B, C, C-1, D–I (each carries its own
+  `label`), its own student/parent declaration, no fee note. See
+  `_JDIFT_2026_*`.
+
+Both were re-transcribed on 2026-10-30 from the "Clean" PDFs
+(`JDI Application Form T&C 2026-Clean.pdf`, `JDSD Application Form T&C
+2026 -Clean.pdf`), which supersede the earlier 2026 drafts.
 * **Anyone else** — the older wording carried over verbatim from the PHP
   application links (`jdift_application_link.php` /
   `jdsd_application_link.php`).
@@ -87,13 +92,34 @@ _JDIFT_2026_UNDERTAKING = (
 #: itself is blank in the signed PDF; the live figures come from
 #: FeeTemplate, so only the note travels with the terms.
 _JDSD_2026_FEE_NOTE = [
-    'The table below shows the fees for one year. The same fees apply for '
-    'every year of the course.',
-    "* Students admitted to the MS BCU program shall be responsible for "
-    "paying all university-related fees directly through the university's "
-    "official online portal. Such fees are separate from and not included "
-    "in the course fee.",
+    "The table below shows the fees for one year. The course fee shown "
+    "will apply for each year of the course for this batch. University "
+    "fees are fixed by the University and may change.",
+    "* Students admitted to the University program shall be responsible "
+    "for paying all university-related fees directly through the "
+    "university’s official online portal or Demand Draft. Such fees are "
+    "separate from, and not included in, the tuition fee and subject to "
+    "the University rules. *",
 ]
+
+#: Opening paragraph of each 2026 document, defining "Institute",
+#: "University" and "Management". Served as `preamble`; blank where the
+#: wording has none.
+_PREAMBLES = {
+    "JDSD": (
+        "In this document, the “Institute” means JD School of Design, "
+        "operated by JD Educational Trust, Bengaluru; the “University” "
+        "means the university to which the student’s programme is "
+        "affiliated, where applicable; and the “Management” means the "
+        "management of JD Educational Trust."
+    ),
+    "JDIFT": (
+        "In this document, the “Institute” means JD Institute of Fashion "
+        "Technology operated by JD Educational Trust Bengaluru, including "
+        "its centres; and the “Management” means the management of the "
+        "Institute."
+    ),
+}
 
 #: Cheque payee, per institute. Interpolated into fee sub-rule A.
 _FEE_RECIPIENT = {
@@ -278,11 +304,10 @@ _DISCLAIMERS = {
 }
 
 
-# === JDSD 2026 =======================================================
+# === JDSD 2026 (clean) ==================================================
 #
-# "FEES, ACADEMIC RULES, STUDENT REGULATIONS AND UNDERTAKING".
-# Each entry is one titled section; `subs` are its numbered items. An
-# item that carries its own bullets is written as a dict.
+# "FEES, ACADEMIC RULES, STUDENT REGULATIONS AND UNDERTAKING" — the
+# "Clean" document signed off in October 2026. Eleven numbered sections.
 
 _JDSD_2026_RULES = [
     {
@@ -291,34 +316,34 @@ _JDSD_2026_RULES = [
         "subs": [
             "Fees may be paid by Cash, Cheque, Demand Draft, RTGS, NEFT, "
             "IMPS, or Online Transfer in favour of JD EDUCATIONAL TRUST, "
-            "payable at Bengaluru.",
+            "payable at their respective centres.",
             "UG/PG students shall separately pay the applicable University "
-            "Annual Registration/Admission Fee/Examination Fees, Sports and "
-            "Cultural Fee, NSS Fee, Youth Red Cross Fee, and other "
-            "university-mandated fees as notified by the concerned "
-            'University. Fees are subject to change on an annual basis and '
-            'may vary from year to year."',
+            "annual registration, admission, examination, sports and "
+            "cultural, NSS, Youth Red Cross and other fees notified by the "
+            "University from time to time. University fees are fixed by the "
+            "University, are not included in the course fee, and may change "
+            "from year to year.",
             "University annual registration fee Every Year, or other "
             "applicable university/academic fees shall be paid by the "
             "student separately as prescribed by the respective University.",
-            "In case of delayed payment or cheque dishonour/bounce, the "
-            "student shall be liable to pay the applicable penalty, bank "
-            "charges, and service charges as prescribed by the respective "
-            "bank/institution.",
-            "In the event of withdrawal of candidature or cancellation of "
-            "admission, the fees paid shall be non-refundable and "
-            "non-transferable under any circumstances, subject to applicable "
-            "institutional/university regulations.",
-            "In the case of full fee payment, if a student subsequently "
-            "fails to fulfil the academic/course requirements, the student "
-            "shall not be eligible for any certificate or certification from "
-            "the Institute.",
+            "In case of delayed payment or cheque dishonour, the student "
+            "shall be liable to pay the late payment charge specified below "
+            "and any bank charges actually incurred by the Institute.",
+            "Refund of fees on withdrawal of candidature or cancellation of "
+            "admission shall be governed by the Institute’s Fee Refund "
+            "Policy. For programmes affiliated to a University, refunds "
+            "shall be made in accordance with the applicable UGC and "
+            "University regulations on refund of fees. Fees paid are not "
+            "transferable to another student.",
+            "Payment of fees, including payment in full, does not by itself "
+            "entitle a student to any certificate. A student who does not "
+            "fulfil the academic/course requirements shall not be eligible "
+            "for any certificate or certification from the Institute.",
             "Students must collect and retain the official fee receipt for "
             "every fee payment made to the Institute.",
-            "Students who fail to remit the prescribed fees on or before the "
-            "due date shall be liable to pay a late payment penalty of "
-            "₹500/- per day, calculated from the date on which the "
-            "respective instalment falls due.",
+            "Delayed fee payments will incur a late fee of 12 % per annum "
+            "on the overdue amount, calculated from the due date until the "
+            "date of payment",
             "An additional annual fee of Rs. 100/- towards the DKUL/LMS "
             "platform shall be payable as applicable.",
             "The annual vehicle parking sticker fee shall be Rs. 50/- per "
@@ -337,8 +362,6 @@ _JDSD_2026_RULES = [
             "Students who repeat a subject, semester, or academic year shall "
             "be required to pay the applicable repeat/readmission fee "
             "separately.",
-            "Students failing to pay fees within the stipulated time shall "
-            "be liable to pay the applicable late-payment penalty.",
             "Tuition fees may be revised from time to time in accordance "
             "with institutional policies and applicable regulations.",
         ],
@@ -353,8 +376,8 @@ _JDSD_2026_RULES = [
             "attendance shall not be permitted to appear for the "
             "Semester-End Examination, subject to applicable University "
             "regulations.",
-            "Students who are not eligible to appear for the examination due "
-            "to shortage of attendance may be required to repeat the "
+            "Students who are not eligible to appear for the examination "
+            "due to shortage of attendance may be required to repeat the "
             "semester and academic requirements and pay the applicable "
             "readmission/repeat fees.",
             "Students must be seated in the classroom at least 10 minutes "
@@ -364,14 +387,14 @@ _JDSD_2026_RULES = [
             "the class are strictly prohibited during class hours.",
             "Students must submit all assignments within the deadlines "
             "communicated by the concerned faculty member.",
-            "Late submission of assignments may result in the assignment not "
-            "being graded, which may adversely affect the student's overall "
-            "academic performance. Such cases may also be brought to the "
-            "attention of the parent/guardian.",
-            "Students must participate in all academic activities prescribed "
-            "by the Institute, including classes, practical sessions, "
-            "workshops, seminars, exhibitions, Annual Design Awards, "
-            "wherever applicable.",
+            "Late submission of assignments may result in the assignment "
+            "not being graded, which may adversely affect the student's "
+            "overall academic performance. Such cases may also be brought "
+            "to the attention of the parent/guardian.",
+            "Students must participate in all academic activities "
+            "prescribed by the Institute, including classes, practical "
+            "sessions, workshops, seminars, exhibitions, Annual Design "
+            "Awards, wherever applicable.",
         ],
     },
     {
@@ -392,16 +415,16 @@ _JDSD_2026_RULES = [
                     "institutional activities",
                 ],
             },
-            "Failure to wear the Identity Card shall attract a fine of "
-            "Rs. 500/-.",
+            "Failure to wear the Identity Card may attract a fine of "
+            "Rs. 500/- per instance.",
             "In case of loss of the Identity Card, the student shall pay "
             "Rs. 1,000/- towards issuance of a replacement Identity Card.",
             "Misuse, exchange, lending, borrowing, or transfer of Identity "
-            "Cards is strictly prohibited. Any such violation shall attract "
-            "a penalty of Rs. 5,000/- from each person involved, and the "
+            "Cards is strictly prohibited. Any such violation may attract a "
+            "fine of up to Rs. 5,000/- on each student involved, and the "
             "Institute may take further disciplinary action, including "
-            "suspension/expulsion, depending on the seriousness of the "
-            "violation.",
+            "suspension/expulsion, in accordance with Section 9, depending "
+            "on the seriousness of the violation.",
         ],
     },
     {
@@ -409,17 +432,20 @@ _JDSD_2026_RULES = [
         "emphasis": True,
         "subs": [
             "Library facilities may be used before and after class hours or "
-            "during the timings specified in the timetable/library schedule.",
+            "during the timings specified in the timetable/library "
+            "schedule.",
             "Students shall be responsible for the proper use and safe "
-            "custody of Institute property, including furniture, structures, "
-            "tools, equipment, laboratory facilities, and other resources. "
-            "Any mishandling, accidental damage, vandalism, or loss caused "
-            "by a student shall render them liable to pay the appropriate "
-            "charges towards labour, materials, repair, restoration, or "
-            "replacement, as determined by the College.",
+            "custody of Institute property, including furniture, "
+            "structures, tools, equipment, laboratory facilities, and other "
+            "resources. Any mishandling, accidental damage, vandalism, or "
+            "loss caused by a student shall render them liable to pay the "
+            "appropriate charges towards labour, materials, repair, "
+            "restoration, or replacement, as assessed by the Institute "
+            "after giving the student an opportunity to be heard.",
             "Students shall be responsible for the cleanliness and orderly "
-            "maintenance of the campus premises and shall cooperate with the "
-            "faculty and staff in ensuring that this standard is upheld.",
+            "maintenance of the campus premises and shall cooperate with "
+            "the faculty and staff in ensuring that this standard is "
+            "upheld.",
         ],
     },
     {
@@ -433,8 +459,10 @@ _JDSD_2026_RULES = [
             "form an important part of the student's skill development and "
             "industry exposure.",
             {
-                "text": "Students shall be responsible for bearing the "
-                        "prescribed expenses towards:",
+                "text": "Students shall bear the expenses prescribed by the "
+                        "Institute towards the following, the estimated "
+                        "amounts of which will be communicated in advance "
+                        "for each academic year:",
                 "bullets": [
                     "Materials",
                     "Educational/study tours",
@@ -445,8 +473,8 @@ _JDSD_2026_RULES = [
             "During study tours, excursions, seminars, exhibitions or other "
             "off-campus activities, the Institute shall not be responsible "
             "for any mishap, accident, loss, injury or unforeseen "
-            "circumstance, except to the extent of responsibility imposed by "
-            "applicable law.",
+            "circumstance, except to the extent of responsibility imposed "
+            "by applicable law.",
         ],
     },
     {
@@ -481,19 +509,21 @@ _JDSD_2026_RULES = [
             "without any backlog, wherever applicable.",
             "The final portfolio must be completed and submitted within the "
             "stipulated time.",
-            "Students should make sure that they are Successfully completing "
-            "and submitting the mandatory design projects.",
-            "Participation in the JD Design Awards is mandatory, as it forms "
-            "an important part of the students’ portfolio. However, "
+            "Students must successfully complete and submit the mandatory "
+            "design projects.",
+            "Participation in the Annual Design Awards is mandatory, as it "
+            "forms an important part of the students’ portfolio. However, "
             "only eligible and shortlisted students will be permitted to "
             "showcase their collections/projects at the final event.",
-            "The students should make sure that they maintain attendance of "
-            "75% without any fail.",
-            "All academics, administrative, financial, examination, project, "
-            "internship, and other institutional requirement must be "
+            "Students must maintain a minimum attendance of 75%, as "
+            "prescribed in Section 2.",
+            "All academic, administrative, financial, examination, project, "
+            "internship, and other institutional requirements must be "
             "completed before the certificate is issued.",
-            "All Marks Cards, Certificates, and other academic credentials "
-            "are issued by the respective university.",
+            "For University-affiliated programmes, Marks Cards, degree "
+            "certificates and other academic credentials are issued by the "
+            "University. Certificates for the Institute’s own programmes "
+            "are issued by the Institute.",
         ],
     },
     {
@@ -519,9 +549,9 @@ _JDSD_2026_RULES = [
             "Objection Certificate (NOC) from the concerned "
             "department/faculty/staff for every examination, wherever "
             "prescribed.",
-            "The students who fail to get their NOC SIgned will not be "
-            "issued the Hall Ticket and may not be permitted to appear for "
-            "the Semester-End Examination, subject to applicable University "
+            "Students who do not obtain the required NOC may not be issued "
+            "the Hall Ticket and may not be permitted to appear for the "
+            "Semester-End Examination, subject to applicable University "
             "regulations.",
         ],
     },
@@ -529,243 +559,28 @@ _JDSD_2026_RULES = [
         "text": "CODE OF CONDUCT AND DISCIPLINE",
         "emphasis": True,
         "subs": [
-            "Students are expected to maintain discipline, dignity, respect, "
-            "and professional conduct at all times within and outside the "
-            "campus while participating in Institute-related activities.",
-            "Any form of indiscipline, misconduct, misbehaviour, harassment, "
-            "intimidation, damage to property, or violation of Institute "
-            "rules shall invite strict disciplinary action and may, "
-            "depending on the seriousness of the offence, result in "
+            "Students are expected to maintain discipline, dignity, "
+            "respect, and professional conduct at all times within and "
+            "outside the campus while participating in Institute-related "
+            "activities.",
+            "Any form of indiscipline, misconduct, misbehaviour, "
+            "harassment, intimidation, damage to property, or violation of "
+            "Institute rules shall invite strict disciplinary action and "
+            "may, depending on the seriousness of the offence, result in "
             "suspension or expulsion.",
             "Misbehaviour or inappropriate conduct by a parent/guardian "
             "towards the management, faculty, or staff may also be "
-            "considered while reviewing the student's continuation with the "
-            "Institute.",
+            "considered while reviewing the student's continuation with "
+            "the Institute.",
             "The Institute reserves the right to cancel the admission of a "
             "candidate/student at any stage, including after admission, if "
-            "any material discrepancy is found in the student's documents, "
-            "declarations, conduct, or eligibility, or in cases involving "
-            "serious misconduct by the student or parent/guardian.",
+            "any material discrepancy is found in the student’s documents, "
+            "declarations, or eligibility, or in cases involving serious "
+            "misconduct by the student, after giving the student a "
+            "reasonable opportunity to be heard.",
             "Students and parents/guardians are expected to cooperate with "
-            "the Institute and its staff in maintaining a safe, disciplined, "
-            "clean, and professional campus environment.",
-            "Students must maintain punctuality and regularity in attendance",
-            "Students are expected to maintain proper discipline, decorum, "
-            "and professional conduct within the campus and during all "
-            "Institute-related activities.",
-            "Students shall treat faculty, staff, fellow students, visitors, "
-            "and other members of the Institute community with respect and "
-            "courtesy.",
-            "Any form of misconduct, indiscipline, harassment, bullying, "
-            "intimidation, threatening behaviour, physical altercation, or "
-            "verbal abuse shall be subject to disciplinary action.",
-            "Students must comply with the Institute's rules, regulations, "
-            "and instructions issued by authorized faculty or administrative "
-            "personnel.",
-            "Disrupting classes, examinations, or Institute functions "
-            "through inappropriate behaviour or repeated non-compliance with "
-            "instructions shall constitute misconduct.",
-            "Unauthorized recording, photographing, or sharing of photos, "
-            "videos, or Institute-related content may be restricted where it "
-            "violates privacy or confidentiality.",
-            "Students must use the Institute's official communication "
-            "channels responsibly and shall not misuse them for abusive, "
-            "offensive, or misleading communication.",
-            "Cheating, plagiarism, academic malpractice, impersonation, or "
-            "submission of fraudulent documents shall be treated as a "
-            "serious disciplinary matter.",
-            "Possession or use of prohibited substances, weapons, or other "
-            "restricted items on campus shall be dealt with as per "
-            "applicable law and Institute regulations.",
-            "Students may be required to explain their conduct or appear "
-            "before the designated disciplinary authority when an allegation "
-            "of misconduct is reported.",
-            "Disciplinary action for proven misconduct may range from a "
-            "warning, counselling, or fine to suspension or "
-            "termination/expulsion, depending on the severity, subject to "
-            "due process.",
-            "Repeated or serious misconduct may attract stricter action, "
-            "even where a prior warning has already been issued.",
-            "The Institute reserves the right to act on misconduct occurring "
-            "during Institute-organized events, field visits, internships, "
-            "or online activities that affect the Institute or its "
-            "community.",
-            "All disciplinary matters shall be decided by the designated "
-            "authority as per applicable procedure, and the decision shall "
-            "be communicated through official Institute channels.",
-        ],
-    },
-    {
-        "text": "PERSONAL INFORMATION AND DECLARATIONS",
-        "emphasis": True,
-        "subs": [
-            "Any change in the student's address, telephone number, email "
-            "address, or other contact details must be communicated to the "
-            "Administration office in writing without delay.",
-            "Parents/guardians and students are required to provide all "
-            "information and declarations required by the Institute and/or "
-            "University at the time of admission, including applicable "
-            "declarations relating to physical or mental health conditions, "
-            "learning disabilities, and legal/criminal matters, as required "
-            "by law and institutional policy.",
-            "Students and parents/guardians shall ensure that all "
-            "information furnished in admission and academic records is "
-            "complete, accurate, and truthful.",
-        ],
-    },
-    {
-        "text": "MANAGEMENT'S RIGHT AND FINAL DECISION",
-        "emphasis": True,
-        "subs": [
-            "The Institute reserves the right to amend, modify, introduce, "
-            "or withdraw rules, regulations, fees, academic requirements, "
-            "and procedures from time to time in accordance with "
-            "institutional policies and applicable University/statutory "
-            "regulations.",
-            "The decision of the Management shall be final and binding in "
-            "all matters concerning the administration and internal "
-            "functioning of the Institute, subject to applicable University "
-            "regulations and law.",
-        ],
-    },
-]
-
-
-# === JDIFT 2026 ======================================================
-#
-# "RULES & REGULATIONS, FEE POLICY AND STUDENT UNDERTAKING".
-# Sections are lettered A-I in the signed document, hence
-# `list_style="upper-alpha"` on the bundle. Section C is a flat bullet
-# list rather than numbered items, so it carries `ordered: False`.
-
-_JDIFT_2026_RULES = [
-    {
-        "text": "FEE PAYMENT AND FINANCIAL REGULATIONS",
-        "emphasis": True,
-        "subs": [
-            "Mode of Payment: Fees may be paid by Cash, Cheque, Demand "
-            "Draft, RTGS, NEFT, IMPS, or Online Transfer in favour of JD "
-            "INSTITUTE OF FASHION TECHNOLOGY, payable at Bengaluru.",
-            "All students are required to pay a Tution Fee (JD) "
-            "Registration Fee of Rs. 10,000/- (plus applicable GST) at the "
-            "time of admission. The Registration Fee, once paid, is "
-            "strictly non-refundable under any circumstances.",
-            "Cheque Dishonour / Delayed Payment: In the event of cheque "
-            "dishonour, the student shall be liable to pay the applicable "
-            "bank charges and in case of delayed payment, students are "
-            "liable to pay the prescribed penalty.",
-            "Non-Refundable and Non-Transferable Fees: In the event of "
-            "withdrawal of candidature or cancellation of admission, fees "
-            "once paid shall be non-refundable and non-transferable under "
-            "any circumstances.",
-            "Course Eligibility and Certification: In the case of full "
-            "payment of fees, if a student does not fulfil the academic "
-            "requirements like,attendance,examination, internship, "
-            "portfolio, or other prescribed course requirements, the "
-            "student shall not be eligible for certification.",
-            "Fee Receipts: Students must collect and retain official fee "
-            "receipts for all payments made through any of the modes "
-            "mentioned above.",
-            {
-                "text": "Change of Batch / Course: If a student wishes to "
-                        "shift to a subsequent batch or change the course "
-                        "from the batch/course to which the student was "
-                        "originally admitted, such transfer/change shall be "
-                        "considered only in cases where the request is "
-                        "genuine and supported by valid reasons. The "
-                        "approval of any such request shall be at the sole "
-                        "discretion of the Management.\n\n"
-                        "The following transfer/change fee shall be "
-                        "applicable:",
-                "bullets": [
-                    "First change of batch/course: ₹10,000/-",
-                    "Second change of batch/course: ₹20,000/-",
-                    "Any subsequent change of batch/course: Charges as may "
-                    "be determined by the Management from time to time.",
-                ],
-                "after": "The Management reserves the right to accept or "
-                         "reject any request based on the genuineness and "
-                         "validity of the circumstances stated by the "
-                         "student.",
-            },
-            "Change of Centre: If a student wishes to transfer from one "
-            "Institute centre to another, a transfer charge of ₹25,000/- "
-            "shall be payable, only in cases where the request is genuine "
-            "and supported by valid reasons. The approval of any such "
-            "request shall be at the sole discretion of the Management.",
-            "Tuition Fees: The academic fee includes tuition fees "
-            "applicable for the respective academic year. The Management "
-            "reserves the right to revise tuition fees in accordance with "
-            "institutional policies and applicable academic requirements.",
-            "Examination and Re-examination Fees: Students shall pay the "
-            "prescribed examination fee for each semester. Students who "
-            "fail or are required to reappear for an examination shall be "
-            "liable to pay the prescribed re-examination fee.",
-            "Late Fee: Students who fail to remit the prescribed fees on or "
-            "before the due date shall be liable to pay a late payment "
-            "penalty of ₹500/- per day, calculated from the date on which "
-            "the respective instalment falls due.",
-            "Additional Charges: An additional annual fee of Rs. 100/- "
-            "towards the DKUL/LMS platform shall be payable as applicable.",
-        ],
-    },
-    {
-        "text": "ATTENDANCE AND ACADEMIC REQUIREMENTS",
-        "emphasis": True,
-        "subs": [
-            "A student who fails to maintain the prescribed 85% attendance "
-            "shall not be eligible to appear for the semester-end "
-            "examination and may be required to repeat the semester by "
-            "paying the applicable re-admission fee, subject to "
-            "institutional rules.",
-            "Students must be seated in the classroom at least 10 minutes "
-            "before the scheduled commencement of the class. Students "
-            "arriving late may not be permitted to attend the class.",
-            "Mobile phones, games, music and other unauthorised electronic "
-            "activities are strictly prohibited during class hours.",
-            "Timely submission of assignments, as per the deadlines "
-            "prescribed by the respective Subject Mentor, is mandatory.",
-            "Late submission of assignments may not be evaluated or "
-            "awarded marks/grades, and may adversely affect the student's "
-            "overall academic performance.",
-            "Semester hall tickets and mark cards must be collected from "
-            "the Institute within the stipulated period as communicated "
-            "through official notices.",
-            "Students must obtain the required No Objection Certificate "
-            "(NOC) from the respective department/staff for every "
-            "examination, wherever prescribed. A student who fails to "
-            "obtain the required NOC may not be issued the hall ticket and "
-            "may not be permitted to appear for the semester-end "
-            "examination.",
-        ],
-    },
-    {
-        "text": "IDENTITY CARD AND CAMPUS DISCIPLINE",
-        "emphasis": True,
-        # The signed document runs this section as a bullet list under a
-        # lead-in paragraph, with no numbering.
-        "ordered": False,
-        "intro":
-            "It is mandatory for all students to wear and visibly display "
-            "their Institute Identity Card at all times while in the "
-            "institute, including during class hours, lunch breaks, "
-            "movement from one building to another, Institute visits, "
-            "examinations, workshops, events, and other academic or "
-            "official activities.",
-        "subs": [
-            "Failure to wear or produce the Identity Card when required "
-            "shall attract a fine of ₹500/-.",
-            "In case of loss of the Identity Card, the student shall pay "
-            "₹1,000/- towards the issuance of a replacement Identity Card.",
-            "The Identity Card is strictly non-transferable and must be "
-            "used only by the student to whom it is issued.",
-            "Any misuse, alteration, lending, sharing, tampering, "
-            "fraudulent use, or other unauthorised use of the Identity Card "
-            "shall be treated as serious misconduct.",
-            "If a student is found misusing the Identity Card, the "
-            "Institute reserves the right to take strict disciplinary "
-            "action, including suspension or suspension/expulsion, "
-            "depending on the seriousness of the violation.",
+            "the Institute and its staff in maintaining a safe, "
+            "disciplined, clean, and professional campus environment.",
             "Students must maintain punctuality and regularity in "
             "attendance",
             "Students are expected to maintain proper discipline, decorum, "
@@ -806,16 +621,289 @@ _JDIFT_2026_RULES = [
             "even where a prior warning has already been issued.",
             "The Institute reserves the right to act on misconduct "
             "occurring during Institute-organized events, field visits, "
-            "internships, or online activities that affect the Institute or "
-            "its community.",
+            "internships, or online activities that affect the Institute "
+            "or its community.",
             "All disciplinary matters shall be decided by the designated "
             "authority as per applicable procedure, and the decision shall "
             "be communicated through official Institute channels.",
-            "The decision of the Management regarding disciplinary action "
-            "shall be final.",
+            "Ragging in any form is strictly prohibited on and off the "
+            "campus and is a punishable offence. The Institute follows the "
+            "UGC Regulations on Curbing the Menace of Ragging in Higher "
+            "Educational Institutions, 2009. Every student and "
+            "parent/guardian shall submit the anti-ragging undertaking in "
+            "the prescribed form at the time of admission and at the start "
+            "of each academic year. A student found guilty of ragging shall "
+            "be liable to disciplinary action, including expulsion, and the "
+            "matter may be reported to the police.",
+            "The Institute has constituted an Internal Complaints Committee "
+            "to address complaints of sexual harassment, in accordance with "
+            "the UGC (Prevention, Prohibition and Redressal of Sexual "
+            "Harassment of Women Employees and Students in Higher "
+            "Educational Institutions) Regulations, 2015, and a Student "
+            "Grievance Redressal Committee in accordance with applicable "
+            "UGC regulations. Students and parents/guardians may raise any "
+            "complaint or grievance, including in relation to fees, "
+            "academics, or discipline, with the relevant committee. Details "
+            "are available on the Institute’s website and notice board.",
         ],
     },
     {
+        "text": "PERSONAL INFORMATION AND DECLARATIONS",
+        "emphasis": True,
+        "subs": [
+            "Any change in the student's address, telephone number, email "
+            "address, or other contact details must be communicated to the "
+            "Administration office in writing without delay.",
+            "Parents/guardians and students are required to provide all "
+            "information and declarations required by the Institute and/or "
+            "University at the time of admission, including applicable "
+            "declarations relating to physical or mental health conditions, "
+            "learning disabilities, and legal/criminal matters, as required "
+            "by law and institutional policy.",
+            "Students and parents/guardians shall ensure that all "
+            "information furnished in admission and academic records is "
+            "complete, accurate, and truthful.",
+        ],
+    },
+    {
+        "text": "MANAGEMENT'S RIGHT AND FINAL DECISION",
+        "emphasis": True,
+        "subs": [
+            "The Institute reserves the right to amend, modify, introduce, "
+            "or withdraw rules, regulations, academic requirements, and "
+            "procedures from time to time in accordance with institutional "
+            "policies and applicable University/statutory regulations. "
+            "Changes will be notified through the Institute’s official "
+            "channels. Fees shall be revised only as stated in Section 1.",
+            "The decision of the Management shall be final and binding in "
+            "all matters concerning the administration and internal "
+            "functioning of the Institute, subject to the grievance "
+            "redressal mechanism, applicable University regulations, and "
+            "law.",
+            "These rules and this undertaking are governed by the laws of "
+            "India, and the courts at Bengaluru shall have jurisdiction.",
+        ],
+    },
+]
+
+
+# === JDIFT 2026 (clean) =================================================
+#
+# "RULES & REGULATIONS, FEE POLICY AND STUDENT UNDERTAKING" — the
+# "Clean" document signed off in October 2026. Sections are lettered
+# A, B, C, C-1, D, E, F, G, H, I in the signed document, so every
+# section carries its own `label`. Sections C and C-1 are flat bullet
+# lists rather than numbered items, so they carry `ordered: False`.
+
+_JDIFT_2026_RULES = [
+    {
+        "label": "A",
+        "text": "FEE PAYMENT AND FINANCIAL REGULATIONS",
+        "emphasis": True,
+        "subs": [
+            "Mode of Payment: Fees may be paid by Cash, Cheque, Demand "
+            "Draft, RTGS, NEFT, IMPS, or Online Transfer in favour of JD "
+            "INSTITUTE OF FASHION TECHNOLOGY, payable at their respective "
+            "centres.",
+            "All students are required to pay a Registration Fee of "
+            "Rs. 11,800/-(inclusive of GST) at the time of admission. The "
+            "Registration Fee is non-refundable.",
+            "Cheque Dishonour / Delayed Payment: In the event of cheque "
+            "dishonour, the student shall be liable to pay the bank charges "
+            "actually incurred by the Institute, and in case of delayed "
+            "payment, the late fee specified below.",
+            "Non-Refundable and Non-Transferable Fees: In the event of "
+            "withdrawal of candidature or cancellation of admission, fees "
+            "once paid shall be non-refundable and non-transferable under "
+            "any circumstances whatsoever",
+            "Course Eligibility and Certification: Payment of fees, "
+            "including payment in full, does not by itself entitle a "
+            "student to certification. A student who does not fulfil the "
+            "academic requirements, such as attendance, examination, "
+            "internship, portfolio, or other prescribed course "
+            "requirements, shall not be eligible for certification.",
+            "Fee Receipts: Students must collect and retain official fee "
+            "receipts for all payments made through any of the modes "
+            "mentioned above.",
+            {
+                "text": "Change of Batch / Course: If a student wishes to "
+                        "shift to a subsequent batch or change the course "
+                        "from the batch/course to which the student was "
+                        "originally admitted, such transfer/change shall be "
+                        "considered only in cases where the request is "
+                        "genuine and supported by valid reasons. The "
+                        "Management will decide any such request reasonably "
+                        "and communicate its decision in writing.\n\n"
+                        "The following transfer/change fee shall be "
+                        "applicable:",
+                "bullets": [
+                    "First change of batch/course: ₹10,000/-",
+                    "Second change of batch/course: ₹20,000/-",
+                    "Any subsequent change of batch/course: Charges as may "
+                    "be determined by the Management from time to time.",
+                ],
+                "after": "The Management reserves the right to accept or "
+                         "reject any request based on the genuineness and "
+                         "validity of the circumstances stated by the "
+                         "student.",
+            },
+            "Change of Centre: If a student wishes to transfer from one "
+            "Institute centre to another, a transfer charge of ₹25,000/- "
+            "shall be payable, only in cases where the request is genuine "
+            "and supported by valid reasons. The Management will decide any "
+            "such request reasonably and communicate its decision in "
+            "writing.",
+            "Tuition Fees: The academic fee includes tuition fees "
+            "applicable for the respective academic year. The Management "
+            "reserves the right to revise tuition fees in accordance with "
+            "institutional policies and applicable academic requirements.",
+            "Examination and Re-examination Fees: Students shall pay the "
+            "prescribed examination fee for each semester. Students who "
+            "fail or are required to reappear for an examination shall be "
+            "liable to pay the prescribed re-examination fee.",
+            "Late Fee: Students who fail to remit the prescribed fees on or "
+            "before the due date shall be liable to pay a late payment "
+            "penalty of ₹500/- per day, calculated from the date on which "
+            "the respective instalment falls due.",
+            "Additional Charges: An additional annual fee of Rs. 100/- "
+            "towards the DKUL/LMS platform shall be payable as applicable.",
+            "The annual vehicle parking sticker fee shall be Rs. 50/- per "
+            "vehicle, subject to the applicable parking rules.",
+            "FEES MAY BE REVISED FROM TIME TO TIME IN ACCORDANCE WITH "
+            "INSTITUTIONAL POLICIES AND APPLICABLE REGULATIONS.",
+        ],
+    },
+    {
+        "label": "B",
+        "text": "ATTENDANCE AND ACADEMIC REQUIREMENTS",
+        "emphasis": True,
+        "subs": [
+            "A student who fails to maintain the prescribed 85% attendance "
+            "shall not be eligible to appear for the semester-end "
+            "examination and may be required to repeat the semester by "
+            "paying the applicable re-admission fee, subject to "
+            "institutional rules.",
+            "Students must be seated in the classroom at least 10 minutes "
+            "before the scheduled commencement of the class. Students "
+            "arriving late may not be permitted to attend the class.",
+            "Mobile phones, games, music and other unauthorised electronic "
+            "activities are strictly prohibited during class hours.",
+            "Timely submission of assignments, as per the deadlines "
+            "prescribed by the respective Subject Mentor, is mandatory.",
+            "Late submission of assignments may not be evaluated or awarded "
+            "marks/grades, and may adversely affect the student's overall "
+            "academic performance.",
+            "Semester hall tickets and mark cards must be collected from "
+            "the Institute within the stipulated period as communicated "
+            "through official notices.",
+            "Students must obtain the required No Objection Certificate "
+            "(NOC) from the respective department/staff for every "
+            "examination, wherever prescribed. A student who fails to "
+            "obtain the required NOC may not be issued the hall ticket and "
+            "may not be permitted to appear for the semester-end "
+            "examination.",
+        ],
+    },
+    {
+        "label": "C",
+        "text": "IDENTITY CARD AND CAMPUS DISCIPLINE",
+        "emphasis": True,
+        "intro": "It is mandatory for all students to wear and visibly "
+                 "display their Institute Identity Card at all times while "
+                 "in the institute, including during class hours, lunch "
+                 "breaks, movement from one building to another, Industry "
+                 "visits, examinations, workshops, events, and other "
+                 "academic or official activities.",
+        "ordered": False,
+        "subs": [
+            "Failure to wear or produce the Identity Card when required "
+            "shall attract a fine of ₹500/-.",
+            "In case of loss of the Identity Card, the student shall pay "
+            "₹1,000/- towards the issuance of a replacement Identity Card.",
+            "The Identity Card is strictly non-transferable and must be "
+            "used only by the student to whom it is issued.",
+            "Any misuse, alteration, lending, sharing, tampering, "
+            "fraudulent use, or other unauthorised use of the Identity Card "
+            "shall be treated as serious misconduct.",
+            "Misuse, exchange, lending, borrowing, or transfer of Identity "
+            "Cards is strictly prohibited. Any such violation may attract a "
+            "fine of up to Rs. 5,000/- on each student involved, and the "
+            "Institute may take further disciplinary action, including "
+            "suspension/expulsion, in accordance with Section 9, depending "
+            "on the seriousness of the violation.",
+        ],
+    },
+    {
+        "label": "C-1",
+        "text": "CODE OF CONDUCT AND DISCIPLINE",
+        "emphasis": True,
+        "ordered": False,
+        "subs": [
+            "Students must maintain punctuality and regularity in "
+            "attendance",
+            "Students are expected to maintain proper discipline, decorum, "
+            "and professional conduct within the campus and during all "
+            "Institute-related activities.",
+            "Students shall treat faculty, staff, fellow students, "
+            "visitors, and other members of the Institute community with "
+            "respect and courtesy.",
+            "Any form of misconduct, indiscipline, harassment, bullying, "
+            "intimidation, threatening behaviour, physical altercation, or "
+            "verbal abuse shall be subject to disciplinary action.",
+            "Students must comply with the Institute's rules, regulations, "
+            "and instructions issued by authorized faculty or "
+            "administrative personnel.",
+            "Disrupting classes, examinations, or Institute functions "
+            "through inappropriate behaviour or repeated non-compliance "
+            "with instructions shall constitute misconduct.",
+            "Students shall not record, photograph, or share photos, "
+            "videos, or other content of classes, faculty, staff, or other "
+            "students, or confidential Institute material, without the "
+            "consent of the persons concerned and the Institute.",
+            "Students must use the Institute's official communication "
+            "channels responsibly and shall not misuse them for abusive, "
+            "offensive, or misleading communication.",
+            "Cheating, plagiarism, academic malpractice, impersonation, or "
+            "submission of fraudulent documents shall be treated as a "
+            "serious disciplinary matter.",
+            "Possession or use of prohibited substances, weapons, or other "
+            "restricted items on campus shall be dealt with as per "
+            "applicable law and Institute regulations.",
+            "Students may be required to explain their conduct or appear "
+            "before the designated disciplinary authority when an "
+            "allegation of misconduct is reported.",
+            "Disciplinary action for proven misconduct may range from a "
+            "warning, counselling, or fine to suspension or "
+            "termination/expulsion, depending on the severity, subject to "
+            "due process.",
+            "Repeated or serious misconduct may attract stricter action, "
+            "even where a prior warning has already been issued.",
+            "The Institute reserves the right to act on misconduct "
+            "occurring during Institute-organized events, field visits, "
+            "internships, or online activities that affect the Institute "
+            "or its community.",
+            "All disciplinary matters shall be decided by the designated "
+            "authority as per applicable procedure, and the decision shall "
+            "be communicated through official Institute channels.",
+            "A student aggrieved by a disciplinary decision may appeal in "
+            "writing to the Management within 15 days of the decision. The "
+            "decision of the Management on appeal shall be final, subject "
+            "to applicable law.",
+            "Ragging in any form is strictly prohibited on and off the "
+            "campus and is a punishable offence. A student found guilty of "
+            "ragging shall be liable to disciplinary action, including "
+            "expulsion, and the matter may be reported to the police.",
+            "The Institute has constituted an Internal Complaints Committee "
+            "under the Sexual Harassment of Women at Workplace (Prevention, "
+            "Prohibition and Redressal) Act, 2013. Students may raise "
+            "complaints of sexual harassment with the Committee, and any "
+            "other grievance (including on fees, academics or discipline) "
+            "with the Grievance Officer, whose details are available on the "
+            "Institute’s notice board and website.",
+        ],
+    },
+    {
+        "label": "D",
         "text": "LIBRARY, CAMPUS PROPERTY AND RESPONSIBILITY",
         "emphasis": True,
         "subs": [
@@ -834,6 +922,7 @@ _JDIFT_2026_RULES = [
         ],
     },
     {
+        "label": "E",
         "text": "WORKSHOPS, EVENTS, STUDY TOURS AND INDUSTRY EXPOSURE",
         "emphasis": True,
         "subs": [
@@ -842,8 +931,10 @@ _JDIFT_2026_RULES = [
             "compulsory, as these activities form an important part of the "
             "student's skill development and industry exposure.",
             {
-                "text": "Students shall be responsible for bearing the "
-                        "prescribed expenses towards:",
+                "text": "Students shall bear the expenses prescribed by the "
+                        "Institute towards the following, the estimated "
+                        "amounts of which will be communicated in advance "
+                        "for each academic year:",
                 "bullets": [
                     "Materials",
                     "Educational/study tours",
@@ -863,21 +954,23 @@ _JDIFT_2026_RULES = [
         ],
     },
     {
+        "label": "F",
         "text": "CERTIFICATION REQUIREMENTS",
         "emphasis": True,
-        "intro": "The award of the final course certificate shall be "
-                 "subject to the student fulfilling all prescribed academic "
-                 "and institutional requirements, including:",
+        "intro": "The award of the final course certificate shall be subject "
+                 "to the student fulfilling all prescribed academic and "
+                 "institutional requirements, including:",
         "subs": [
             "Passing all subjects without any backlog.",
             "Maintaining the prescribed minimum attendance.",
             "Submitting the final portfolio within the stipulated deadline.",
             "Successfully completing and submitting the mandatory design "
             "project.",
-            "Participation in the JD Design Awards is mandatory, as it "
-            "forms an important part of the students’ portfolio. However, "
-            "only eligible and shortlisted students will be permitted to "
-            "showcase their collections/projects at the final event.",
+            "Participation in the JD Design Awards, which is mandatory as "
+            "it forms an important part of the students’ portfolio. "
+            "However, only eligible and shortlisted students will be "
+            "permitted to showcase their collections/projects at the final "
+            "event.",
             "It shall be mandatory for students to complete a minimum of "
             "one month of internship and to submit the internship "
             "experience certificate obtained from the concerned "
@@ -887,6 +980,7 @@ _JDIFT_2026_RULES = [
         ],
     },
     {
+        "label": "G",
         "text": "COMMUNICATION AND STUDENT RESPONSIBILITIES",
         "emphasis": True,
         "subs": [
@@ -896,15 +990,16 @@ _JDIFT_2026_RULES = [
             "communication channels.",
             "Students are responsible for regularly checking official "
             "Institute notices and communications.",
-            "Any change in the student's residential address, telephone "
+            "Any change in the student’s residential address, telephone "
             "number, email address or other contact details must be "
-            "communicated to the Administration office through a written "
-            "application without delay.",
+            "communicated to the Administration office in writing without "
+            "delay.",
             "Students are responsible for complying with all applicable "
             "Institute and statutory rules and regulations.",
         ],
     },
     {
+        "label": "H",
         "text": "DECLARATION OF PERSONAL INFORMATION",
         "emphasis": True,
         "subs": [
@@ -916,13 +1011,15 @@ _JDIFT_2026_RULES = [
             "pertaining to physical or mental health conditions, learning "
             "disabilities, and/or criminal records at the time of "
             "admission.",
-            "Any deliberate suppression or misrepresentation of such "
+            "Any deliberate suppression or misrepresentation of material "
             "information shall render the student liable to appropriate "
-            "action, including cancellation of admission, subject to "
+            "action, including cancellation of admission after a written "
+            "show-cause notice and an opportunity to be heard, subject to "
             "applicable law and regulations.",
         ],
     },
     {
+        "label": "I",
         "text": "GENERAL TERMS",
         "emphasis": True,
         "subs": [
@@ -931,9 +1028,8 @@ _JDIFT_2026_RULES = [
             "requirements, administrative procedures, and other "
             "institutional policies from time to time, subject to "
             "applicable statutory regulations.",
-            "Students and parents/guardians shall be deemed to have "
-            "accepted and agreed to comply with the Rules & Regulations "
-            "upon admission.",
+            "Students and parents/guardians agree to comply with these "
+            "Rules & Regulations by signing the declaration below.",
             "The decision of the Management shall be final in all matters "
             "relating to the administration and implementation of these "
             "Rules & Regulations, subject to applicable laws and "
@@ -943,10 +1039,14 @@ _JDIFT_2026_RULES = [
             "degrees. We provide professional training programmes designed "
             "to develop practical knowledge and industry-relevant skills.",
             "Academic degree certificates are not awarded by our centre. "
-            "However, upon successful completion of the applicable Diploma "
-            "Course, the prescribed Diploma Certificate is awarded in "
-            "accordance with the terms and requirements of the respective "
-            "programme.",
+            "Upon successful completion of the applicable Diploma Course, "
+            "the Institute awards its own Diploma Certificate in accordance "
+            "with the terms and requirements of the respective programme.",
+            "These Rules & Regulations are governed by the laws of India, "
+            "and the courts at Bengaluru shall have exclusive jurisdiction. "
+            "If any provision is held invalid, the remaining provisions "
+            "shall continue in force. Nothing in these Rules & Regulations "
+            "limits any right of the student under applicable law.",
         ],
     },
 ]
@@ -964,12 +1064,17 @@ def _normalise_sub(sub) -> dict:
     }
 
 
-def _normalise(rule) -> dict:
+def _normalise(rule, label: str = "") -> dict:
     """Every rule leaves this module in the same shape, so no consumer
-    has to branch on "is it a string or an object"."""
+    has to branch on "is it a string or an object".
+
+    `label` is the section marker the document prints ("A", "C-1",
+    "3"). The rule's own `label` wins; otherwise the caller supplies
+    the running number/letter."""
     if isinstance(rule, str):
         rule = {"text": rule}
     return {
+        "label": rule.get("label") or label,
         "text": rule["text"],
         "intro": rule.get("intro", ""),
         "subs": [_normalise_sub(s) for s in (rule.get("subs") or [])],
@@ -1001,8 +1106,9 @@ def rules_for(institute_code: str) -> list[dict]:
     the generic fee block.
     """
     if institute_code == "JDSD":
-        return [_normalise(r) for r in _JDSD_2026_RULES]
+        return [_normalise(r, str(n)) for n, r in enumerate(_JDSD_2026_RULES, 1)]
     if institute_code == "JDIFT":
+        # Every JDIFT section carries its own letter (A … C, C-1, D … I).
         return [_normalise(r) for r in _JDIFT_2026_RULES]
 
     fees = {
@@ -1012,7 +1118,8 @@ def rules_for(institute_code: str) -> list[dict]:
         # in its own right.
         "emphasis": True,
     }
-    return [_normalise(fees)] + [_normalise(r) for r in _SHARED_RULES]
+    rules = [fees] + list(_SHARED_RULES)
+    return [_normalise(r, str(n)) for n, r in enumerate(rules, 1)]
 
 
 def declaration_for(institute_code: str) -> str:
@@ -1036,6 +1143,7 @@ def terms_for(institute_code: str) -> dict:
         # JDSD's 2026 document titles this section "Undertaking by the
         # student". Served rather than branched on in each UI, so the
         # form, the portal and the PDF cannot label it differently.
+        "preamble": _PREAMBLES.get(code, ""),
         "declaration_title": _DECLARATION_TITLES.get(code, "Declaration"),
         "declaration": declaration_for(code),
         "fee_recipient": _FEE_RECIPIENT.get(code, _DEFAULT_FEE_RECIPIENT),

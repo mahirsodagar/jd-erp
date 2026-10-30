@@ -20,7 +20,24 @@ class JdsdTerms2026Tests(TestCase):
 
     def test_item_counts_match_the_signed_document(self):
         counts = [len(r["subs"]) for r in self.t["rules"]]
-        self.assertEqual(counts, [14, 7, 4, 3, 3, 2, 7, 6, 20, 3, 2])
+        self.assertEqual(counts, [13, 7, 4, 3, 3, 2, 7, 6, 22, 3, 3])
+
+    def test_sections_are_numbered_by_label(self):
+        self.assertEqual([r["label"] for r in self.t["rules"]],
+                         [str(n) for n in range(1, 12)])
+
+    def test_preamble_defines_the_parties(self):
+        self.assertIn("JD School of Design", self.t["preamble"])
+        self.assertIn("“University”", self.t["preamble"])
+
+    def test_clean_wording_landed(self):
+        fees = [s["text"] for s in self.t["rules"][0]["subs"]]
+        self.assertIn("12 % per annum", fees[7])
+        self.assertIn("Fee Refund Policy", fees[4])
+        self.assertIn("their respective centres", fees[0])
+        conduct = [s["text"] for s in self.t["rules"][8]["subs"]]
+        self.assertIn("Curbing the Menace of Ragging", conduct[20])
+        self.assertIn("Student Grievance Redressal Committee", conduct[21])
 
     def test_nested_bullets_survive(self):
         """Rule 1.11 lists what the academic fee covers."""
@@ -28,6 +45,7 @@ class JdsdTerms2026Tests(TestCase):
         nested = [s for s in fees if s["bullets"]]
         self.assertEqual(len(nested), 1)
         self.assertIn("may include", nested[0]["text"])
+        self.assertEqual(len(self.t["rules"][2]["subs"][0]["bullets"]), 6)
         self.assertIn("Tuition fees", nested[0]["bullets"])
 
     def test_section_seven_keeps_its_lead_in(self):
@@ -54,7 +72,8 @@ class JdsdTerms2026Tests(TestCase):
     def test_fee_note_present_without_the_blank_table(self):
         self.assertEqual(len(self.t["fee_note"]), 2)
         self.assertIn("one year", self.t["fee_note"][0])
-        self.assertIn("MS BCU", self.t["fee_note"][1])
+        self.assertIn("each year of the course for this batch", self.t["fee_note"][0])
+        self.assertIn("Demand Draft", self.t["fee_note"][1])
 
     def test_disclaimer_still_served(self):
         self.assertIsNotNone(self.t["disclaimer"])
@@ -70,21 +89,40 @@ class JdsdTerms2026Tests(TestCase):
 
 class JdiftTerms2026Tests(TestCase):
     """JDI's own 2026 document — "RULES & REGULATIONS, FEE POLICY AND
-    STUDENT UNDERTAKING", nine sections lettered A-I."""
+    STUDENT UNDERTAKING", ten sections lettered A, B, C, C-1, D-I."""
 
     def setUp(self):
         self.t = terms_for("JDIFT")
 
-    def test_nine_sections_in_document_order(self):
+    def test_ten_sections_in_document_order(self):
         titles = [r["text"] for r in self.t["rules"]]
-        self.assertEqual(len(titles), 9)
+        self.assertEqual(len(titles), 10)
         self.assertEqual(titles[0], "FEE PAYMENT AND FINANCIAL REGULATIONS")
         self.assertEqual(titles[2], "IDENTITY CARD AND CAMPUS DISCIPLINE")
-        self.assertEqual(titles[8], "GENERAL TERMS")
+        self.assertEqual(titles[3], "CODE OF CONDUCT AND DISCIPLINE")
+        self.assertEqual(titles[9], "GENERAL TERMS")
+
+    def test_sections_carry_the_documents_own_letters(self):
+        """C-1 sits between C and D; auto-lettering would mislabel it."""
+        self.assertEqual([r["label"] for r in self.t["rules"]],
+                         ["A", "B", "C", "C-1", "D", "E", "F", "G", "H", "I"])
+
+    def test_preamble_defines_the_parties(self):
+        self.assertIn("JD Institute of Fashion Technology", self.t["preamble"])
+        self.assertIn("including its centres", self.t["preamble"])
+
+    def test_clean_wording_landed(self):
+        fees = [s["text"] for s in self.t["rules"][0]["subs"]]
+        self.assertIn("Rs. 11,800/-(inclusive of GST)", fees[1])
+        self.assertNotIn("10,000/- (plus", fees[1])
+        self.assertIn("their respective centres", fees[0])
+        self.assertTrue(fees[13].startswith("FEES MAY BE REVISED"))
+        general = [s["text"] for s in self.t["rules"][9]["subs"]]
+        self.assertIn("exclusive jurisdiction", general[5])
 
     def test_item_counts_match_the_signed_document(self):
         counts = [len(r["subs"]) for r in self.t["rules"]]
-        self.assertEqual(counts, [12, 7, 21, 3, 4, 7, 4, 3, 5])
+        self.assertEqual(counts, [14, 7, 5, 18, 3, 4, 7, 4, 3, 6])
 
     def test_sections_are_lettered_not_numbered(self):
         self.assertEqual(self.t["list_style"], "upper-alpha")
@@ -94,9 +132,12 @@ class JdiftTerms2026Tests(TestCase):
         section_c = self.t["rules"][2]
         self.assertFalse(section_c["ordered"])
         self.assertIn("visibly display", section_c["intro"])
+        self.assertFalse(self.t["rules"][3]["ordered"])  # C-1 too
         # Every other section is numbered.
         for i, rule in enumerate(self.t["rules"]):
             if i != 2:
+                if rule["label"] in ("C", "C-1"):
+                    continue
                 self.assertTrue(rule["ordered"], rule["text"])
 
     def test_change_of_batch_keeps_its_bullets_and_closing_line(self):

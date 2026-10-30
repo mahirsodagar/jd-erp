@@ -239,6 +239,7 @@ CATALOGUE = [
     ("fees", "fees.otherfee.delete", "Delete an ad-hoc other fee"),
 
     ("fees", "fees.balance.view", "See a student's fee balance"),
+    ("fees", "fees.feelink.send", "Email a student the pay link for their next installment"),
     ("fees", "fees.concession.request", "Raise a concession request"),
     ("fees", "fees.concession.approve", "Approve or reject concession requests"),
 

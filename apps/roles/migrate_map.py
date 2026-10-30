@@ -96,6 +96,8 @@ RULES: dict[str, tuple[str, ...]] = {
     "fees.otherfee.add": ("fees.installment.add",),
     "fees.otherfee.delete": ("fees.installment.delete",),
     "fees.balance.view": ("fees.receipt.view", "fees.receipt.view_all"),
+    # Whoever records payments at the counter can also send the pay link.
+    "fees.feelink.send": ("fees.receipt.create",),
 
     # --- Modules 3.3 / 3.4: Fee + Concession Reports -------------------
     "fees.report.view": ("fees.receipt.view", "fees.receipt.view_all"),

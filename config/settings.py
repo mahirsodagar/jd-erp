@@ -719,6 +719,7 @@ EMAIL_SENDER_DOMAIN_POLICY = {
     "admissions.form_submitted.email":     "COURSE",  # "admission form filled"
     "fees.installment_undertaking.email":  "COURSE",  # installment pattern / undertaking
     "fees.installment_pending.email":      "COURSE",  # installment-pending reminder
+    "fees.fee_link.email":                 "COURSE",  # staff-sent installment pay link
     # Entrance-exam link → always jdinstitute.edu.in (the default
     # Workspace mailbox, admin.a@jdinstitute.edu.in), never the course
     # domains. It is the one lead-facing trigger with no MSG91 template,
@@ -788,6 +789,38 @@ OPERATIONS_INBOX = env("OPERATIONS_INBOX", default="")
 PRINCIPAL_INBOX = env("PRINCIPAL_INBOX", default="")
 VICE_PRINCIPAL_INBOX = env("VICE_PRINCIPAL_INBOX", default="")
 ACADEMIC_MANAGER_INBOX = env("ACADEMIC_MANAGER_INBOX", default="")
+
+# Fee receipt PDF is emailed to the student with the campus receipts
+# inbox in CC, keyed on `Campus.code`. A campus absent / blank here gets
+# no campus copy (the student copy still goes). Override per env.
+FEE_RECEIPT_CAMPUS_INBOXES = {
+    "BLR": env("FEE_RECEIPT_INBOX_BLR", default="dkul.receipts@jdinstitute.edu.in"),
+    "GOA": env("FEE_RECEIPT_INBOX_GOA", default="dkul.goareceipts@jdinstitute.edu.in"),
+    "HYD": env("FEE_RECEIPT_INBOX_HYD", default=""),
+    "VJY": env("FEE_RECEIPT_INBOX_VJY", default=""),
+}
+
+# Application form acknowledgement (PDF of the submitted form) goes to
+# the student with the campus inbox in CC, keyed on `Campus.code`.
+APPLICATION_ACK_CAMPUS_INBOXES = {
+    "BLR": env("APPLICATION_ACK_INBOX_BLR",
+               default="acknowledgement.bengaluru@jdinstitute.edu.in"),
+    "GOA": env("APPLICATION_ACK_INBOX_GOA",
+               default="acknowledgement.goa@jdinstitute.edu.in"),
+    "HYD": env("APPLICATION_ACK_INBOX_HYD", default=""),
+    "VJY": env("APPLICATION_ACK_INBOX_VJY", default=""),
+}
+
+# Fee undertaking PDF (sent by staff from the enrollment) goes to the
+# student with the campus undertaking inbox in CC, keyed on `Campus.code`.
+UNDERTAKING_CAMPUS_INBOXES = {
+    "BLR": env("UNDERTAKING_INBOX_BLR",
+               default="undertaking.bangalore@jdinstitute.edu.in"),
+    "GOA": env("UNDERTAKING_INBOX_GOA",
+               default="undertaking.goa@jdinstitute.edu.in"),
+    "HYD": env("UNDERTAKING_INBOX_HYD", default=""),
+    "VJY": env("UNDERTAKING_INBOX_VJY", default=""),
+}
 
 # Relieving approval chain: L1/L2 come from the employee's reporting
 # managers; L3 and L4 are fixed institute-wide (Principal, then HR — the

@@ -32,6 +32,7 @@ from .models import (
     Certificate, Lesson, MarksEntry, ScheduleSlot,
 )
 from .permissions import ScheduleAccess, TimetableAccess, has_perm
+from .timetable_notify import notify_batch_published, notify_slot
 from .serializers import (
     AlumniRecordSerializer, AlumniSelfUpdateSerializer,
     AssignmentSerializer, AssignmentSubmissionSerializer,
@@ -74,7 +75,7 @@ class ScheduleSlotListCreateView(APIView):
 
     def get(self, request):
         qs = ScheduleSlot.objects.select_related(
-            "batch", "subject", "instructor", "classroom", "time_slot",
+            "batch", "batch__campus", "subject", "instructor", "classroom", "time_slot",
         )
         qs = _scope(qs, request.user)
         params = request.query_params
@@ -117,6 +118,7 @@ class ScheduleSlotListCreateView(APIView):
                     if report["errors"]
                     else http.HTTP_400_BAD_REQUEST)
             return Response(report, status=code)
+        notify_slot(slot, verb="scheduled", actor=request.user)
         return Response(ScheduleSlotSerializer(slot).data,
                         status=http.HTTP_201_CREATED)
 
@@ -166,12 +168,14 @@ class ScheduleSlotDetailView(APIView):
         slot.notes = s.validated_data.get("notes", slot.notes)
         slot.classroom_conflict_overridden = bool(report["warnings"] and force)
         slot.save()
+        notify_slot(slot, verb="updated", actor=request.user)
         return Response(ScheduleSlotSerializer(slot).data)
 
     def delete(self, request, pk):
         slot = self._obj(pk)
         slot.status = ScheduleSlot.Status.CANCELLED
         slot.save(update_fields=["status", "updated_at"])
+        notify_slot(slot, verb="cancelled", actor=request.user)
         return Response(status=http.HTTP_204_NO_CONTENT)
 
 
@@ -209,6 +213,11 @@ class BulkWeeklyPublishView(APIView):
             instructor=instructor, classroom=classroom,
             time_slot=time_slot, created_by=request.user,
             force=d.get("force", False) and _forced(request, request.user),
+        )
+        notify_batch_published(
+            batch, instructors=[instructor],
+            start_date=d["start_date"], end_date=d["end_date"],
+            created=len(result["created"]), actor=request.user,
         )
         return Response(result, status=http.HTTP_201_CREATED)
 
@@ -279,6 +288,11 @@ class WeeklyGridPublishView(APIView):
             created_by=request.user,
             force=d.get("force", False) and _forced(request, request.user),
         )
+        notify_batch_published(
+            batch, instructors=instructors.values(),
+            start_date=d["start_date"], end_date=d["end_date"],
+            created=result["total_created"], actor=request.user,
+        )
         return Response(result, status=http.HTTP_201_CREATED)
 
 
@@ -302,7 +316,7 @@ class MyTimetableView(APIView):
         to_date = parse_date(params.get("to") or "")
 
         qs = ScheduleSlot.objects.select_related(
-            "batch", "subject", "instructor", "classroom", "time_slot",
+            "batch", "batch__campus", "subject", "instructor", "classroom", "time_slot",
         ).filter(status=ScheduleSlot.Status.SCHEDULED)
         if from_date:
             qs = qs.filter(date__gte=from_date)

@@ -352,6 +352,14 @@ def render_undertaking_pdf(
 
 # --- Delivery ----------------------------------------------------------
 
+def undertaking_campus_inbox_for(campus) -> str:
+    """The undertaking mailbox for this campus (settings
+    UNDERTAKING_CAMPUS_INBOXES, keyed on `Campus.code`), or ""."""
+    inboxes = getattr(settings, "UNDERTAKING_CAMPUS_INBOXES", {}) or {}
+    code = (getattr(campus, "code", "") or "").strip().upper()
+    return (inboxes.get(code) or "").strip()
+
+
 def send_undertaking(
     enrollment: Enrollment,
     *,
@@ -383,6 +391,11 @@ def send_undertaking(
     staff_email = (getattr(requested_by, "email", "") or "").strip()
     if staff_email and staff_email.lower() != to_addr.lower():
         cc_list.append(staff_email)
+    # The campus undertaking inbox always holds a copy.
+    campus_inbox = undertaking_campus_inbox_for(enrollment.campus)
+    if campus_inbox and campus_inbox.lower() != to_addr.lower() \
+            and campus_inbox not in cc_list:
+        cc_list.append(campus_inbox)
     if extra_cc:
         for raw in extra_cc:
             addr = (raw or "").strip()

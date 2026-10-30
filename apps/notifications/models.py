@@ -113,3 +113,37 @@ class NotificationDispatchLog(models.Model):
         indexes = [
             models.Index(fields=["status", "created_at"]),
         ]
+
+
+class InAppNotification(models.Model):
+    """One line in a user's notification bell. Written best-effort by
+    the modules (tasks, timetable, leaves); never on the request's
+    critical path. `link` is a frontend route the bell navigates to."""
+
+    class Kind(models.TextChoices):
+        TASK = "TASK", "Task"
+        TIMETABLE = "TIMETABLE", "Timetable"
+        LEAVE = "LEAVE", "Leave"
+        OTHER = "OTHER", "Other"
+
+    recipient = models.ForeignKey(
+        "accounts.User", on_delete=models.CASCADE,
+        related_name="inapp_notifications",
+    )
+    kind = models.CharField(
+        max_length=12, choices=Kind.choices, default=Kind.OTHER,
+    )
+    title = models.CharField(max_length=200)
+    body = models.CharField(max_length=500, blank=True)
+    link = models.CharField(max_length=200, blank=True)
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["recipient", "is_read", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"[{self.kind}] {self.title} → {self.recipient_id}"

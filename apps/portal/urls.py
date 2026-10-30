@@ -1,7 +1,7 @@
 from django.urls import path
 
 from .application_views import ApplicationFormPdfView, ApplicationFormView
-from .fee_views import FeeSummaryView, InstallmentPayView
+from .fee_views import FeeSummaryView, InstallmentPayView, ReceiptPdfView
 from .views import (
     AppointmentCancelView, AppointmentFacultyView, AppointmentListCreateView,
     AssignmentListView, AssignmentSubjectsView, AssignmentSubmitView,
@@ -90,6 +90,8 @@ urlpatterns = [
     path("fees/", FeeSummaryView.as_view(), name="portal-fees"),
     path("fees/installments/<int:pk>/pay/", InstallmentPayView.as_view(),
          name="portal-fee-installment-pay"),
+    path("fees/receipts/<int:pk>/pdf/", ReceiptPdfView.as_view(),
+         name="portal-fee-receipt-pdf"),
 
     # Qualifications (educational documents)
     path("qualifications/", QualificationListCreateView.as_view(),

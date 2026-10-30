@@ -293,7 +293,7 @@ def find_overdue_hot_leads(*, hours: int = 24):
         if fu.lead_id in seen:
             continue
         seen.add(fu.lead_id)
-        if fu.lead.status == Lead.Status.ACTIVE:
+        if fu.lead.status in Lead.OPEN_STATUSES:
             overdue.append((fu.lead, fu))
     return overdue
 

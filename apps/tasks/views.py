@@ -117,11 +117,15 @@ class TaskDetailView(APIView):
                 status=http.HTTP_403_FORBIDDEN,
             )
 
+        old_assignee_id = task.assignee_id
         for f in ("name", "description", "end_date",
                   "assignee_remarks", "assignee"):
             if f in data:
                 setattr(task, f, data[f])
         task.save()
+        if task.assignee_id != old_assignee_id:
+            task.refresh_from_db()
+            notify_task_assigned(task=task)
         return Response(TaskSerializer(task).data)
 
     def delete(self, request, pk):

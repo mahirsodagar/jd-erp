@@ -160,6 +160,12 @@ def _terms(pdf: FPDF, student: Student) -> None:
     # this section "Undertaking by the student", the earlier wording a
     # declaration.
     heading = terms.get("declaration_title") or "Declaration"
+    if terms.get("preamble"):
+        _section(pdf, "Terms & Conditions")
+        pdf.set_x(_MARGIN)
+        pdf.set_font("Helvetica", "I", 8.5)
+        pdf.multi_cell(_BODY_W, 4.5, _safe(terms["preamble"]))
+        pdf.ln(0.8)
     _section(pdf, heading)
     pdf.set_x(_MARGIN)
     pdf.set_font("Helvetica", "", 8.5)
@@ -172,8 +178,12 @@ def _terms(pdf: FPDF, student: Student) -> None:
     pdf.set_font("Helvetica", "", 8.5)
     alpha = terms.get("list_style") == "upper-alpha"
     for n, rule in enumerate(terms["rules"], start=1):
-        # JDIFT's document letters its sections A-I; JDSD's numbers them.
-        marker = chr(ord("A") + n - 1) if alpha else str(n)
+        # The bundle carries each section's own marker (JDIFT's are
+        # lettered A, B, C, C-1, D…; JDSD's numbered). Older bundles
+        # without one fall back to the list style.
+        marker = rule.get("label") or (
+            chr(ord("A") + n - 1) if alpha else str(n)
+        )
         pdf.set_x(_MARGIN)
         pdf.set_font("Helvetica", "B" if rule["emphasis"] else "", 8.5)
         pdf.multi_cell(_BODY_W, 4.5, _safe(f"{marker}. {rule['text']}"))

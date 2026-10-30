@@ -31,7 +31,9 @@ from .serializers import (
 from .services.balance import (
     concession_ceiling, enrollment_balance, resolve_fee_figures,
 )
+from .services.fee_link import FeeLinkError, send_fee_link
 from .services.pdf import render_receipt_pdf
+from .services.receipt_email import send_receipt_email
 from .services.registration import ensure_registration_installment
 from .services.receipt_no import generate_receipt_no
 
@@ -322,6 +324,8 @@ class FeeReceiptListCreateView(APIView):
             received_by=request.user,
             receipt_no=generate_receipt_no(campus_code=enrollment.campus.code),
         )
+        # Receipt PDF to the student + campus receipts inbox. Best-effort.
+        send_receipt_email(receipt)
         return Response(
             FeeReceiptDetailSerializer(receipt).data,
             status=http.HTTP_201_CREATED,
@@ -546,6 +550,32 @@ class EnrollmentBalanceView(APIView):
             "student_application_id": e.student.application_form_id,
             **enrollment_balance(e),
         })
+
+
+class EnrollmentSendFeeLinkView(APIView):
+    """`POST /api/fees/enrollments/<pk>/send-fee-link/` — email the
+    student a pay link for their next payable installment."""
+
+    permission_classes = [IsAuthenticated, FeeAccessPolicy]
+
+    def post(self, request, pk):
+        if not has_perm(request.user, "fees.feelink.send"):
+            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
+        try:
+            e = Enrollment.objects.select_related(
+                "student", "campus", "program__institute",
+            ).get(pk=pk)
+        except Enrollment.DoesNotExist as exc:
+            raise Http404 from exc
+        if not (request.user.is_superuser
+                or can_view_all(request.user)
+                or request.user.campuses.filter(pk=e.campus_id).exists()):
+            raise Http404
+        try:
+            result = send_fee_link(enrollment=e, actor=request.user)
+        except FeeLinkError as exc:
+            return Response({"detail": str(exc)}, status=http.HTTP_400_BAD_REQUEST)
+        return Response(result)
 
 
 # --- Student panel ------------------------------------------------------

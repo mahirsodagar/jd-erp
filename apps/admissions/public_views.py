@@ -241,6 +241,7 @@ class PublicApplicationView(APIView):
                     status=http.HTTP_400_BAD_REQUEST,
                 )
 
+        first_submit = getattr(lead, "promoted_student", None) is None
         try:
             student, creds = submit_application_from_lead(
                 lead=lead, payload=payload,
@@ -255,6 +256,13 @@ class PublicApplicationView(APIView):
                 {str(e).strip("'\""): "Required."},
                 status=http.HTTP_400_BAD_REQUEST,
             )
+
+        if first_submit:
+            # Acknowledgement + form PDF to the student and campus inbox.
+            # Re-submits (incremental fills after counsellor review) are
+            # silent so the student isn't mailed on every edit.
+            from .services_application_email import send_application_acknowledgement
+            send_application_acknowledgement(student)
 
         return Response(
             {

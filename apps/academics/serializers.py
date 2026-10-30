@@ -21,6 +21,7 @@ class ScheduleSlotSerializer(serializers.ModelSerializer):
     start_time = serializers.TimeField(source="time_slot.start_time", read_only=True)
     end_time = serializers.TimeField(source="time_slot.end_time", read_only=True)
     campus_id = serializers.IntegerField(source="batch.campus_id", read_only=True)
+    campus_name = serializers.CharField(source="batch.campus.name", read_only=True, default="")
 
     class Meta:
         model = ScheduleSlot
@@ -33,13 +34,13 @@ class ScheduleSlotSerializer(serializers.ModelSerializer):
             "time_slot", "time_slot_label", "start_time", "end_time",
             "date", "status", "notes",
             "classroom_conflict_overridden",
-            "campus_id",
+            "campus_id", "campus_name",
             "created_by", "created_at", "updated_at",
         ]
         read_only_fields = [
             "id", "batch_name", "subject_name", "subject_code",
             "instructor_name", "instructor_code", "classroom_name",
-            "time_slot_label", "start_time", "end_time", "campus_id",
+            "time_slot_label", "start_time", "end_time", "campus_id", "campus_name",
             "classroom_conflict_overridden",
             "created_by", "created_at", "updated_at",
         ]

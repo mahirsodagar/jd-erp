@@ -438,3 +438,34 @@ class InstallmentRoutingTests(_Fixture):
 
         receipt = FeeReceipt.objects.get(instrument_ref="FI1N01")
         self.assertIn("Royalty", receipt.bank)
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        EMAIL_SMTP_OUTBOUND_ENABLED=True,
+        FEE_RECEIPT_CAMPUS_INBOXES={"BLR": "dkul.receipts@jdinstitute.edu.in"},
+        ACCOUNTS_INBOX="",
+        # A developer .env may point jdindia.com at a real Zoho SMTP;
+        # pin it off so the message lands in the locmem outbox.
+        EMAIL_SMTP_BY_DOMAIN={},
+    )
+    def test_online_payment_emails_receipt_to_student_and_campus(self):
+        from django.core import mail
+
+        from apps.fees.models import FeeReceipt
+
+        inst, _ = self._installment(
+            self.diploma, self.blr, Installment.Kind.REGISTRATION,
+        )
+        pr = services.installment_request_for(inst, amount="10000")
+        order = PaymentOrder.objects.create(
+            request=pr, order_id="FI1N02", amount=pr.amount,
+        )
+        services.apply_order_body(order, {"status": "CHARGED"})
+
+        receipt = FeeReceipt.objects.get(instrument_ref="FI1N02")
+        self.assertEqual(len(mail.outbox), 1)
+        m = mail.outbox[0]
+        self.assertEqual(m.to, ["asha@example.com"])
+        self.assertEqual(m.cc, ["dkul.receipts@jdinstitute.edu.in"])
+        self.assertEqual(m.attachments[0][0], f"{receipt.receipt_no}.pdf")
+        self.assertTrue(m.attachments[0][1].startswith(b"%PDF"))

@@ -69,7 +69,7 @@ class TermsBundleTests(TestCase):
             for rule in terms_for(code)["rules"]:
                 self.assertEqual(
                     set(rule),
-                    {"text", "intro", "subs", "emphasis", "ordered"},
+                    {"label", "text", "intro", "subs", "emphasis", "ordered"},
                 )
                 self.assertIsInstance(rule["subs"], list)
 

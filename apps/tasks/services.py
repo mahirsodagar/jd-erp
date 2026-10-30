@@ -9,6 +9,8 @@ import logging
 from django.utils import timezone
 
 from apps.notifications.email import send_email
+from apps.notifications.inapp import notify
+from apps.notifications.models import InAppNotification
 
 from .models import Task
 
@@ -16,15 +18,22 @@ logger = logging.getLogger(__name__)
 
 
 def notify_task_assigned(*, task: Task) -> None:
-    """Best-effort email to the assignee when a new task is created."""
+    """Best-effort bell + email to the assignee when a task is created
+    or reassigned to them."""
+    creator_name = (
+        task.created_by.full_name or task.created_by.username
+    )
+    notify(
+        [task.assignee], kind=InAppNotification.Kind.TASK,
+        title=f"New task: {task.name}",
+        body=f"Assigned by {creator_name}. Due {task.end_date.strftime('%d-%m-%Y')}.",
+        link="/tasks", exclude_user=task.created_by,
+    )
     recipient = (task.assignee.email or "").strip()
     if not recipient:
         return
     assignee_name = (
         task.assignee.full_name or task.assignee.username
-    )
-    creator_name = (
-        task.created_by.full_name or task.created_by.username
     )
     subject = f"New task assigned: {task.name}"
     body = (
@@ -45,15 +54,21 @@ def notify_task_assigned(*, task: Task) -> None:
 
 
 def notify_task_completed(*, task: Task) -> None:
-    """Best-effort email to the creator when the assignee completes it."""
+    """Best-effort bell + email to the creator when the assignee completes it."""
+    assignee_name = (
+        task.assignee.full_name or task.assignee.username
+    )
+    notify(
+        [task.created_by], kind=InAppNotification.Kind.TASK,
+        title=f"Task completed: {task.name}",
+        body=f"{assignee_name} marked it done.",
+        link="/tasks", exclude_user=task.assignee,
+    )
     recipient = (task.created_by.email or "").strip()
     if not recipient:
         return
     creator_name = (
         task.created_by.full_name or task.created_by.username
-    )
-    assignee_name = (
-        task.assignee.full_name or task.assignee.username
     )
     completed_on = (task.completed_at or timezone.now()).strftime(
         "%d-%m-%y %H:%M",

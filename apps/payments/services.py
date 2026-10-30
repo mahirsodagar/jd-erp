@@ -662,7 +662,7 @@ def _record_installment_receipt(
 
     enrollment = installment.enrollment
     charged_at = order.charged_at or timezone.now()
-    FeeReceipt.objects.create(
+    receipt = FeeReceipt.objects.create(
         receipt_no=generate_receipt_no(campus_code=enrollment.campus.code),
         enrollment=enrollment,
         installment=installment,
@@ -684,6 +684,9 @@ def _record_installment_receipt(
         # Left as None deliberately: no human received this one.
         received_by=None,
     )
+    # Same as the counter flow: PDF to the student + campus inbox.
+    from apps.fees.services.receipt_email import send_receipt_email
+    send_receipt_email(receipt)
 
 
 def _institute_key_for(lead) -> str:

@@ -337,6 +337,46 @@ class PortalFeeTests(TestCase):
             "online_payment_enabled"
         ])
 
+    # --- receipt PDF ---------------------------------------------------
+
+    def _receipt(self, enrollment, no, status=FeeReceipt.Status.ACTIVE):
+        return FeeReceipt.objects.create(
+            receipt_no=no, enrollment=enrollment, installment=None,
+            basic_fee=Decimal("1000"), amount=Decimal("1000"),
+            payment_mode=FeeReceipt.PaymentMode.CASH,
+            received_date=date(2026, 7, 1), status=status,
+        )
+
+    def _pdf(self, receipt):
+        return self.client.get(reverse("portal-fee-receipt-pdf", args=[receipt.id]))
+
+    def test_student_can_download_own_receipt_pdf(self):
+        r = self._pdf(self._receipt(self.enrollment, "RCP-PDF-1"))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r["Content-Type"], "application/pdf")
+        self.assertTrue(r.content.startswith(b"%PDF"))
+
+    def test_cancelled_receipt_pdf_is_not_downloadable(self):
+        r = self._pdf(self._receipt(
+            self.enrollment, "RCP-PDF-2", status=FeeReceipt.Status.CANCELLED,
+        ))
+        self.assertEqual(r.status_code, 404)
+
+    def test_cannot_download_another_students_receipt(self):
+        other = Student.objects.create(
+            application_form_id="AF-RAVI", student_name="Ravi K", gender="M", dob=date(2006, 1, 1),
+            nationality="INDIAN", institute=self.institute,
+            campus=self.campus, program=self.program, academic_year=self.year,
+            student_mobile="9000000001", student_email="ravi@example.com",
+        )
+        other_enrollment = Enrollment.objects.create(
+            student=other, program=self.program, semester=self.sem,
+            campus=self.campus, batch=self.batch, academic_year=self.year,
+            status=Enrollment.Status.ACTIVE,
+        )
+        r = self._pdf(self._receipt(other_enrollment, "RCP-PDF-3"))
+        self.assertEqual(r.status_code, 404)
+
 
 @override_settings(**SG_ON)
 class PortalApplicationViewTests(TestCase):

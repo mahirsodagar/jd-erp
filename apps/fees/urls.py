@@ -5,6 +5,7 @@ from .views import (
     ConcessionDetailView,
     ConcessionListCreateView,
     EnrollmentBalanceView,
+    EnrollmentSendFeeLinkView,
     FeeReceiptCancelView,
     FeeReceiptDetailView,
     FeeReceiptListCreateView,
@@ -47,4 +48,5 @@ urlpatterns = [
 
     # Balance per enrollment
     path("enrollments/<int:pk>/balance/", EnrollmentBalanceView.as_view(), name="enrollment-balance"),
+    path("enrollments/<int:pk>/send-fee-link/", EnrollmentSendFeeLinkView.as_view(), name="enrollment-send-fee-link"),
 ]

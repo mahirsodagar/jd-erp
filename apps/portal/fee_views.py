@@ -22,12 +22,14 @@ action is not destructive.
 from decimal import Decimal
 
 from django.db.models import Sum
+from django.http import Http404, HttpResponse
 from rest_framework import status as http
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.fees.models import FeeReceipt, Installment, OtherFee
 from apps.fees.services.balance import enrollment_balance
+from apps.fees.services.pdf import render_receipt_pdf
 from apps.payments.errors import PaymentGatewayError
 from apps.payments.routing import route_for_installment
 from apps.payments.services import (
@@ -288,3 +290,31 @@ class InstallmentPayView(APIView):
             "installment_id": target.id,
             "payment_request_id": payment_request.id,
         })
+
+
+class ReceiptPdfView(APIView):
+    """`GET /api/portal/fees/receipts/<pk>/pdf/` — one receipt as a PDF.
+
+    Scoped to the student's own receipts (a parent gets their ward's), and
+    only ACTIVE ones: a cancelled receipt is not shown on the page, so it
+    must not be downloadable either.
+    """
+
+    permission_classes = [IsStudentOrParent]
+
+    def get(self, request, pk):
+        try:
+            r = FeeReceipt.objects.select_related(
+                "enrollment", "enrollment__student", "enrollment__campus",
+                "enrollment__batch", "enrollment__program",
+                "enrollment__student__institute", "installment", "received_by",
+            ).get(
+                pk=pk,
+                enrollment__student=request.portal_ctx.student,
+                status=FeeReceipt.Status.ACTIVE,
+            )
+        except FeeReceipt.DoesNotExist as e:
+            raise Http404 from e
+        resp = HttpResponse(render_receipt_pdf(r), content_type="application/pdf")
+        resp["Content-Disposition"] = f'attachment; filename="{r.receipt_no}.pdf"'
+        return resp
