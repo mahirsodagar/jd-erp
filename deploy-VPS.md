@@ -334,3 +334,26 @@ If the box is ever rebuilt, recreate in this order:
 9. Install the nginx site, `nginx -t`, `reload`.
 10. `certbot --nginx -d dkul.jediiians.com`.
 11. `chown -R www-data:www-data /var/www/jd-erp`.
+
+---
+
+## 14. Seeding employees (one-time, campus-wise)
+
+The legacy Employee Master exports (Bengaluru, Goa, Hyderabad,
+Vijayawada, Cochin) are bundled in `apps/employees/seed_data/`.
+Run `seed_states` and `seed_institutes` first (cities are created on
+the fly), then:
+
+```bash
+cd /var/www/jd-erp
+sudo -u www-data venv/bin/python manage.py seed_employees           # dry-run, read the report
+sudo -u www-data venv/bin/python manage.py seed_employees --apply
+sudo -u www-data venv/bin/python manage.py backfill_employee_users --apply   # portal logins
+```
+
+Idempotent on `emp_code`: re-running leaves existing employees alone
+(`--update` overwrites them from the CSV). The report lists skipped
+rows (test accounts, rows without email/DOB, the same person exported
+under two campuses) and reporting-manager names that match nobody, so
+HR can fix those in HR → Employees. Campuses HYD / BZA / COK are
+created if missing.
