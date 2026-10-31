@@ -294,7 +294,13 @@ class Command(BaseCommand):
         if not spec:
             raise _Skip(f"unknown campus {label!r}")
         code, name, city, state = spec
-        campus = Campus.objects.filter(code=code).first()
+        # Prod may already have the campus under a different code (e.g.
+        # Vijayawada = VJY), so fall back to a name match before creating.
+        campus = (
+            Campus.objects.filter(code=code).first()
+            or Campus.objects.filter(name__iexact=name).first()
+            or Campus.objects.filter(name__iexact=city).first()
+        )
         if campus is None:
             campus = Campus.objects.create(code=code, name=name, city=city, state=state)
             self.warnings.append(f"created campus {code} ({name})")
