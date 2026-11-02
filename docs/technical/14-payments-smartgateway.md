@@ -305,11 +305,13 @@ from the fee kind, the **program's** institute and the campus code
 
 | Fee | Institute | Campus | Gateway → account |
 |---|---|---|---|
-| Application fee | JDSD | any | Razorpay → `JDSD_TRUST` (not built: manual link for now) |
-| Registration, installments | JDSD | any | SmartGateway → `JDSD_TRUST` (50100515602102) |
-| Registration | JDIFT | any | SmartGateway → `JDIFT_ROYALTY` (50200123417910) |
-| Application fee, installments | JDIFT | BLR, GOA | SmartGateway → `JDIFT_MAIN` (59245987654321) |
-| anything else | | | no route → manual link / no "Pay now" (on hold) |
+| Application fee, registration, installments | JDSD | any | SmartGateway → `JDSD_TRUST` (50100515602102) |
+| Registration | JDIFT | any | Razorpay → `JDIFT_ROYALTY` (50200123417910) |
+| Application fee | JDIFT | any | SmartGateway → `JDIFT_MAIN` (59245987654321), since 2026-11-02 |
+| Installments | JDIFT | any | no route → manual page / no "Pay now" (on hold) |
+
+Rule of thumb since 2026-11-02: **every application fee goes through
+SmartGateway**; Razorpay carries only the JDIFT registration fee.
 
 The route is frozen onto `PaymentRequest.gateway` / `.account` when the
 request is raised. Session creation, `/orders` reads and return-URL

@@ -8,15 +8,23 @@ installments to Razorpay on the JDIFT main account):
 1. **JDSD** (B.Sc / M.Sc / B.Des / M.Des) — JD Educational Trust,
    A/c 50100515602102, through **HDFC SmartGateway**: application fee,
    registration fee and every installment.
-2. **JDIFT** (all diplomas) — only the registration fee (₹10,000 + 18%
-   GST) is online, through **Razorpay**, at *every* centre — JD Institute
-   of Fashion Technology ROYALTY, A/c 50200123417910.
+2. **JDIFT** (all diplomas) — the registration fee (₹10,000 + 18% GST)
+   through **Razorpay**, at *every* centre — JD Institute of Fashion
+   Technology ROYALTY, A/c 50200123417910.
+3. **Application fee, every institute** — through **HDFC SmartGateway**
+   (user's rule, 2026-11-02: "application fees should be paid through
+   SmartGateway for all programs and institutes"). JDSD's is covered by
+   rule 1; JDIFT's settles to the JDIFT main account, A/c 59245987654321.
+   That account inherits the shared SmartGateway merchant until it has
+   credentials of its own (`SMARTGATEWAY_JDIFT_MAIN_*`), and needs
+   `SMARTGATEWAY_JDIFT_MAIN_LIVE=True` per environment.
 
-Anything the table does not cover (every other JDIFT fee, a program with
-no institute) resolves to **no route**, which means "no online payment":
-the caller falls back to the manual fee link. That is on hold on purpose,
-not an oversight. A zero registration fee never gets this far — no
-installment is laid down for it (`fees.services.registration`).
+Anything the table does not cover (JDIFT course installments, a program
+with no institute) resolves to **no route**, which means "no online
+payment": the caller falls back to the manual fee link (our UPI/bank
+page, see `apps.payments.manual`). That is on hold on purpose, not an
+oversight. A zero registration fee never gets this far — no installment
+is laid down for it (`fees.services.registration`).
 
 Institute is read off the *program* — Program.institute is the only
 place the ERP records it — never off the campus or the degree name.
@@ -75,6 +83,10 @@ DEFAULT_ROUTES = [
     {
         "institute": "JDIFT", "fee": FEE_REGISTRATION,
         "gateway": GATEWAY_RAZORPAY, "account": "JDIFT_ROYALTY",
+    },
+    {
+        "institute": "JDIFT", "fee": FEE_APPLICATION,
+        "gateway": GATEWAY_SMARTGATEWAY, "account": "JDIFT_MAIN",
     },
 ]
 

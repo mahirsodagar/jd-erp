@@ -81,13 +81,23 @@ class RouteTableTests(TestCase):
                 _rzp("JDIFT_ROYALTY"), campus,
             )
 
-    def test_jdift_app_fee_and_installments_are_on_hold_at_every_centre(self):
-        for fee in (FEE_APPLICATION, FEE_INSTALLMENT):
-            for campus in ("BLR", "GOA", "PUNE", ""):
-                self.assertIsNone(
-                    routing.resolve(fee=fee, institute="JDIFT", campus=campus),
-                    (fee, campus),
-                )
+    def test_jdift_application_fee_goes_to_smartgateway_main_at_every_centre(self):
+        for campus in ("BLR", "GOA", "PUNE", ""):
+            self.assertEqual(
+                routing.resolve(
+                    fee=FEE_APPLICATION, institute="JDIFT", campus=campus,
+                ),
+                _sg("JDIFT_MAIN"), campus,
+            )
+
+    def test_jdift_installments_are_on_hold_at_every_centre(self):
+        for campus in ("BLR", "GOA", "PUNE", ""):
+            self.assertIsNone(
+                routing.resolve(
+                    fee=FEE_INSTALLMENT, institute="JDIFT", campus=campus,
+                ),
+                campus,
+            )
 
     def test_program_without_institute_has_no_route(self):
         self.assertIsNone(
@@ -220,14 +230,15 @@ class _Fixture(TestCase):
 @override_settings(**ROUTING_ON)
 class ApplicationFeeRoutingTests(_Fixture):
 
-    def test_jdift_blr_lead_gets_the_manual_link(self):
+    def test_jdift_blr_lead_gets_a_smartgateway_link_on_main(self):
         from apps.leads.send_links import send_fee_link
 
         result = send_fee_link(
             lead=self._lead(self.diploma, self.blr), institute_key="JDIFT",
         )
-        self.assertEqual(result["gateway"], "manual")
-        self.assertEqual(PaymentRequest.objects.count(), 0)
+        self.assertEqual(result["gateway"], "smartgateway")
+        pr = PaymentRequest.objects.get(pk=result["payment_request_id"])
+        self.assertEqual((pr.gateway, pr.account), ("smartgateway", "JDIFT_MAIN"))
 
     def test_jdsd_lead_request_is_frozen_to_smartgateway_trust(self):
         pr = services.application_fee_request_for(
@@ -237,32 +248,45 @@ class ApplicationFeeRoutingTests(_Fixture):
         self.assertEqual((pr.gateway, pr.account), ("smartgateway", "JDSD_TRUST"))
 
     @override_settings(RAZORPAY_ENABLED=False)
-    def test_jdift_lead_never_gets_a_smartgateway_link(self):
-        """JDIFT's application fee belongs to Razorpay; with Razorpay off
-        it must fall back to the manual link, not onto SmartGateway."""
+    def test_jdift_application_fee_does_not_depend_on_razorpay(self):
+        """Razorpay only carries JDIFT registration; switching it off
+        must leave the application fee on SmartGateway."""
         from apps.leads.send_links import send_fee_link
 
         result = send_fee_link(
             lead=self._lead(self.diploma, self.blr), institute_key="JDIFT",
         )
-        self.assertEqual(result["gateway"], "manual")
-        self.assertEqual(PaymentRequest.objects.count(), 0)
+        self.assertEqual(result["gateway"], "smartgateway")
 
-    def test_jdift_lead_at_another_centre_gets_the_manual_link(self):
+    def test_jdift_lead_at_another_centre_also_gets_smartgateway(self):
         from apps.leads.send_links import send_fee_link
 
         result = send_fee_link(
             lead=self._lead(self.diploma, self.pune), institute_key="JDIFT",
         )
+        self.assertEqual(result["gateway"], "smartgateway")
+        pr = PaymentRequest.objects.get(pk=result["payment_request_id"])
+        self.assertEqual(pr.account, "JDIFT_MAIN")
+
+    @override_settings(SMARTGATEWAY_ACCOUNTS={"JDSD_TRUST": {"live": True}})
+    def test_jdift_main_not_live_falls_back_loudly(self):
+        """Prod until SMARTGATEWAY_JDIFT_MAIN_LIVE=True is set: the link
+        must degrade to the manual page and name the missing flag."""
+        from apps.leads.send_links import send_fee_link
+
+        with self.assertLogs("apps.leads", level="ERROR") as logs:
+            result = send_fee_link(
+                lead=self._lead(self.diploma, self.blr), institute_key="JDIFT",
+            )
         self.assertEqual(result["gateway"], "manual")
-        self.assertEqual(PaymentRequest.objects.count(), 0)
+        self.assertIn("SMARTGATEWAY_JDIFT_MAIN_LIVE", "\n".join(logs.output))
 
     def test_institute_the_link_was_sent_for_wins_over_program(self):
         lead = self._lead(self.diploma, self.blr)
         self.assertEqual(
             routing.route_for_lead(lead, "JDSD").account, "JDSD_TRUST",
         )
-        self.assertIsNone(routing.route_for_lead(lead))
+        self.assertEqual(routing.route_for_lead(lead).account, "JDIFT_MAIN")
 
     @override_settings(SMARTGATEWAY_ACCOUNTS={})
     def test_account_not_live_falls_back_loudly(self):
