@@ -287,8 +287,12 @@ Configuration it depends on:
 
 - `settings.INSTITUTE_PAYMENT_DETAILS[institute_key]` — UPI VPA, payee name,
   bank account, `default_amount`. Missing key → `ValueError`.
-- `settings.FEE_LINK_URLS[institute_key]` — the DLT-approved short payment
-  URL. Missing → `ValueError`.
+- `settings.SMARTGATEWAY_PUBLIC_BASE_URL` — the public origin of this API.
+  Every fee link points at it: the per-lead gateway pay link when the fee
+  has an online route, else the manual-payment page
+  `/api/public/pay/manual/<INSTITUTE>/?amount=&for=` (UPI QR + bank
+  details from `INSTITUTE_PAYMENT_DETAILS`, see `apps/payments/manual.py`).
+  Missing → `ValueError`. The old Qfix short links are gone.
 - `settings.FRONTEND_BASE_URL` — used to build `{base}/#/apply/{token}`, which
   is then run through TinyURL (`apps/notifications/shorten.py`) so the SMS fits
   the DLT template. If TinyURL fails, the long URL is used.

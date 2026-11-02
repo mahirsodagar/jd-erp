@@ -235,22 +235,13 @@ STUDENT_PORTAL_LOGIN_URL = env(
     default="https://jdsd.netlify.app/#/portal/login/",
 )
 
-# Per-institute short payment URLs used by the fee-link flow. Defaults
-# match the legacy PHP project's DLT-approved short links so we don't
-# need fresh approvals from BulkSMS. Override per environment via env
-# vars when you have new short URLs.
-FEE_LINK_URLS = {
-    "JDIFT": env("FEE_LINK_URL_JDIFT", default="https://9cfb.short.gy/jdinst"),
-    "JDSD":  env("FEE_LINK_URL_JDSD",  default="https://9cfb.short.gy/jdsd"),
-}
-
-
 # --- Application-fee payment instructions ------------------------------
 
-# Per-institute UPI / bank-account details rendered into the fee-link
-# email (with a generated QR). Override via env vars (JSON) when prod
-# values land. Each entry: vpa, payee_name, ac_name, ac_no, ifsc,
-# bank, branch, default_amount.
+# Per-institute UPI / bank-account details rendered on the manual-payment
+# page (`/api/public/pay/manual/<INSTITUTE>/`, with a generated UPI QR)
+# that fee links point at when the fee has no online route. Override via
+# env vars (JSON) when prod values land. Each entry: vpa, payee_name,
+# ac_name, ac_no, ifsc, bank, branch, default_amount.
 INSTITUTE_PAYMENT_DETAILS = env.json(
     "INSTITUTE_PAYMENT_DETAILS",
     default={
@@ -280,8 +271,8 @@ INSTITUTE_PAYMENT_DETAILS = env.json(
 
 # --- HDFC SmartGateway payment gateway ----------------------------------
 
-# Master switch. While False the fee-link flow keeps sending the existing
-# static short URL + UPI/bank instructions, so a half-configured
+# Master switch. While False the fee-link flow sends our manual-payment
+# page (UPI QR + bank instructions) instead, so a half-configured
 # environment degrades instead of breaking. Turn on per-environment once
 # the credentials below are filled AND the webhook is registered in the
 # SmartGateway dashboard.

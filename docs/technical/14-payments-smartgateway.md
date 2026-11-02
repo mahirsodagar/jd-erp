@@ -19,7 +19,7 @@ Before the gateway, the fee step was manual end to end:
 ```
 Counsellor clicks "Send fee link"
    → SMS/WhatsApp/email carrying a static per-institute short URL
-     (settings.FEE_LINK_URLS) + UPI QR + bank details
+     (a Qfix form, since removed) + UPI QR + bank details
    → student pays into the bank
    → someone spots it on a statement
    → counsellor clicks "Mark fee paid" and types the reference by hand
@@ -192,8 +192,15 @@ The order and request still settle — only the lead's fields are held.
 | Situation | What the student receives |
 |---|---|
 | Gateway on, request raised | Our per-lead pay URL |
-| Gateway on, request can't be raised | The static short URL + UPI/bank instructions |
-| Gateway off | The static short URL + UPI/bank instructions |
+| Gateway on, request can't be raised | Our manual-payment page (UPI QR + bank details) |
+| Gateway off, or no online route for this fee | Our manual-payment page (UPI QR + bank details) |
+
+The manual page is `GET /api/public/pay/manual/<INSTITUTE>/?amount=&for=`
+(`apps/payments/manual.py`, `ManualPayPageView`): no auth, rendered from
+`INSTITUTE_PAYMENT_DETAILS`, amount pre-filled in the UPI QR. It replaced
+the Qfix short links in 2026-11; JD no longer uses that service. Because
+it is served from `SMARTGATEWAY_PUBLIC_BASE_URL`, that setting is now
+required in every environment, gateway on or off.
 
 A gateway outage therefore never blocks a counsellor from sending
 payment instructions. Note that raising a request makes **no** network

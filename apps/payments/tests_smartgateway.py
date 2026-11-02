@@ -722,7 +722,7 @@ class FeeLinkIntegrationTests(_LeadFixture):
         self.assertIsNotNone(result["payment_request_id"])
         self.assertIn("/api/public/pay/", result["url"])
 
-    def test_falls_back_to_static_url_when_request_cannot_be_raised(self):
+    def test_falls_back_to_manual_page_when_request_cannot_be_raised(self):
         from apps.leads.send_links import send_fee_link
 
         with patch.object(
@@ -736,7 +736,7 @@ class FeeLinkIntegrationTests(_LeadFixture):
         self.assertTrue(result["url"].startswith("http"))
 
     @override_settings(SMARTGATEWAY_ENABLED=False)
-    def test_disabled_gateway_uses_static_url(self):
+    def test_disabled_gateway_uses_manual_page(self):
         from apps.leads.send_links import send_fee_link
 
         result = send_fee_link(lead=self.lead, institute_key="JDSD")
@@ -744,14 +744,15 @@ class FeeLinkIntegrationTests(_LeadFixture):
         self.assertEqual(PaymentRequest.objects.count(), 0)
 
     @override_settings(SMARTGATEWAY_PUBLIC_BASE_URL="")
-    def test_enabled_but_misconfigured_falls_back_and_says_so(self):
-        """The dangerous case: switched on, but the pay link would be
-        built off the wrong host. Must send the manual link, loudly."""
+    def test_enabled_but_no_public_origin_refuses_loudly(self):
+        """The dangerous case: switched on, but no public origin to build
+        any link from. The manual page lives on that origin too, so
+        nothing can be sent — refuse with the setting named, log it."""
         from apps.leads.send_links import send_fee_link
 
         with self.assertLogs("apps.leads", level="ERROR") as logs:
-            result = send_fee_link(lead=self.lead, institute_key="JDSD")
+            with self.assertRaisesRegex(ValueError, "SMARTGATEWAY_PUBLIC_BASE_URL"):
+                send_fee_link(lead=self.lead, institute_key="JDSD")
 
-        self.assertEqual(result["gateway"], "manual")
         self.assertEqual(PaymentRequest.objects.count(), 0)
         self.assertIn("SMARTGATEWAY_PUBLIC_BASE_URL", "\n".join(logs.output))

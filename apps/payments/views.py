@@ -23,7 +23,9 @@ import json
 import logging
 
 from django.conf import settings
+from django.http import Http404, HttpResponse
 from django.shortcuts import redirect
+from django.views import View
 from rest_framework import status as http
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -52,6 +54,28 @@ from .services import (
 )
 
 logger = logging.getLogger("apps.payments")
+
+
+class ManualPayPageView(View):
+    """`GET /api/public/pay/manual/<INSTITUTE>/?amount=&for=` — the fee
+    link for a fee with no online route (see `apps.payments.manual`).
+
+    Plain HTML, no auth: the student opens it from an SMS. `amount` and
+    `for` are advisory and only shape what the page prints.
+    """
+
+    def get(self, request, institute):
+        from .manual import render_page
+
+        try:
+            html = render_page(
+                institute,
+                amount=request.GET.get("amount", ""),
+                purpose=request.GET.get("for", ""),
+            )
+        except LookupError:
+            raise Http404("Unknown institute")
+        return HttpResponse(html)
 
 
 def _form_params(request) -> dict:

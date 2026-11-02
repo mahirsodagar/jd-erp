@@ -8,7 +8,7 @@ from apps.leads.exam_views import (
     PublicExamStartView, PublicExamSubmitView, PublicExamView,
 )
 from apps.payments.views import (
-    PayRedirectView, PayReturnView, RazorpayWebhookView,
+    ManualPayPageView, PayRedirectView, PayReturnView, RazorpayWebhookView,
     SmartGatewayWebhookView,
 )
 
@@ -24,6 +24,10 @@ urlpatterns = [
          PublicExamStartView.as_view(), name="public-exam-start"),
     path("api/public/exam/<uuid:token>/submit/",
          PublicExamSubmitView.as_view(), name="public-exam-submit"),
+    # Public, no-auth manual-payment page (UPI QR + bank details) — what
+    # the fee SMS/email points at when the fee has no online route.
+    path("api/public/pay/manual/<str:institute>/",
+         ManualPayPageView.as_view(), name="public-pay-manual"),
     # Public, no-auth pay link — what the fee SMS/email points at. Mints a
     # SmartGateway session on click and 302s to the hosted payment page,
     # so the URL in the student's SMS never goes stale.

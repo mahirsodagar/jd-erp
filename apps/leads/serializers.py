@@ -198,14 +198,13 @@ class LeadDetailSerializer(serializers.ModelSerializer):
         new request.
 
         The lead's open per-lead pay link (SmartGateway / Razorpay) when
-        one exists, else the static per-institute short URL for the
-        lead's program. Blank in lists: it costs queries per row and the
-        list screen never shows it.
+        one exists, else our manual-payment page for the lead's program's
+        institute. Blank in lists: it costs queries per row and the list
+        screen never shows it.
         """
         if isinstance(self.parent, serializers.ListSerializer):
             return ""
-        from django.conf import settings
-
+        from apps.payments.manual import manual_pay_url
         from apps.payments.services import (
             open_application_fee_request, pay_url_for,
         )
@@ -215,7 +214,13 @@ class LeadDetailSerializer(serializers.ModelSerializer):
             return pay_url_for(request)
         program = obj.program if obj.program_id else None
         institute = getattr(getattr(program, "institute", None), "code", "")
-        return (getattr(settings, "FEE_LINK_URLS", {}) or {}).get(institute, "")
+        try:
+            return manual_pay_url(
+                institute, amount=self.get_application_fee_due(obj),
+                purpose="Application fee",
+            )
+        except ValueError:
+            return ""
 
     class Meta:
         model = Lead

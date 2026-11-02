@@ -61,7 +61,7 @@ Five models are referenced by nearly everything. Changing them is expensive.
       └─► signal: outcome drip (hot / cold / enrolled …)  [notifications]
 
  3. Send fee link  →  payment received  →  mark fee paid  [leads]
-            uses INSTITUTE_PAYMENT_DETAILS + FEE_LINK_URLS
+            uses INSTITUTE_PAYMENT_DETAILS + payments.manual (UPI/bank page)
 
  4. Send application link  (GATED on step 3)
       └─► tokenised public form                          [admissions.public_views]

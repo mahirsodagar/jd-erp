@@ -1,5 +1,5 @@
 """Staff "Send fee link": the right installment, the right link, and
-the static fallback when the fee has no online route."""
+the manual-payment page fallback when the fee has no online route."""
 
 from datetime import date
 from decimal import Decimal
@@ -19,11 +19,8 @@ from apps.notifications.models import NotificationTemplate as T
 from apps.payments.models import PaymentRequest
 from apps.portal.tests_fees import SG_ON
 
-STATIC = {"JDIFT": "https://short.test/jdift", "JDSD": "https://short.test/jdsd"}
-
-
 @override_settings(
-    **SG_ON, FEE_LINK_URLS=STATIC,
+    **SG_ON,
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
 )
 class SendFeeLinkTests(TestCase):
@@ -108,12 +105,24 @@ class SendFeeLinkTests(TestCase):
         first = self._send(enrollment).json()["url"]
         self.assertEqual(self._send(enrollment).json()["url"], first)
 
-    def test_no_online_route_falls_back_to_static_link(self):
+    def test_no_online_route_falls_back_to_manual_page(self):
         enrollment, *_ = self._enroll(self.jdift)  # JDIFT course installment
         body = self._send(enrollment).json()
         self.assertEqual(body["gateway"], "manual")
-        self.assertEqual(body["url"], STATIC["JDIFT"])
+        self.assertTrue(
+            body["url"].startswith("https://api.jd.test/api/public/pay/manual/JDIFT/"),
+            body["url"],
+        )
+        self.assertIn("amount=50000", body["url"])
+        self.assertIn("Installment", body["url"])
         self.assertFalse(PaymentRequest.objects.exists())
+
+    @override_settings(SMARTGATEWAY_PUBLIC_BASE_URL="")
+    def test_manual_page_needs_the_public_origin(self):
+        enrollment, *_ = self._enroll(self.jdift)
+        r = self._send(enrollment)
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertIn("SMARTGATEWAY_PUBLIC_BASE_URL", r.json()["detail"])
 
     def test_everything_paid_is_rejected(self):
         enrollment, i1, i2 = self._enroll(self.jdsd)

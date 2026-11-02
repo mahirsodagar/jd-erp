@@ -324,36 +324,35 @@ def _fee_email_text(*, lead: Lead, payment: dict, amount: str) -> str:
     )
 
 
-def _static_fee_link_url(institute_key: str) -> str:
-    """The per-institute short URL + UPI/bank instructions.
+def _manual_fee_link_url(institute_key: str, amount: str) -> str:
+    """Our own manual-payment page (UPI QR + bank details) with the
+    application fee pre-filled — see `apps.payments.manual`.
 
-    The original, manually-reconciled flow. Still the fallback whenever
-    the gateway is off or a payment request can't be raised.
+    The manually-reconciled flow. Still the fallback whenever the gateway
+    is off or a payment request can't be raised. Raises `ValueError`
+    when it can't be built (no payment details for the institute, or the
+    public origin of this API is not configured).
     """
-    fee_urls = getattr(settings, "FEE_LINK_URLS", {}) or {}
-    url = fee_urls.get(institute_key)
-    if not url:
-        raise ValueError(
-            f"No fee-link URL configured for institute '{institute_key}'. "
-            f"Set FEE_LINK_URLS[{institute_key!r}] in settings or env.",
-        )
-    return url
+    from apps.payments.manual import manual_pay_url
+
+    return manual_pay_url(institute_key, amount=amount, purpose="Application fee")
 
 
 def _fee_link_url(*, lead: Lead, institute_key: str, payment: dict, actor=None):
     """Resolve the URL to put in the fee SMS / WhatsApp / email.
 
-    Prefers a per-lead HDFC SmartGateway pay link, because that is what
-    makes the payment self-reconciling: the bank webhooks back to us and
-    the lead's `application_fee_paid_at` is stamped without anyone keying
-    it in. Falls back to the static per-institute short URL (UPI / bank
-    instructions, manually reconciled) when SmartGateway is switched off
-    or the request can't be raised — a gateway outage must never block a
-    counsellor from sending payment instructions.
+    Prefers a per-lead gateway pay link (HDFC SmartGateway / Razorpay,
+    per `apps.payments.routing`), because that is what makes the payment
+    self-reconciling: the gateway webhooks back to us and the lead's
+    `application_fee_paid_at` is stamped without anyone keying it in.
+    Falls back to our manual-payment page (UPI QR / bank details,
+    manually reconciled) when the fee has no online route, the gateway
+    is switched off, or the request can't be raised — a gateway outage
+    must never block a counsellor from sending payment instructions.
 
-    The URL returned points at OUR public pay endpoint, not at the bank:
-    SmartGateway payment-page sessions expire, and a lead may pay days
-    after the SMS lands. See apps.payments.models for the full reasoning.
+    Either way the URL points at OUR public endpoints, not at the bank:
+    gateway payment-page sessions expire, and a lead may pay days after
+    the SMS lands. See apps.payments.models for the full reasoning.
 
     Returns `(url, payment_request_or_None)`.
     """
@@ -363,6 +362,8 @@ def _fee_link_url(*, lead: Lead, institute_key: str, payment: dict, actor=None):
         NoOnlineRoute, application_fee_request_for, pay_url_for,
         payable_route,
     )
+
+    amount = _application_fee_for_lead(lead, payment)
 
     # Which bank account this fee settles into decides which merchant
     # credentials apply — see apps.payments.routing.
@@ -375,14 +376,13 @@ def _fee_link_url(*, lead: Lead, institute_key: str, payment: dict, actor=None):
         # By design (no rule for this fee, or its gateway is switched off
         # here), not a fault — the manual link is the intended outcome.
         logger.info("leads: %s Sending the manual fee link.", e)
-        return _static_fee_link_url(institute_key), None
+        return _manual_fee_link_url(institute_key, amount), None
     except PaymentGatewayError as e:
         # Switched on but broken for this account. Falls back safely, but
         # is a misconfiguration someone needs to see.
         logger.error("leads: %s Sending the manual fee link instead.", e)
-        return _static_fee_link_url(institute_key), None
+        return _manual_fee_link_url(institute_key, amount), None
 
-    amount = _application_fee_for_lead(lead, payment)
     try:
         payment_request = application_fee_request_for(
             lead=lead,
@@ -393,10 +393,10 @@ def _fee_link_url(*, lead: Lead, institute_key: str, payment: dict, actor=None):
         )
     except PaymentGatewayError as e:
         logger.warning(
-            "leads: SmartGateway request failed for lead %s (%s) — "
-            "falling back to the static fee link.", lead.id, e,
+            "leads: gateway request failed for lead %s (%s) — "
+            "falling back to the manual fee link.", lead.id, e,
         )
-        return _static_fee_link_url(institute_key), None
+        return _manual_fee_link_url(institute_key, amount), None
 
     return pay_url_for(payment_request), payment_request
 
@@ -406,9 +406,9 @@ def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
 
     Matches `send_application_link`'s pattern: both legs go through
     `queue_notification(...)` (so they land in the dispatch log and use
-    the registered templates), and both reference the same per-institute
-    short URL from `settings.FEE_LINK_URLS`. The SMS body matches the
-    legacy PHP DLT-approved wording (template_id 1307168958796572350).
+    the registered templates), and both reference the same URL from
+    `_fee_link_url`. The SMS body matches the legacy PHP DLT-approved
+    wording (template_id 1307168958796572350).
     """
     payment = _payment_details(institute_key)
     institute_label = payment["payee_name"]

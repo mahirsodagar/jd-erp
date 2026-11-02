@@ -8,8 +8,8 @@ The link is a tokenised pay URL (`PaymentRequest`) whenever the fee has
 an online route, which makes the payment self-reconciling: the gateway
 confirms the charge and the receipt is written automatically. When it
 has none (e.g. JDIFT course installments — see `apps.payments.routing`)
-the static per-institute link from `settings.FEE_LINK_URLS` goes out
-instead, and accounts records the receipt by hand as before.
+our manual-payment page (UPI QR + bank details, `apps.payments.manual`)
+goes out instead, and accounts records the receipt by hand as before.
 
 Email only for now: there is no DLT-approved SMS template for this yet.
 """
@@ -35,19 +35,21 @@ def _money(amount: Decimal) -> str:
     return f"{d:.0f}" if d == d.to_integral_value() else f"{d:.2f}"
 
 
-def _static_url(institute_key: str) -> str:
-    url = (getattr(settings, "FEE_LINK_URLS", {}) or {}).get(institute_key)
-    if not url:
+def _manual_url(institute_key: str, *, amount: Decimal, label: str) -> str:
+    from apps.payments.manual import manual_pay_url
+
+    try:
+        return manual_pay_url(institute_key, amount=amount, purpose=label)
+    except ValueError as e:
         raise FeeLinkError(
-            f"Online payment is not available for this fee and no manual "
-            f"fee link is configured for institute '{institute_key or '—'}'. "
-            f"Set FEE_LINK_URLS[{institute_key!r}].",
-        )
-    return url
+            f"Online payment is not available for this fee and the manual "
+            f"fee link can't be built for institute "
+            f"'{institute_key or '—'}': {e}",
+        ) from e
 
 
-def _pay_url(installment, *, amount: Decimal, institute_key: str, actor):
-    """`(url, payment_request_or_None)` — gateway link, else static link."""
+def _pay_url(installment, *, amount: Decimal, institute_key: str, label: str, actor):
+    """`(url, payment_request_or_None)` — gateway link, else manual page."""
     from apps.payments import routing
     from apps.payments.errors import PaymentGatewayError
     from apps.payments.services import (
@@ -61,10 +63,10 @@ def _pay_url(installment, *, amount: Decimal, institute_key: str, actor):
         )
     except NoOnlineRoute as e:
         logger.info("fees: %s Sending the manual fee link.", e)
-        return _static_url(institute_key), None
+        return _manual_url(institute_key, amount=amount, label=label), None
     except PaymentGatewayError as e:
         logger.error("fees: %s Sending the manual fee link instead.", e)
-        return _static_url(institute_key), None
+        return _manual_url(institute_key, amount=amount, label=label), None
 
     try:
         payment_request = installment_request_for(
@@ -73,9 +75,9 @@ def _pay_url(installment, *, amount: Decimal, institute_key: str, actor):
     except PaymentGatewayError as e:
         logger.warning(
             "fees: pay request failed for installment %s (%s) — "
-            "falling back to the static fee link.", installment.pk, e,
+            "falling back to the manual fee link.", installment.pk, e,
         )
-        return _static_url(institute_key), None
+        return _manual_url(institute_key, amount=amount, label=label), None
 
     return pay_url_for(payment_request), payment_request
 
@@ -109,15 +111,16 @@ def send_fee_link(*, enrollment, actor=None) -> dict:
     institute_key = (getattr(institute, "code", "") or "").upper()
     institute_label = getattr(institute, "name", "") or "JD"
 
-    url, payment_request = _pay_url(
-        target, amount=balance, institute_key=institute_key, actor=actor,
-    )
-
     installment_label = (
         "Registration fee"
         if target.kind == target.Kind.REGISTRATION
         else f"Installment #{target.sequence}"
     )
+    url, payment_request = _pay_url(
+        target, amount=balance, institute_key=institute_key,
+        label=installment_label, actor=actor,
+    )
+
     email_log = queue_notification(
         template_key="fees.fee_link.email",
         recipient=email,
@@ -145,7 +148,7 @@ def send_fee_link(*, enrollment, actor=None) -> dict:
         "installment_id": target.id,
         "installment": installment_label,
         "amount": str(balance),
-        # "manual" = static link; the receipt still has to be recorded.
+        # "manual" = our UPI/bank page; the receipt still has to be recorded.
         "gateway": payment_request.gateway if payment_request else "manual",
         "payment_request_id": getattr(payment_request, "id", None),
     }

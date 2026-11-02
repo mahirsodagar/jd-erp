@@ -136,7 +136,7 @@ intended safety net.
 | If you change… | Watch out for |
 |---|---|
 | `Campus.code` | Historic `emp_code` (`{CAMPUS}-{YYYY}-{seq}`) and `receipt_no` (`RCP-{CAMPUS}-{YYYY}-{seq}`) already contain the old code. Sequence generators scan by prefix, so a code change restarts numbering |
-| `Institute.code` | Same for `application_form_id` (`{INSTITUTE}-{YYYY}-{seq}`), and it is the key into `settings.INSTITUTE_PAYMENT_DETAILS` / `FEE_LINK_URLS`. A mismatch makes "Send fee link" raise |
+| `Institute.code` | Same for `application_form_id` (`{INSTITUTE}-{YYYY}-{seq}`), and it is the key into `settings.INSTITUTE_PAYMENT_DETAILS` (and the manual-payment page URL). A mismatch makes "Send fee link" raise |
 | `AcademicYear.is_current` | Only one row should carry it. `promote_lead_to_student` picks the first `is_current=True` and errors if none exists |
 | `Program.category` | Reporting only — no longer affects lead assignment |
 | `Program.degree_type` | Changes the From domain on fee/admission emails |
