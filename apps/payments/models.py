@@ -31,7 +31,9 @@ Kept in its own app rather than inside `leads` because none of this is
 lead-specific: `PaymentRequest.purpose` is the discriminator, and each
 purpose hangs its own nullable FK off the request — `lead` for
 APPLICATION_FEE, `installment` for FEE_INSTALLMENT (the student portal's
-"pay this installment" button). Exactly one of them is set.
+"pay this installment" button), `student` for REGISTRATION_FEE (paid
+straight after the application form, before any enrollment exists —
+see `apps.payments.registration_fee`). Exactly one of them is set.
 """
 
 import uuid
@@ -51,6 +53,8 @@ class PaymentRequest(models.Model):
     class Purpose(models.TextChoices):
         APPLICATION_FEE = "APPLICATION_FEE", "Application fee (lead)"
         FEE_INSTALLMENT = "FEE_INSTALLMENT", "Fee installment (student)"
+        REGISTRATION_FEE = "REGISTRATION_FEE", "Registration fee (applicant)"
+        OTHER_FEE = "OTHER_FEE", "Other fee (student)"
 
     class Status(models.TextChoices):
         PENDING = "PENDING", "Awaiting payment"
@@ -77,6 +81,24 @@ class PaymentRequest(models.Model):
         help_text="Set for FEE_INSTALLMENT requests — the scheduled row "
                   "the student is paying from the portal.",
     )
+    other_fee = models.ForeignKey(
+        "fees.OtherFee", null=True, blank=True, on_delete=models.CASCADE,
+        related_name="payment_requests",
+        help_text="Set for OTHER_FEE requests — an ad-hoc fee staff sent "
+                  "a pay link for.",
+    )
+    student = models.ForeignKey(
+        "admissions.Student", null=True, blank=True,
+        on_delete=models.CASCADE, related_name="payment_requests",
+        help_text="Set for REGISTRATION_FEE requests — raised the moment "
+                  "the application form is submitted, before the student "
+                  "has an enrollment to hang an installment off.",
+    )
+    #: Receipt number reserved when a REGISTRATION_FEE request settles,
+    #: so the PDF mailed on payment and the FeeReceipt written at
+    #: enrolment carry the same number. Drawn from the campus series in
+    #: `fees.services.receipt_no`, which counts these as issued.
+    receipt_no = models.CharField(max_length=40, blank=True, db_index=True)
 
     amount = models.DecimalField(
         max_digits=10, decimal_places=2,
@@ -126,6 +148,7 @@ class PaymentRequest(models.Model):
         indexes = [
             models.Index(fields=["lead", "status"]),
             models.Index(fields=["installment", "status"]),
+            models.Index(fields=["student", "status"]),
             models.Index(fields=["purpose", "status"]),
         ]
 

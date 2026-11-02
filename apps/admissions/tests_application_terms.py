@@ -334,3 +334,65 @@ class ConsentStampTimeTests(_LeadFixture):
         )
         self.assertGreaterEqual(student.rules_accepted_at, before)
         self.assertLessEqual(student.rules_accepted_at, timezone.now())
+
+
+class TermsFollowTheProgramTests(TestCase):
+    """The form, the portal and the PDF must bind the student to the
+    institute of the program they picked — not the lead's sending
+    institute, and not a stale Student.institute."""
+
+    def test_institute_code_follows_the_program_then_the_student(self):
+        from types import SimpleNamespace as NS
+
+        from apps.admissions.application_terms import institute_code_for_student
+
+        jdsd = NS(code="JDSD")
+        jdift = NS(code="JDIFT")
+        self.assertEqual(
+            institute_code_for_student(NS(program=NS(institute=jdsd), institute=jdift)),
+            "JDSD",
+        )
+        self.assertEqual(
+            institute_code_for_student(NS(program=NS(institute=None), institute=jdift)),
+            "JDIFT",
+        )
+        self.assertEqual(
+            institute_code_for_student(NS(program=None, institute=None)), "",
+        )
+
+    def test_prefill_serves_terms_per_institute_on_offer(self):
+        from django.urls import reverse
+        from rest_framework.test import APIClient
+
+        from apps.leads.models import Lead
+        from apps.master.models import Campus, Institute, LeadSource, Program
+
+        jdsd = Institute.objects.create(name="JDSD", code="JDSD")
+        jdift = Institute.objects.create(name="JDIFT", code="JDIFT")
+        campus = Campus.objects.create(name="Bengaluru", code="BLR")
+        # The lead's own program carries no institute, so the form is not
+        # scoped and offers programs from both — and must carry the terms
+        # of each so it can show the right set once one is picked.
+        loose = Program.objects.create(name="Loose", code="LOOSE")
+        for p in (
+            loose,
+            Program.objects.create(name="B.Des", code="BDES", institute=jdsd),
+            Program.objects.create(name="Diploma", code="DFD", institute=jdift),
+        ):
+            p.campuses.add(campus)
+        import uuid
+
+        lead = Lead.objects.create(
+            name="Asha", email="asha@example.com", phone="9900112233",
+            campus=campus, program=loose, application_token=uuid.uuid4(),
+            source=LeadSource.objects.create(name="Web", slug="web"),
+        )
+        r = APIClient().get(
+            reverse("public-application", args=[lead.application_token]),
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        by = r.json()["terms_by_institute"]
+        self.assertEqual(set(by), {"", "JDSD", "JDIFT"})
+        self.assertEqual(by["JDSD"]["declaration_title"], "Undertaking by the Student")
+        self.assertEqual(by["JDIFT"]["declaration_title"], "Student / Parent Declaration")
+        self.assertEqual(by[""]["declaration"], r.json()["terms"]["declaration"])

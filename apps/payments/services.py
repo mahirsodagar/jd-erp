@@ -70,7 +70,12 @@ def _customer_id_for(lead) -> str:
 
 
 def _student_of(payment_request: PaymentRequest):
-    """The Student behind a FEE_INSTALLMENT request, or None."""
+    """The Student behind a FEE_INSTALLMENT or REGISTRATION_FEE request,
+    or None."""
+    if payment_request.student_id:
+        return payment_request.student
+    if payment_request.other_fee_id:
+        return payment_request.other_fee.enrollment.student
     installment = payment_request.installment
     if installment is None:
         return None
@@ -330,6 +335,67 @@ def installment_request_for(
     )
 
 
+def open_other_fee_request(other_fee) -> PaymentRequest | None:
+    """The still-payable request against this other fee, if any."""
+    return (
+        PaymentRequest.objects
+        .filter(
+            other_fee=other_fee,
+            purpose=PaymentRequest.Purpose.OTHER_FEE,
+            status=PaymentRequest.Status.PENDING,
+        )
+        .order_by("-created_on")
+        .first()
+    )
+
+
+def other_fee_request_for(
+    other_fee, *, amount, description: str = "", actor=None,
+) -> PaymentRequest:
+    """Get (or raise) a payable request for one ad-hoc "other" fee.
+
+    Same contract as `installment_request_for`: `amount` is what is left
+    to pay, a stale pending request is cancelled rather than reused, and
+    a fee with no online route raises `PaymentGatewayError`.
+    """
+    try:
+        route = payable_route(
+            routing.route_for_other_fee(other_fee), f"other fee {other_fee.pk}",
+        )
+    except PaymentGatewayError as e:
+        logger.warning("payments: %s", e)
+        raise type(e)(
+            "Online payment is not available for this fee. Please contact "
+            "the accounts office.",
+        ) from e
+
+    amount = Decimal(str(amount))
+    if amount <= Decimal("0"):
+        raise SmartGatewayError("There is nothing left to pay on this fee.")
+
+    existing = open_other_fee_request(other_fee)
+    if existing is not None:
+        if (
+            existing.amount == amount
+            and existing.gateway == route.gateway
+            and existing.account == route.account
+        ):
+            return existing
+        existing.status = PaymentRequest.Status.CANCELLED
+        existing.save(update_fields=["status", "updated_on"])
+
+    student = other_fee.enrollment.student
+    return PaymentRequest.objects.create(
+        purpose=PaymentRequest.Purpose.OTHER_FEE,
+        other_fee=other_fee,
+        gateway=route.gateway,
+        account=route.account,
+        amount=amount,
+        description=description or f"{other_fee.name} — {student.student_name}",
+        created_by=actor,
+    )
+
+
 # ---------------------------------------------------------------------
 # Minting an order (the student opened the link)
 # ---------------------------------------------------------------------
@@ -340,6 +406,8 @@ def installment_request_for(
 _ORDER_ID_PREFIX = {
     PaymentRequest.Purpose.APPLICATION_FEE: "AF",
     PaymentRequest.Purpose.FEE_INSTALLMENT: "FI",
+    PaymentRequest.Purpose.REGISTRATION_FEE: "RF",
+    PaymentRequest.Purpose.OTHER_FEE: "OF",
 }
 
 
@@ -633,6 +701,10 @@ def _mark_lead_fee_paid(payment_request: PaymentRequest, order: PaymentOrder) ->
         "application_fee_mode", "application_fee_ref",
         "application_fee_notes", "application_fee_recorded_by",
     ])
+    from apps.fees.services.application_receipt import (
+        ensure_application_fee_receipt_no,
+    )
+    ensure_application_fee_receipt_no(lead)
 
 
 def _record_installment_receipt(
@@ -685,6 +757,46 @@ def _record_installment_receipt(
         received_by=None,
     )
     # Same as the counter flow: PDF to the student + campus inbox.
+    from apps.fees.services.receipt_email import send_receipt_email
+    send_receipt_email(receipt)
+
+
+def _record_other_fee_receipt(
+    payment_request: PaymentRequest, order: PaymentOrder,
+) -> None:
+    """Write the FeeReceipt for a settled "other fee" payment — the twin
+    of `_record_installment_receipt`, linked by `other_fee` instead so it
+    stays out of the course-fee balance, as a counter receipt would."""
+    from apps.fees.models import FeeReceipt
+    from apps.fees.services.receipt_no import generate_receipt_no
+
+    other_fee = payment_request.other_fee
+    if other_fee is None:
+        return
+    if FeeReceipt.objects.filter(instrument_ref=order.order_id).exists():
+        return
+
+    enrollment = other_fee.enrollment
+    charged_at = order.charged_at or timezone.now()
+    receipt = FeeReceipt.objects.create(
+        receipt_no=generate_receipt_no(campus_code=enrollment.campus.code),
+        enrollment=enrollment,
+        other_fee=other_fee,
+        basic_fee=order.amount,
+        amount=order.amount,
+        payment_mode=_payment_mode(order),
+        instrument_ref=order.order_id,
+        bank=_gateway_label(payment_request)[:120],
+        received_date=timezone.localtime(charged_at).date(),
+        notes=(
+            f"Paid online by the student via {_gateway_label(payment_request)} "
+            f"(order {order.order_id}"
+            + (f", txn {order.txn_id}" if order.txn_id else "")
+            + (f", {order.payment_method}" if order.payment_method else "")
+            + ")."
+        ),
+        received_by=None,
+    )
     from apps.fees.services.receipt_email import send_receipt_email
     send_receipt_email(receipt)
 
@@ -810,6 +922,12 @@ def apply_order_body(order: PaymentOrder, body: dict) -> PaymentOrder:
 
     if payment_request.installment_id:
         _record_installment_receipt(payment_request, order)
+    if payment_request.other_fee_id:
+        _record_other_fee_receipt(payment_request, order)
+
+    if payment_request.purpose == PaymentRequest.Purpose.REGISTRATION_FEE:
+        from .registration_fee import settle_paid_registration_fee
+        settle_paid_registration_fee(payment_request, order)
 
     if payment_request.lead_id:
         _mark_lead_fee_paid(payment_request, order)

@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     PaymentRequestListView,
+    PaymentRequestReceiptPdfView,
     PaymentRequestReconcileView,
     SmartGatewayStatusView,
 )
@@ -13,4 +14,6 @@ urlpatterns = [
          name="payment-request-list"),
     path("requests/<int:pk>/reconcile/", PaymentRequestReconcileView.as_view(),
          name="payment-request-reconcile"),
+    path("requests/<int:pk>/receipt/pdf/", PaymentRequestReceiptPdfView.as_view(),
+         name="payment-request-receipt-pdf"),
 ]

@@ -25,7 +25,7 @@ from apps.payments import gateway, routing, services
 from apps.payments.errors import PaymentGatewayError
 from apps.payments.models import PaymentOrder, PaymentRequest
 from apps.payments.routing import (
-    FEE_APPLICATION, FEE_INSTALLMENT, FEE_REGISTRATION, Route,
+    FEE_APPLICATION, FEE_INSTALLMENT, FEE_OTHER, FEE_REGISTRATION, Route,
 )
 
 ACCOUNT_KEYS = ("JDSD_TRUST", "JDIFT_MAIN", "JDIFT_ROYALTY")
@@ -64,21 +64,30 @@ def _rzp(account):
 class RouteTableTests(TestCase):
     """The client's table, rule by rule."""
 
-    def test_every_jdsd_fee_goes_to_smartgateway_trust_at_any_centre(self):
-        for fee in (FEE_APPLICATION, FEE_REGISTRATION, FEE_INSTALLMENT):
+    def test_jdsd_application_installments_and_other_fees_go_to_smartgateway_trust(self):
+        for fee in (FEE_APPLICATION, FEE_INSTALLMENT, FEE_OTHER):
             for campus in ("BLR", "GOA", "PUNE", ""):
                 self.assertEqual(
                     routing.resolve(fee=fee, institute="JDSD", campus=campus),
                     _sg("JDSD_TRUST"), (fee, campus),
                 )
 
-    def test_jdift_registration_goes_to_royalty_at_every_centre(self):
+    def test_registration_goes_to_razorpay_royalty_for_every_institute_and_centre(self):
+        """User rule 2026-11-02: registration fee is Razorpay everywhere,
+        settling into the existing JDIFT Royalty account."""
+        for institute in ("JDSD", "JDIFT"):
+            for campus in ("BLR", "GOA", "PUNE", ""):
+                self.assertEqual(
+                    routing.resolve(
+                        fee=FEE_REGISTRATION, institute=institute, campus=campus,
+                    ),
+                    _rzp("JDIFT_ROYALTY"), (institute, campus),
+                )
+
+    def test_jdift_other_fees_are_paid_at_the_college(self):
         for campus in ("BLR", "GOA", "PUNE", ""):
-            self.assertEqual(
-                routing.resolve(
-                    fee=FEE_REGISTRATION, institute="JDIFT", campus=campus,
-                ),
-                _rzp("JDIFT_ROYALTY"), campus,
+            self.assertIsNone(
+                routing.resolve(fee=FEE_OTHER, institute="JDIFT", campus=campus),
             )
 
     def test_jdift_application_fee_goes_to_smartgateway_main_at_every_centre(self):
@@ -378,10 +387,15 @@ class InstallmentRoutingTests(_Fixture):
         )
         return inst, user
 
-    def test_jdsd_registration_settles_to_trust(self):
+    def test_jdsd_registration_settles_to_razorpay_royalty(self):
         inst, _ = self._installment(
             self.bdes, self.pune, Installment.Kind.REGISTRATION,
         )
+        pr = services.installment_request_for(inst, amount="10000")
+        self.assertEqual((pr.gateway, pr.account), ("razorpay", "JDIFT_ROYALTY"))
+
+    def test_jdsd_course_installment_settles_to_trust(self):
+        inst, _ = self._installment(self.bdes, self.pune)
         pr = services.installment_request_for(inst, amount="10000")
         self.assertEqual((pr.gateway, pr.account), ("smartgateway", "JDSD_TRUST"))
 

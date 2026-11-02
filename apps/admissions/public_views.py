@@ -257,17 +257,27 @@ class PublicApplicationView(APIView):
                 status=http.HTTP_400_BAD_REQUEST,
             )
 
+        # "Pay registration fee" step — JD Institute applicants only, and
+        # only when it can actually be paid online right now (None hides
+        # the step). Raised on every submit so a student who returns to
+        # finish the form still gets the button if they skipped it.
+        from apps.payments.registration_fee import registration_payment_summary
+        registration_payment = registration_payment_summary(student, create=True)
+
         if first_submit:
             # Acknowledgement + form PDF to the student and campus inbox.
             # Re-submits (incremental fills after counsellor review) are
             # silent so the student isn't mailed on every edit.
             from .services_application_email import send_application_acknowledgement
-            send_application_acknowledgement(student)
+            send_application_acknowledgement(
+                student, registration_payment=registration_payment,
+            )
 
         return Response(
             {
                 "student_id": student.id,
                 "application_form_id": student.application_form_id,
+                "registration_payment": registration_payment,
                 **creds,
             },
             status=http.HTTP_201_CREATED,
@@ -391,9 +401,14 @@ def _prefill(lead: Lead) -> dict:
     existing = getattr(lead, "promoted_student", None)
     student_data = None
     if existing is not None:
+        from apps.payments.registration_fee import registration_payment_summary
         student_data = {
             "id": existing.id,
             "application_form_id": existing.application_form_id,
+            # Registration fee due/paid for a returning JD Institute
+            # applicant; null when the step doesn't apply. Read-only
+            # here — the request itself is raised on submit.
+            "registration_payment": registration_payment_summary(existing),
             "student_name": existing.student_name,
             "father_name": existing.father_name,
             "mother_name": existing.mother_name,
@@ -486,6 +501,15 @@ def _prefill(lead: Lead) -> dict:
             getattr(lead.program.institute, "code", "")
             if lead.program_id and lead.program.institute_id else "",
         ),
+        # The same bundle for every institute with a program on offer,
+        # keyed by institute code ("" = the generic wording). The form
+        # shows the set for the program the applicant picks, which is
+        # the institute the student is filed under — so the portal's
+        # playback and the PDF show exactly what was accepted.
+        "terms_by_institute": {
+            code: terms_for(code)
+            for code in sorted({p["institute_code"] for p in programs} | {""})
+        },
         # Reference data the form needs — bundled here so the form
         # makes a single round-trip and stays unauthenticated.
         "campuses": list(

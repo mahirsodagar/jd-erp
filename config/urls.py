@@ -8,7 +8,8 @@ from apps.leads.exam_views import (
     PublicExamStartView, PublicExamSubmitView, PublicExamView,
 )
 from apps.payments.views import (
-    ManualPayPageView, PayRedirectView, PayReturnView, RazorpayWebhookView,
+    ManualPayPageView, PayRedirectView, PayReturnView, PublicPaymentReceiptView,
+    RazorpayWebhookView,
     SmartGatewayWebhookView,
 )
 
@@ -36,6 +37,9 @@ urlpatterns = [
     # SmartGateway's return_url — where the payer's browser lands after.
     path("api/public/pay/<uuid:token>/return/",
          PayReturnView.as_view(), name="public-pay-return"),
+    # The payer's own copy of the receipt, offered on the result page.
+    path("api/public/pay/<uuid:token>/receipt/",
+         PublicPaymentReceiptView.as_view(), name="public-pay-receipt"),
     # SmartGateway webhook. No JWT — authenticated by the Basic
     # credentials configured in the SmartGateway dashboard.
     path("api/public/smartgateway/webhook/",

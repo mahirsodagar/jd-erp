@@ -380,6 +380,63 @@ class PaymentRequestReconcileView(APIView):
         return Response(PaymentRequestSerializer(payment_request).data)
 
 
+class PaymentRequestReceiptPdfView(APIView):
+    """`GET /api/payments/requests/<pk>/receipt/pdf/` — the receipt for a
+    paid request, whatever it paid for (see `receipts`). 404 until the
+    request is settled."""
+
+    permission_classes = [IsAuthenticated, CanViewPaymentRequests]
+
+    def get(self, request, pk):
+        from django.http import Http404
+
+        from .receipts import pdf_response, receipt_pdf_for_request
+
+        pr = (
+            PaymentRequest.objects
+            .select_related("lead", "lead__campus", "lead__program",
+                            "student", "paid_order")
+            .filter(pk=pk)
+            .first()
+        )
+        if pr is None:
+            raise Http404
+        found = receipt_pdf_for_request(pr)
+        if found is None:
+            return Response({"detail": "No receipt yet — the payment is not settled."},
+                            status=http.HTTP_404_NOT_FOUND)
+        return pdf_response(*found)
+
+
+class PublicPaymentReceiptView(APIView):
+    """`GET /api/public/pay/<token>/receipt/` — the payer downloads their
+    own receipt from the result page.
+
+    The token is the same unguessable UUID the pay link itself carries,
+    so holding it already means holding the payment; nothing more is
+    revealed than the emailed receipt.
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request, token):
+        from .receipts import pdf_response, receipt_pdf_for_request
+
+        pr = (
+            PaymentRequest.objects
+            .select_related("lead", "lead__campus", "lead__program",
+                            "student", "paid_order")
+            .filter(token=token)
+            .first()
+        )
+        found = receipt_pdf_for_request(pr) if pr is not None else None
+        if found is None:
+            return Response({"detail": "No receipt is available for this payment."},
+                            status=http.HTTP_404_NOT_FOUND)
+        return pdf_response(*found)
+
+
 class SmartGatewayStatusView(APIView):
     """Whether the gateway is configured, and in which mode.
 

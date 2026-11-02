@@ -407,6 +407,15 @@ RAZORPAY_ACCOUNTS = {
 RAZORPAY_LINK_EXPIRY_MINUTES = env.int("RAZORPAY_LINK_EXPIRY_MINUTES", default=1440)
 RAZORPAY_TIMEOUT = env.int("RAZORPAY_TIMEOUT", default=20)
 
+# Institutes whose applicants are offered "pay the registration fee" right
+# after submitting the application form (client rule 2026-11-02: JD
+# Institute only, not JD School of Design). The step appears only when
+# the fee template has a registration fee and the routed gateway is on
+# for this environment. See apps/payments/registration_fee.py.
+REGISTRATION_FEE_AT_APPLICATION_INSTITUTES = env.list(
+    "REGISTRATION_FEE_AT_APPLICATION_INSTITUTES", default=["JDIFT"],
+)
+
 
 # --- SMS provider selection --------------------------------------------
 

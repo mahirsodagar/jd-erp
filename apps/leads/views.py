@@ -118,6 +118,87 @@ class LeadListCreateView(APIView):
         return Response(LeadDetailSerializer(lead).data, status=http.HTTP_201_CREATED)
 
 
+class LeadApplicationFeeReceiptPdfView(APIView):
+    """`GET /api/leads/<pk>/application-fee/receipt/pdf/` — the paid
+    application fee as a receipt PDF. Same visibility rule as the lead
+    itself; 404 while the fee is not marked paid."""
+
+    permission_classes = [IsAuthenticated, LeadVisibility]
+
+    def get(self, request, pk):
+        from django.http import HttpResponse
+
+        from apps.fees.services.application_receipt import (
+            render_application_fee_receipt,
+        )
+
+        try:
+            lead = Lead.objects.select_related(
+                "campus", "program", "program__institute",
+                "application_fee_recorded_by",
+            ).get(pk=pk)
+        except Lead.DoesNotExist:
+            return Response({"detail": "Lead not found."}, status=http.HTTP_404_NOT_FOUND)
+        self.check_object_permissions(request, lead)
+        if lead.application_fee_paid_at is None:
+            return Response({"detail": "Application fee is not marked paid."},
+                            status=http.HTTP_404_NOT_FOUND)
+        pdf = render_application_fee_receipt(lead)
+        resp = HttpResponse(pdf, content_type="application/pdf")
+        resp["Content-Disposition"] = (
+            f'attachment; filename="{lead.application_fee_receipt_no}.pdf"'
+        )
+        return resp
+
+
+class LeadImportView(APIView):
+    """Bulk create leads from a CSV — see `lead_import`.
+
+    POST multipart `file`. With `dry_run=1` only the per-row plan is
+    returned; without it the file is re-validated and written, all or
+    nothing. Needs the same permission as adding a single lead.
+    """
+
+    permission_classes = [IsAuthenticated, HasPerm]
+    required_perm = "leads.lead.create"
+
+    def post(self, request):
+        from . import lead_import as imp
+
+        upload = request.FILES.get("file")
+        if not upload:
+            return Response({"detail": "Attach a CSV file as `file`."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        if upload.size > 2 * 1024 * 1024:
+            return Response({"detail": "File is larger than 2 MB."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        try:
+            results = imp.plan(imp.read_rows(upload.read()))
+        except imp.ImportFileError as exc:
+            return Response({"detail": str(exc)},
+                            status=http.HTTP_400_BAD_REQUEST)
+
+        summary = imp.summarise(results)
+        body = {"summary": summary,
+                "rows": [r.as_dict() for r in results],
+                "applied": False}
+        dry_run = str(request.data.get("dry_run", "")).lower() in ("1", "true")
+        if dry_run:
+            return Response(body)
+        if summary["error"]:
+            body["detail"] = (f"{summary['error']} row(s) have errors; "
+                              "nothing was imported.")
+            return Response(body, status=http.HTTP_400_BAD_REQUEST)
+        if not results:
+            body["detail"] = "The file has no lead rows."
+            return Response(body, status=http.HTTP_400_BAD_REQUEST)
+
+        leads = imp.apply(results, created_by=request.user)
+        body["applied"] = True
+        body["created_ids"] = [lead.pk for lead in leads]
+        return Response(body, status=http.HTTP_201_CREATED)
+
+
 class LeadDetailView(APIView):
     permission_classes = [IsAuthenticated, LeadVisibility]
 
@@ -660,6 +741,10 @@ class LeadMarkFeePaidView(_SendLinkBase):
             "application_fee_mode", "application_fee_ref",
             "application_fee_notes", "application_fee_recorded_by",
         ])
+        from apps.fees.services.application_receipt import (
+            ensure_application_fee_receipt_no,
+        )
+        ensure_application_fee_receipt_no(lead)
         return Response(
             {
                 "application_fee_paid_at": lead.application_fee_paid_at,
@@ -668,6 +753,7 @@ class LeadMarkFeePaidView(_SendLinkBase):
                 "application_fee_ref": lead.application_fee_ref,
                 "application_fee_notes": lead.application_fee_notes,
                 "application_fee_recorded_by": request.user.id,
+                "application_fee_receipt_no": lead.application_fee_receipt_no,
             },
             status=http.HTTP_200_OK,
         )

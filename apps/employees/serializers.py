@@ -120,6 +120,7 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
             "id", "emp_code",
             "first_name", "middle_name", "family_name", "full_name",
             "dob", "nationality", "blood_group", "gender", "qualification",
+            "aadhaar_number",
             "employment_type",
             "employment_category", "employment_category_label",
             "date_of_appointment", "date_of_joining",
@@ -149,6 +150,7 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
     # record is still usable as a directory entry.
     SENSITIVE_FIELDS = (
         "dob", "nationality", "blood_group", "gender", "qualification",
+        "aadhaar_number",
         "current_address", "current_city", "current_state",
         "permanent_address", "permanent_city", "permanent_state",
         "mobile_primary", "mobile_alternate",
@@ -271,6 +273,7 @@ class EmployeeCreateSerializer(_EmployeeWriteBase):
             "emp_code",
             "first_name", "middle_name", "family_name",
             "dob", "nationality", "blood_group", "gender", "qualification",
+            "aadhaar_number",
             "employment_type", "employment_category",
             "date_of_appointment", "date_of_joining",
             "designation", "department", "campus", "institute",
@@ -300,6 +303,7 @@ class EmployeeUpdateSerializer(_EmployeeWriteBase):
         fields = [
             "first_name", "middle_name", "family_name",
             "dob", "nationality", "blood_group", "gender", "qualification",
+            "aadhaar_number",
             "employment_type", "employment_category",
             "date_of_appointment", "date_of_joining",
             "designation", "department", "campus", "institute",

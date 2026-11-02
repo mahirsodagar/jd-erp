@@ -60,6 +60,9 @@ class StudentDetailSerializer(serializers.ModelSerializer):
     photo_url = serializers.SerializerMethodField()
     portal_username = serializers.SerializerMethodField()
     is_dropout = serializers.SerializerMethodField()
+    # Registration fee paid (or due) online at application time — JD
+    # Institute only. Null when the step doesn't apply to this student.
+    registration_payment = serializers.SerializerMethodField()
 
     class Meta:
         model = Student
@@ -86,12 +89,13 @@ class StudentDetailSerializer(serializers.ModelSerializer):
             "application_fee_paid_at", "application_fee_amount",
             "application_fee_mode", "application_fee_ref",
             "application_fee_recorded_by_name",
+            "registration_payment",
             "created_by", "created_on", "updated_by", "updated_on",
         ]
         read_only_fields = [
             "id", "application_form_id",
             "user_account", "parent_user_account", "lead_origin",
-            "portal_username", "is_dropout",
+            "portal_username", "is_dropout", "registration_payment",
             "created_by", "created_on", "updated_by", "updated_on",
             "campus_name", "program_name", "course_name",
             "institute_name", "academic_year_code", "photo_url",
@@ -147,6 +151,10 @@ class StudentDetailSerializer(serializers.ModelSerializer):
     def get_is_dropout(self, obj):
         from .services import is_dropout
         return is_dropout(obj)
+
+    def get_registration_payment(self, obj):
+        from apps.payments.registration_fee import registration_payment_summary
+        return registration_payment_summary(obj)
 
     def get_portal_username(self, obj):
         # Only surface to staff — students shouldn't see their own row

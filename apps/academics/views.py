@@ -1582,6 +1582,14 @@ class TestListCreateView(APIView):
                 attempts__student__enrollments__batch_id=v,
                 attempts__student__enrollments__status=Enrollment.Status.ACTIVE,
             ).distinct()
+        if v := params.get("campus"):
+            # Same idea as batch: a test belongs to a campus when it has
+            # been mapped to students actively enrolled there.
+            from apps.admissions.models import Enrollment
+            qs = qs.filter(
+                attempts__student__enrollments__campus_id=v,
+                attempts__student__enrollments__status=Enrollment.Status.ACTIVE,
+            ).distinct()
         return Response(TestSerializer(qs[:500], many=True).data)
 
     def post(self, request):

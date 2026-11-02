@@ -152,3 +152,154 @@ def send_fee_link(*, enrollment, actor=None) -> dict:
         "gateway": payment_request.gateway if payment_request else "manual",
         "payment_request_id": getattr(payment_request, "id", None),
     }
+
+
+# ---------------------------------------------------------------------
+# Per-row links (student details → Fees → "Send link" on each row)
+# ---------------------------------------------------------------------
+#
+# Unlike `send_fee_link` these are online-only: a row with no gateway
+# route (JDIFT course installments and other fees — paid at the college,
+# user rule 2026-11-02) is refused rather than sent as a manual page, and
+# the UI hides the button for such rows (`online_payable`).
+
+def is_online_payable(route) -> bool:
+    """Whether a resolved route can take money right now."""
+    from apps.payments.errors import PaymentGatewayError
+    from apps.payments.services import payable_route
+
+    try:
+        payable_route(route, "")
+    except PaymentGatewayError:
+        return False
+    return True
+
+
+def _student_email(enrollment) -> str:
+    email = (enrollment.student.student_email or "").strip()
+    if not email:
+        raise FeeLinkError("This student has no email address on file.")
+    return email
+
+
+def _institute_bits(enrollment) -> tuple[str, str]:
+    program = enrollment.program
+    institute = getattr(program, "institute", None)
+    return (
+        (getattr(institute, "code", "") or "").upper(),
+        getattr(institute, "name", "") or "JD",
+    )
+
+
+def _online_request(make_request, *, what: str):
+    from apps.payments.errors import PaymentGatewayError
+    from apps.payments.services import NoOnlineRoute
+
+    try:
+        return make_request()
+    except NoOnlineRoute as e:
+        logger.info("fees: %s", e)
+        raise FeeLinkError(
+            f"Online payment is not available for this {what}; it is paid "
+            f"at the college.",
+        ) from e
+    except PaymentGatewayError as e:
+        logger.error("fees: %s", e)
+        raise FeeLinkError(
+            f"The payment gateway could not raise a link for this {what}: {e}",
+        ) from e
+
+
+def _email_link(*, enrollment, email, label, amount, due_date, url) -> dict:
+    program = enrollment.program
+    _key, institute_label = _institute_bits(enrollment)
+    email_log = queue_notification(
+        template_key="fees.fee_link.email",
+        recipient=email,
+        context={
+            "name": enrollment.student.student_name,
+            "institute": institute_label,
+            "course": program.name,
+            "installment": label,
+            "amount": _money(amount),
+            "due_date": due_date.strftime("%d %b %Y") if due_date else "—",
+            "url": url,
+            "degree_type": program.degree_type,
+        },
+        related=enrollment,
+    )
+    sent = getattr(email_log, "status", "") == "SENT"
+    return {
+        "email": email,
+        "email_sent": sent,
+        "email_error": "" if sent else (getattr(email_log, "error", "") or ""),
+        "url": url,
+        "installment": label,
+        "amount": str(amount),
+    }
+
+
+def send_installment_link(*, installment, actor=None) -> dict:
+    """Email the student a gateway link for ONE scheduled installment —
+    any row with a balance, not only the next payable one (staff's
+    call, user 2026-11-02). Raises `FeeLinkError` when nothing can go."""
+    from apps.fees.services.balance import installment_balance
+    from apps.payments.services import installment_request_for, pay_url_for
+
+    enrollment = installment.enrollment
+    email = _student_email(enrollment)
+    balance = Decimal(installment_balance(installment)["balance"])
+    if balance <= Decimal("0"):
+        raise FeeLinkError("This installment is already paid.")
+
+    label = (
+        "Registration fee"
+        if installment.kind == installment.Kind.REGISTRATION
+        else f"Installment #{installment.sequence}"
+    )
+    payment_request = _online_request(
+        lambda: installment_request_for(installment, amount=balance, actor=actor),
+        what="installment",
+    )
+    out = _email_link(
+        enrollment=enrollment, email=email, label=label, amount=balance,
+        due_date=installment.due_date, url=pay_url_for(payment_request),
+    )
+    out.update({
+        "installment_id": installment.id,
+        "gateway": payment_request.gateway,
+        "payment_request_id": payment_request.id,
+    })
+    return out
+
+
+def send_other_fee_link(*, other_fee, actor=None) -> dict:
+    """Email the student a gateway link for ONE ad-hoc "other" fee."""
+    from apps.fees.models import FeeReceipt
+    from apps.payments.services import other_fee_request_for, pay_url_for
+    from django.db.models import Sum
+
+    enrollment = other_fee.enrollment
+    email = _student_email(enrollment)
+    paid = Decimal(
+        other_fee.receipts.filter(status=FeeReceipt.Status.ACTIVE)
+        .aggregate(s=Sum("amount"))["s"] or 0
+    )
+    balance = Decimal(other_fee.amount) - paid
+    if balance <= Decimal("0"):
+        raise FeeLinkError("This fee is already paid.")
+
+    payment_request = _online_request(
+        lambda: other_fee_request_for(other_fee, amount=balance, actor=actor),
+        what="fee",
+    )
+    out = _email_link(
+        enrollment=enrollment, email=email, label=other_fee.name,
+        amount=balance, due_date=None, url=pay_url_for(payment_request),
+    )
+    out.update({
+        "other_fee_id": other_fee.id,
+        "gateway": payment_request.gateway,
+        "payment_request_id": payment_request.id,
+    })
+    return out

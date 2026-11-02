@@ -245,6 +245,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
             "application_fee_notes",
             "application_fee_recorded_by",
             "application_fee_recorded_by_name",
+            "application_fee_receipt_no",
             "application_fee_due",
             "fee_link_sent_at", "fee_link_url",
             "created_by", "created_by_name",

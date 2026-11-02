@@ -1131,6 +1131,23 @@ def declaration_for(institute_code: str) -> str:
     return DECLARATION_TEXT
 
 
+def institute_code_for_student(student) -> str:
+    """The institute whose terms a student is bound by.
+
+    Terms follow the *program* (a campus hosts several institutes'
+    programs and names none itself), which is also what the public form
+    shows once a program is picked. `Student.institute` tracks the
+    program everywhere it is written, so this mostly agrees with it; the
+    program wins when they differ, and the student's own institute is
+    the fallback for a program with none.
+    """
+    program = getattr(student, "program", None)
+    code = getattr(getattr(program, "institute", None), "code", "")
+    if not code:
+        code = getattr(getattr(student, "institute", None), "code", "")
+    return code or ""
+
+
 def terms_for(institute_code: str) -> dict:
     """Declaration + rules + fee note + disclaimer for one institute.
 

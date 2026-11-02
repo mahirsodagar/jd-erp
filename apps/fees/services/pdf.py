@@ -181,7 +181,9 @@ def _particular(receipt) -> str:
         return receipt.other_fee.name
     if receipt.installment_id:
         return receipt.installment.description or "Fee"
-    return "Fee"
+    # A pre-enrolment registration receipt names its purpose directly —
+    # see fees.services.registration_receipt.
+    return getattr(receipt, "particular", "") or "Fee"
 
 
 def _mode_label(receipt) -> str:

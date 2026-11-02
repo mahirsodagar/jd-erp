@@ -27,12 +27,14 @@ from .reports import (
 )
 from .views import (
     LeadApplicationCloseView,
+    LeadApplicationFeeReceiptPdfView,
     LeadApplicationOpenView,
     LeadCommunicationListCreateView,
     LeadDetailView,
     LeadFollowupDetailView,
     LeadFollowupListCreateView,
     LeadHistoryView,
+    LeadImportView,
     LeadIntakeView,
     LeadListCreateView,
     LeadPromoteView,
@@ -51,6 +53,7 @@ from .views import (
 
 urlpatterns = [
     path("intake/", LeadIntakeView.as_view(), name="lead-intake"),
+    path("import/", LeadImportView.as_view(), name="lead-import"),
     path("bulk-message/", LeadBulkMessageView.as_view(), name="lead-bulk-message"),
 
     # F.3 — counsellors (one flat list; employees promoted to counsellor)
@@ -109,6 +112,9 @@ urlpatterns = [
          LeadMarkFeePaidView.as_view(), name="lead-mark-fee-paid"),
     path("<int:pk>/clear-fee-paid/",
          LeadClearFeePaidView.as_view(), name="lead-clear-fee-paid"),
+    path("<int:pk>/application-fee/receipt/pdf/",
+         LeadApplicationFeeReceiptPdfView.as_view(),
+         name="lead-application-fee-receipt-pdf"),
 
     # Counsellor closes / opens the student's self-fill application form.
     path("<int:pk>/application/close/",

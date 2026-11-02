@@ -12,6 +12,10 @@ EMP_CODE_VALIDATOR = RegexValidator(
     regex=r"^[A-Z0-9-]+$",
     message="emp_code must be uppercase letters, digits, and dashes only.",
 )
+AADHAAR_VALIDATOR = RegexValidator(
+    regex=r"^\d{12}$",
+    message="Aadhaar number must be exactly 12 digits.",
+)
 
 
 class Department(models.Model):
@@ -102,6 +106,10 @@ class Employee(models.Model):
     blood_group = models.CharField(max_length=5, choices=BloodGroup.choices)
     gender = models.CharField(max_length=1, choices=Gender.choices)
     qualification = models.CharField(max_length=120, blank=True)
+    aadhaar_number = models.CharField(
+        max_length=12, blank=True, validators=[AADHAAR_VALIDATOR],
+        help_text="12-digit Aadhaar number (optional).",
+    )
 
     # Employment
     employment_type = models.PositiveSmallIntegerField(choices=EmploymentType.choices)

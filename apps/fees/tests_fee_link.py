@@ -10,13 +10,13 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from apps.admissions.models import Enrollment, Student
-from apps.fees.models import FeeReceipt, Installment
+from apps.fees.models import FeeReceipt, Installment, OtherFee
 from apps.master.models import (
     AcademicYear, Batch, Campus, Institute, Program, Semester,
 )
 from apps.notifications.models import NotificationDispatchLog
 from apps.notifications.models import NotificationTemplate as T
-from apps.payments.models import PaymentRequest
+from apps.payments.models import PaymentOrder, PaymentRequest
 from apps.portal.tests_fees import SG_ON
 
 @override_settings(
@@ -146,3 +146,119 @@ class SendFeeLinkTests(TestCase):
         client.force_authenticate(user=clerk)
         r = client.post(reverse("enrollment-send-fee-link", args=[enrollment.id]))
         self.assertEqual(r.status_code, 403)
+
+
+@override_settings(
+    **SG_ON,
+    RAZORPAY_ENABLED=True,
+    RAZORPAY_KEY_ID="rzp_test_shared",
+    RAZORPAY_KEY_SECRET="rzp_shared_secret",
+    RAZORPAY_ACCOUNTS={"JDIFT_ROYALTY": {"live": True}},
+    EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+)
+class RowSendFeeLinkTests(SendFeeLinkTests):
+    """Per-row "Send link" (student details → Fees): any unpaid row,
+    registration on Razorpay, course installments and other fees on
+    SmartGateway, nothing at all for JDIFT."""
+
+    def _client(self):
+        client = APIClient()
+        client.force_authenticate(user=self.staff)
+        return client
+
+    def test_any_unpaid_installment_can_be_sent_not_only_the_next(self):
+        enrollment, i1, i2 = self._enroll(self.jdsd)
+        r = self._client().post(reverse("installment-send-fee-link", args=[i2.id]))
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()
+        self.assertEqual(body["installment_id"], i2.id)
+        self.assertEqual(body["gateway"], "smartgateway")
+        self.assertTrue(body["email_sent"], body)
+        pr = PaymentRequest.objects.get(pk=body["payment_request_id"])
+        self.assertEqual((pr.installment_id, pr.account), (i2.id, "JDSD_TRUST"))
+
+    def test_registration_row_goes_to_razorpay(self):
+        enrollment, *_ = self._enroll(self.jdsd)
+        reg = Installment.objects.create(
+            enrollment=enrollment, kind=Installment.Kind.REGISTRATION,
+            sequence=0, due_date=date(2026, 6, 1), amount=Decimal("11800"),
+        )
+        r = self._client().post(reverse("installment-send-fee-link", args=[reg.id]))
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["gateway"], "razorpay")
+        self.assertEqual(r.json()["installment"], "Registration fee")
+
+    def test_paid_row_is_refused(self):
+        enrollment, i1, _ = self._enroll(self.jdsd)
+        FeeReceipt.objects.create(
+            receipt_no="R-1", enrollment=enrollment, installment=i1,
+            basic_fee=i1.amount, amount=i1.amount,
+            payment_mode=FeeReceipt.PaymentMode.CASH, received_date=date(2026, 7, 1),
+        )
+        r = self._client().post(reverse("installment-send-fee-link", args=[i1.id]))
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("already paid", r.json()["detail"])
+
+    def test_jdift_row_is_not_sendable_and_flagged_in_the_list(self):
+        enrollment, i1, _ = self._enroll(self.jdift)
+        r = self._client().post(reverse("installment-send-fee-link", args=[i1.id]))
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertIn("paid at the college", r.json()["detail"])
+        self.assertFalse(PaymentRequest.objects.exists())
+
+        rows = self._client().get(
+            reverse("installment-list-create"), {"enrollment": enrollment.id},
+        ).json()
+        self.assertEqual({row["online_payable"] for row in rows}, {False})
+
+    def test_jdsd_rows_are_flagged_online_payable(self):
+        enrollment, *_ = self._enroll(self.jdsd)
+        rows = self._client().get(
+            reverse("installment-list-create"), {"enrollment": enrollment.id},
+        ).json()
+        self.assertEqual({row["online_payable"] for row in rows}, {True})
+
+    def test_other_fee_link_and_settlement_write_a_receipt(self):
+        from apps.payments import services
+
+        enrollment, *_ = self._enroll(self.jdsd)
+        fee = OtherFee.objects.create(
+            enrollment=enrollment, name="Exam re-attempt", amount=Decimal("1500"),
+        )
+        r = self._client().post(reverse("other-fee-send-fee-link", args=[fee.id]))
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()
+        self.assertEqual(body["other_fee_id"], fee.id)
+        self.assertEqual(body["installment"], "Exam re-attempt")
+        self.assertEqual(body["gateway"], "smartgateway")
+        pr = PaymentRequest.objects.get(pk=body["payment_request_id"])
+        self.assertEqual(pr.purpose, PaymentRequest.Purpose.OTHER_FEE)
+        self.assertEqual(pr.other_fee_id, fee.id)
+
+        order = PaymentOrder.objects.create(
+            request=pr, order_id=f"OF{pr.pk}N01", amount=pr.amount,
+        )
+        services.apply_order_body(order, {"status": "CHARGED"})
+        receipt = FeeReceipt.objects.get(instrument_ref=order.order_id)
+        self.assertEqual(receipt.other_fee_id, fee.id)
+        self.assertEqual(receipt.enrollment_id, enrollment.id)
+        self.assertEqual(receipt.amount, Decimal("1500"))
+        # Fully paid now: the list says so and a resend is refused.
+        row = self._client().get(
+            reverse("other-fee-list-create"), {"enrollment": enrollment.id},
+        ).json()[0]
+        self.assertEqual(Decimal(row["balance"]), Decimal("0"))
+        r = self._client().post(reverse("other-fee-send-fee-link", args=[fee.id]))
+        self.assertEqual(r.status_code, 400)
+
+    def test_jdift_other_fee_is_paid_at_the_college(self):
+        enrollment, *_ = self._enroll(self.jdift)
+        fee = OtherFee.objects.create(
+            enrollment=enrollment, name="Kit", amount=Decimal("500"),
+        )
+        r = self._client().post(reverse("other-fee-send-fee-link", args=[fee.id]))
+        self.assertEqual(r.status_code, 400)
+        row = self._client().get(
+            reverse("other-fee-list-create"), {"enrollment": enrollment.id},
+        ).json()[0]
+        self.assertFalse(row["online_payable"])

@@ -13,7 +13,7 @@ from django.http import HttpResponse
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.admissions.application_terms import terms_for
+from apps.admissions.application_terms import institute_code_for_student, terms_for
 from apps.admissions.models import Student, StudentDocument
 from apps.admissions.services_application_pdf import render_application_pdf
 
@@ -133,7 +133,7 @@ class ApplicationFormView(APIView):
             "documents": documents,
             # Same wording the public form showed, served from the one
             # source of truth rather than restated in the frontend.
-            "terms": terms_for(getattr(s.institute, "code", "") or ""),
+            "terms": terms_for(institute_code_for_student(s)),
             "consent": {
                 "declaration_accepted_at": (
                     s.declaration_accepted_at.isoformat()

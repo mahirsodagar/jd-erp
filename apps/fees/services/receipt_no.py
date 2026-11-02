@@ -28,10 +28,18 @@ def generate_receipt_no(*, campus_code: str, year: int | None = None) -> str:
     # in SQL because a string MAX would rank `9999` above `10000` once a
     # busy campus crosses four digits; the candidate set is one campus-
     # year of receipts, so the scan is cheap.
-    issued = FeeReceipt.objects.filter(
+    issued = list(FeeReceipt.objects.filter(
         receipt_no__startswith=prefix,
         receipt_no__endswith=suffix,
-    ).values_list("receipt_no", flat=True)
+    ).values_list("receipt_no", flat=True))
+    # Numbers reserved for a registration fee paid at application time,
+    # whose FeeReceipt is only written at enrolment — they must not be
+    # handed to a counter receipt in the meantime.
+    from apps.payments.models import PaymentRequest
+    issued += list(PaymentRequest.objects.filter(
+        receipt_no__startswith=prefix,
+        receipt_no__endswith=suffix,
+    ).values_list("receipt_no", flat=True))
     seq = max(
         (int(m.group(1)) for n in issued if (m := pattern.match(n))),
         default=0,

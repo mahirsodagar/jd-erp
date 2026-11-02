@@ -25,6 +25,9 @@ class PaymentRequestSerializer(serializers.ModelSerializer):
     lead_name = serializers.CharField(
         source="lead.name", read_only=True, default="",
     )
+    student_name = serializers.CharField(
+        source="student.student_name", read_only=True, default="",
+    )
     orders = PaymentOrderSerializer(many=True, read_only=True)
     #: The URL that actually goes out in the SMS. Built rather than
     #: stored, so it follows the configured public base URL.
@@ -35,6 +38,8 @@ class PaymentRequestSerializer(serializers.ModelSerializer):
         model = PaymentRequest
         fields = (
             "id", "token", "purpose", "lead", "lead_name", "installment",
+            "other_fee",
+            "student", "student_name", "receipt_no",
             "amount", "currency", "description",
             "gateway", "account", "account_label",
             "status", "paid_at", "attempt_count", "pay_url", "orders",

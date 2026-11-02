@@ -17,17 +17,26 @@ class OtherFeeSerializer(serializers.ModelSerializer):
     )
     paid = serializers.SerializerMethodField()
     balance = serializers.SerializerMethodField()
+    #: Whether staff can send a gateway pay link for this row — False for
+    #: fees with no online route (JDIFT, paid at the college) or while
+    #: the gateway is switched off in this environment.
+    online_payable = serializers.SerializerMethodField()
 
     class Meta:
         model = OtherFee
         fields = [
             "id", "enrollment", "student_name", "name", "amount",
-            "paid", "balance", "created_by", "created_on",
+            "paid", "balance", "online_payable", "created_by", "created_on",
         ]
         read_only_fields = [
-            "id", "student_name", "paid", "balance",
+            "id", "student_name", "paid", "balance", "online_payable",
             "created_by", "created_on",
         ]
+
+    def get_online_payable(self, obj) -> bool:
+        from apps.payments.routing import route_for_other_fee
+        from .services.fee_link import is_online_payable
+        return is_online_payable(route_for_other_fee(obj))
 
     def _paid(self, obj) -> Decimal:
         from django.db.models import Sum
@@ -49,19 +58,26 @@ class InstallmentSerializer(serializers.ModelSerializer):
     )
     paid = serializers.SerializerMethodField()
     balance = serializers.SerializerMethodField()
+    #: See OtherFeeSerializer.online_payable.
+    online_payable = serializers.SerializerMethodField()
 
     class Meta:
         model = Installment
         fields = [
             "id", "enrollment", "student_name", "kind",
             "sequence", "due_date", "amount", "description",
-            "paid", "balance",
+            "paid", "balance", "online_payable",
             "created_by", "created_on",
         ]
         read_only_fields = [
-            "id", "student_name", "paid", "balance",
+            "id", "student_name", "paid", "balance", "online_payable",
             "created_by", "created_on",
         ]
+
+    def get_online_payable(self, obj) -> bool:
+        from apps.payments.routing import route_for_installment
+        from .services.fee_link import is_online_payable
+        return is_online_payable(route_for_installment(obj))
 
     def validate(self, attrs):
         """Keep REGISTRATION rows honest.

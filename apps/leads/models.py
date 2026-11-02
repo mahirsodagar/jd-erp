@@ -92,6 +92,13 @@ class Lead(models.Model):
         on_delete=models.SET_NULL,
         related_name="application_fees_recorded",
     )
+    # Reserved from the campus receipt series (same numbering as course
+    # fee receipts) when the fee is marked paid, so the application fee
+    # receipt PDF carries a real number. Reserved lazily on first
+    # download for leads marked paid before this field existed.
+    application_fee_receipt_no = models.CharField(
+        max_length=40, blank=True, db_index=True,
+    )
     # Stamped each time the fee-payment link (UPI / QR / bank email) is
     # sent. Mirrors `application_token_sent_at`; lets the UI show
     # "Resend fee link" once the first one has gone out.

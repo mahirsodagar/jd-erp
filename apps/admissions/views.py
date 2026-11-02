@@ -455,10 +455,19 @@ class EnrollmentListCreateView(APIView):
         if not ok:
             return Response({"detail": msg}, status=http.HTTP_400_BAD_REQUEST)
         with transaction.atomic():
-            s.save(entry_user=request.user)
+            enrollment = s.save(entry_user=request.user)
             # Enrolling into a different program than the one applied for
             # is allowed and common; the student profile has to follow it.
             sync_student_placement_from_enrollment(student, actor=request.user)
+            # A registration fee paid online right after the application
+            # form becomes this year's registration receipt, so the
+            # student is not charged for it again.
+            from apps.payments.registration_fee import (
+                settle_registration_payment_on_enrollment,
+            )
+            settle_registration_payment_on_enrollment(
+                enrollment, actor=request.user,
+            )
         return Response(s.data, status=http.HTTP_201_CREATED)
 
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from fpdf import FPDF
 
-from .application_terms import terms_for
+from .application_terms import institute_code_for_student, terms_for
 from .models import Student, StudentDocument
 
 _UNICODE_FALLBACKS = {
@@ -154,7 +154,7 @@ def _photo(pdf: FPDF, student: Student) -> None:
 
 
 def _terms(pdf: FPDF, student: Student) -> None:
-    terms = terms_for(getattr(student.institute, "code", "") or "")
+    terms = terms_for(institute_code_for_student(student))
 
     # The bundle carries its own heading — JDSD's 2026 document calls
     # this section "Undertaking by the student", the earlier wording a

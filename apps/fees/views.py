@@ -31,7 +31,9 @@ from .serializers import (
 from .services.balance import (
     concession_ceiling, enrollment_balance, resolve_fee_figures,
 )
-from .services.fee_link import FeeLinkError, send_fee_link
+from .services.fee_link import (
+    FeeLinkError, send_fee_link, send_installment_link, send_other_fee_link,
+)
 from .services.pdf import render_receipt_pdf
 from .services.receipt_email import send_receipt_email
 from .services.registration import ensure_registration_installment
@@ -576,6 +578,53 @@ class EnrollmentSendFeeLinkView(APIView):
         except FeeLinkError as exc:
             return Response({"detail": str(exc)}, status=http.HTTP_400_BAD_REQUEST)
         return Response(result)
+
+
+class _RowSendFeeLinkBase(APIView):
+    """Shared guard for the per-row "Send link" endpoints: the fee-link
+    permission plus the caller's campus scope, like the enrollment one."""
+
+    permission_classes = [IsAuthenticated, FeeAccessPolicy]
+    model = None
+    sender = None
+    what = "row"
+
+    def post(self, request, pk):
+        if not has_perm(request.user, "fees.feelink.send"):
+            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
+        try:
+            row = self.model.objects.select_related(
+                "enrollment", "enrollment__student", "enrollment__campus",
+                "enrollment__program__institute",
+            ).get(pk=pk)
+        except self.model.DoesNotExist as exc:
+            raise Http404 from exc
+        e = row.enrollment
+        if not (request.user.is_superuser
+                or can_view_all(request.user)
+                or request.user.campuses.filter(pk=e.campus_id).exists()):
+            raise Http404
+        try:
+            result = type(self).sender(**{self.what: row, "actor": request.user})
+        except FeeLinkError as exc:
+            return Response({"detail": str(exc)}, status=http.HTTP_400_BAD_REQUEST)
+        return Response(result)
+
+
+class InstallmentSendFeeLinkView(_RowSendFeeLinkBase):
+    """`POST /api/fees/installments/<pk>/send-fee-link/` — email the
+    student a gateway link for this one installment."""
+    model = Installment
+    sender = staticmethod(send_installment_link)
+    what = "installment"
+
+
+class OtherFeeSendFeeLinkView(_RowSendFeeLinkBase):
+    """`POST /api/fees/other-fees/<pk>/send-fee-link/` — email the
+    student a gateway link for this one other fee."""
+    model = OtherFee
+    sender = staticmethod(send_other_fee_link)
+    what = "other_fee"
 
 
 # --- Student panel ------------------------------------------------------
