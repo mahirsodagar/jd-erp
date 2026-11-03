@@ -1,8 +1,9 @@
-"""Receipt for a registration fee paid at application time.
+"""Receipt for a fee paid at application time — registration, course or
+other fee (`payments.applicant_fees`).
 
 The student pays before any enrollment exists, so there is no FeeReceipt
 row to print yet — that is written when staff enrol them
-(`payments.registration_fee.settle_registration_payment_on_enrollment`).
+(`payments.applicant_fees.settle_applicant_payments_on_enrollment`).
 The client wants the receipt in the student's inbox the moment the
 payment lands, so this renders the ordinary receipt PDF from a stand-in
 that looks like a FeeReceipt to `fees.services.pdf`, under the receipt
@@ -45,8 +46,19 @@ class _Placement:
         self.campus = student.campus
 
 
+def particular_for(purpose: str) -> str:
+    """What the receipt says the money was towards."""
+    from apps.payments.applicant_fees import BY_PURPOSE, REGISTRATION
+
+    kind = BY_PURPOSE.get(purpose)
+    if kind is None or kind is REGISTRATION:
+        return REGISTRATION_DESCRIPTION
+    return kind.label
+
+
 class RegistrationReceipt:
-    """Duck-typed FeeReceipt for a settled REGISTRATION_FEE request."""
+    """Duck-typed FeeReceipt for a settled applicant-fee request
+    (REGISTRATION_FEE, COURSE_FEE or OTHER_FEE_APPLICANT)."""
 
     Status = FeeReceipt.Status
     installment_id = None
@@ -59,6 +71,7 @@ class RegistrationReceipt:
     def __init__(self, payment_request, order):
         from apps.payments.services import _gateway_label, _payment_mode
 
+        self.particular = particular_for(payment_request.purpose)
         self.receipt_no = payment_request.receipt_no
         self.enrollment = _Placement(payment_request.student)
         self.basic_fee = order.amount
@@ -82,7 +95,7 @@ def _compose(receipt: RegistrationReceipt) -> tuple[str, str]:
     subject = f"Fee receipt {receipt.receipt_no} — {student.student_name}"
     body = (
         f"Dear {student.student_name},\n\n"
-        f"We have received your registration fee. The receipt is attached.\n\n"
+        f"We have received your {receipt.particular.lower()}. The receipt is attached.\n\n"
         f"Receipt no:   {receipt.receipt_no}\n"
         f"Amount:       Rs. {amount}\n"
         f"Towards:      {receipt.particular}\n"

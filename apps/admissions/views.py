@@ -459,13 +459,15 @@ class EnrollmentListCreateView(APIView):
             # Enrolling into a different program than the one applied for
             # is allowed and common; the student profile has to follow it.
             sync_student_placement_from_enrollment(student, actor=request.user)
-            # A registration fee paid online right after the application
-            # form becomes this year's registration receipt, so the
-            # student is not charged for it again.
-            from apps.payments.registration_fee import (
-                settle_registration_payment_on_enrollment,
+            # Fees paid online right after the application form become
+            # receipts on this enrollment (registration against its
+            # installment, other fee against a new OtherFee row), so the
+            # student is not charged for them again. A course fee waits
+            # for the schedule — see the installment bulk-create view.
+            from apps.payments.applicant_fees import (
+                settle_applicant_payments_on_enrollment,
             )
-            settle_registration_payment_on_enrollment(
+            settle_applicant_payments_on_enrollment(
                 enrollment, actor=request.user,
             )
         return Response(s.data, status=http.HTTP_201_CREATED)

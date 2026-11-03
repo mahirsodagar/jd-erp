@@ -151,6 +151,15 @@ class InstallmentBulkCreateView(APIView):
                 row.get("id") == seeded.id for row in created
             ):
                 created.append(InstallmentSerializer(seeded).data)
+            # A course fee paid online at application time is applied to
+            # the COURSE rows just laid down, in sequence order. Never
+            # raises; idempotent.
+            from apps.payments.applicant_fees import (
+                settle_applicant_payments_on_enrollment,
+            )
+            settle_applicant_payments_on_enrollment(
+                enrollment, actor=request.user,
+            )
         return Response(created, status=http.HTTP_201_CREATED)
 
 

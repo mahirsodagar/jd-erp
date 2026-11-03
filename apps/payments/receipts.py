@@ -7,6 +7,10 @@ the payer's own download on the public result page
 - FEE_INSTALLMENT  → the FeeReceipt written at settlement
 - REGISTRATION_FEE → the FeeReceipt once the student is enrolled, else
                      the pre-enrolment stand-in under the reserved number
+- COURSE_FEE       → always the pre-enrolment stand-in: at enrolment the
+                     payment is split across installments, so the one
+                     document for the whole amount is the stand-in
+- OTHER_FEE_APPLICANT → like REGISTRATION_FEE
 - OTHER_FEE        → the FeeReceipt written at settlement
 - APPLICATION_FEE  → the lead's application fee receipt
 """
@@ -28,6 +32,18 @@ def receipt_pdf_for_request(pr: PaymentRequest) -> tuple[bytes, str] | None:
     from apps.fees.models import FeeReceipt
     from apps.fees.services.pdf import render_receipt_pdf
 
+    from .applicant_fees import APPLICANT_PURPOSES
+
+    def _stand_in():
+        from apps.fees.services.registration_receipt import RegistrationReceipt
+
+        if not pr.receipt_no:
+            return None
+        return render_receipt_pdf(RegistrationReceipt(pr, order)), pr.receipt_no
+
+    if pr.purpose == PaymentRequest.Purpose.COURSE_FEE and pr.student_id:
+        return _stand_in()
+
     receipt = (
         FeeReceipt.objects
         .select_related(
@@ -42,13 +58,8 @@ def receipt_pdf_for_request(pr: PaymentRequest) -> tuple[bytes, str] | None:
     if receipt is not None:
         return render_receipt_pdf(receipt), receipt.receipt_no
 
-    if pr.purpose == PaymentRequest.Purpose.REGISTRATION_FEE and pr.student_id:
-        from apps.fees.services.registration_receipt import RegistrationReceipt
-
-        if not pr.receipt_no:
-            return None
-        stand_in = RegistrationReceipt(pr, order)
-        return render_receipt_pdf(stand_in), pr.receipt_no
+    if pr.purpose in APPLICANT_PURPOSES and pr.student_id:
+        return _stand_in()
 
     if pr.purpose == PaymentRequest.Purpose.APPLICATION_FEE and pr.lead_id:
         from apps.fees.services.application_receipt import (

@@ -408,6 +408,8 @@ _ORDER_ID_PREFIX = {
     PaymentRequest.Purpose.FEE_INSTALLMENT: "FI",
     PaymentRequest.Purpose.REGISTRATION_FEE: "RF",
     PaymentRequest.Purpose.OTHER_FEE: "OF",
+    PaymentRequest.Purpose.COURSE_FEE: "CF",
+    PaymentRequest.Purpose.OTHER_FEE_APPLICANT: "OA",
 }
 
 
@@ -925,9 +927,9 @@ def apply_order_body(order: PaymentOrder, body: dict) -> PaymentOrder:
     if payment_request.other_fee_id:
         _record_other_fee_receipt(payment_request, order)
 
-    if payment_request.purpose == PaymentRequest.Purpose.REGISTRATION_FEE:
-        from .registration_fee import settle_paid_registration_fee
-        settle_paid_registration_fee(payment_request, order)
+    from .applicant_fees import APPLICANT_PURPOSES, settle_paid_applicant_fee
+    if payment_request.purpose in APPLICANT_PURPOSES:
+        settle_paid_applicant_fee(payment_request, order)
 
     if payment_request.lead_id:
         _mark_lead_fee_paid(payment_request, order)

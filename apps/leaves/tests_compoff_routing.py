@@ -63,6 +63,17 @@ class CompOffRoutingTests(TestCase):
         r = self._client(self.orphan_user).get("/api/leaves/reporting-manager/")
         self.assertIsNone(r.json()["manager"])
 
+    def test_manager_options_lists_other_active_employees(self):
+        r = self._client(self.user).get("/api/leaves/manager-options/")
+        self.assertEqual(r.status_code, 200, r.content)
+        emails = {m["email"] for m in r.json()["managers"]}
+        self.assertIn(self.boss.email_primary, emails)
+        self.assertIn(self.other.email_primary, emails)
+        self.assertNotIn(self.emp.email_primary, emails)   # not oneself
+        self.assertEqual(
+            set(r.json()["managers"][0]), {"id", "name", "emp_code", "email"},
+        )
+
     def test_defaults_to_reporting_manager_and_copies_hr(self):
         r = self._apply(self.user, cc_emails="peer@jdinstitute.edu.in")
         self.assertEqual(r.status_code, 201, r.content)

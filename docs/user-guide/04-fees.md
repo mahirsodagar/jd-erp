@@ -62,6 +62,21 @@ Admins can set it to 0 on a template for courses that do not charge it.
 > schedule anyone has already signed changes. It applies to templates created
 > from now on.
 
+### Fees paid before enrolment
+
+As soon as an applicant submits the online application form they see a
+**Pay fees** page with the whole fee structure for their program. The
+registration fee can be paid online there by every applicant. JD School of
+Design applicants can also pay the course fee and the other fee online;
+JD Institute applicants pay those at the college.
+
+Anything paid there arrives with a receipt by email straight away, and shows
+on the student's profile under *Fees paid at application* until they are
+enrolled. Once you enrol the student and set up the installment plan, the
+money is applied automatically: the registration fee to the registration
+row, the course fee to the course installments in order, and the other fee
+as its own *Other fee* entry. You do not record it again.
+
 ## 4.2 Getting in
 
 Everything in this area sits behind one gate: you need the basic

@@ -305,13 +305,38 @@ from the fee kind, the **program's** institute and the campus code
 
 | Fee | Institute | Campus | Gateway → account |
 |---|---|---|---|
-| Application fee, registration, installments | JDSD | any | SmartGateway → `JDSD_TRUST` (50100515602102) |
-| Registration | JDIFT | any | Razorpay → `JDIFT_ROYALTY` (50200123417910) |
+| Registration | every institute | any | Razorpay → `JDIFT_ROYALTY` (50200123417910) |
+| Application fee, installments, other fees | JDSD | any | SmartGateway → `JDSD_TRUST` (50100515602102) |
 | Application fee | JDIFT | any | SmartGateway → `JDIFT_MAIN` (59245987654321), since 2026-11-02 |
-| Installments | JDIFT | any | no route → manual page / no "Pay now" (on hold) |
+| Installments, other fees | JDIFT | any | no route → paid at the college / no "Pay now" |
 
 Rule of thumb since 2026-11-02: **every application fee goes through
-SmartGateway**; Razorpay carries only the JDIFT registration fee.
+SmartGateway**; Razorpay carries only the registration fee.
+
+### The "Pay fees" page after the application form
+
+Since 2026-11-03 every applicant sees a fee page the moment the public
+application form is submitted (`apps/payments/applicant_fees.py`,
+`fee_page` in the submit response and the prefill). It lists the whole
+fee template — application, registration, course (less the registration
+slice) and other fee, plus the total — and puts a *Pay now* button on
+each row the table above routes online: registration for everyone, course
+and other fee for JDSD. JDIFT's course and other rows are shown as
+"payable at the college". The application fee row is read off the lead
+(paid, with its receipt number, or the counsellor's open link).
+
+Each payable row is its own `PaymentRequest` on the Student (purposes
+`REGISTRATION_FEE`, `COURSE_FEE`, `OTHER_FEE_APPLICANT`). Paying reserves
+a receipt number and mails the receipt at once; the accounts rows are
+written when the money can be matched: registration against the year's
+REGISTRATION installment at enrolment, other fee as a new `OtherFee` row
+at enrolment, and the course fee across the COURSE installments in
+sequence order when the schedule is bulk-created (one `FeeReceipt` per
+installment, the first under the reserved number). All idempotent on
+`instrument_ref`.
+
+`REGISTRATION_FEE_AT_APPLICATION_INSTITUTES` (empty = all) can still
+restrict the page to named institutes per environment.
 
 The route is frozen onto `PaymentRequest.gateway` / `.account` when the
 request is raised. Session creation, `/orders` reads and return-URL

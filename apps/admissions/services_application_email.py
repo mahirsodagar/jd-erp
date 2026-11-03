@@ -46,25 +46,28 @@ def _transport(degree_type: str):
     return smtp_cfg, (sender.from_email if sender.is_live else "")
 
 
-def _registration_fee_lines(registration_payment: dict | None) -> str:
-    """The optional "pay your registration fee" paragraph. Only when the
-    fee is still due and payable online — a paid or inapplicable step
-    says nothing."""
-    if not registration_payment or registration_payment.get("status") != "DUE":
-        return ""
-    amount = registration_payment.get("amount") or ""
-    try:
-        amount = f"{float(amount):,.2f}"
-    except (TypeError, ValueError):
-        pass
-    return (
-        f"Registration fee: Rs. {amount}\n"
-        f"You can pay it online whenever convenient using this link:\n"
-        f"{registration_payment.get('pay_url', '')}\n\n"
-    )
+def _fee_lines(fee_page: dict | None) -> str:
+    """One "pay online" paragraph per fee still due and payable online
+    (see `payments.applicant_fees.fee_page_for`). Paid rows and rows
+    collected at the college say nothing."""
+    from apps.payments.applicant_fees import due_rows
+
+    out = []
+    for row in due_rows(fee_page):
+        amount = row.get("amount") or ""
+        try:
+            amount = f"{float(amount):,.2f}"
+        except (TypeError, ValueError):
+            pass
+        out.append(
+            f"{row.get('label', 'Fee')}: Rs. {amount}\n"
+            f"You can pay it online whenever convenient using this link:\n"
+            f"{row.get('pay_url', '')}\n\n"
+        )
+    return "".join(out)
 
 
-def _compose(student, registration_payment: dict | None = None) -> tuple[str, str]:
+def _compose(student, fee_page: dict | None = None) -> tuple[str, str]:
     institute = getattr(student, "institute", None)
     inst_name = getattr(institute, "name", "") or "JD Institute"
     program = getattr(student.program, "name", "") or "—"
@@ -78,7 +81,7 @@ def _compose(student, registration_payment: dict | None = None) -> tuple[str, st
         f"Application no: {student.application_form_id}\n"
         f"Program:        {program}\n"
         f"Campus:         {campus}\n\n"
-        + _registration_fee_lines(registration_payment)
+        + _fee_lines(fee_page)
         + f"Our admissions team will review it and contact you about the "
         f"next steps.\n\n"
         f"Regards,\nAdmissions Office\n{inst_name}"
@@ -87,13 +90,13 @@ def _compose(student, registration_payment: dict | None = None) -> tuple[str, st
 
 
 def send_application_acknowledgement(
-    student, registration_payment: dict | None = None,
+    student, fee_page: dict | None = None,
 ) -> NotificationDispatchLog | None:
     """Email the application form PDF to the student and the campus
-    inbox. `registration_payment` is the summary from
-    `payments.registration_fee.registration_payment_summary`; when the
-    fee is due the pay link rides along. Returns the dispatch log row,
-    or None when there was nobody to send to. Never raises."""
+    inbox. `fee_page` is the summary from
+    `payments.applicant_fees.fee_page_for`; every fee still due online
+    rides along with its pay link. Returns the dispatch log row, or None
+    when there was nobody to send to. Never raises."""
     try:
         student_email = (student.student_email or "").strip()
         campus_email = campus_inbox_for(student.campus)
@@ -108,7 +111,7 @@ def send_application_acknowledgement(
                         getattr(student.campus, "code", ""))
             return None
 
-        subject, body = _compose(student, registration_payment)
+        subject, body = _compose(student, fee_page)
         log = NotificationDispatchLog.objects.create(
             channel=NotificationTemplate.Channel.EMAIL,
             template_key=TEMPLATE_KEY, recipient=to, cc=", ".join(cc),

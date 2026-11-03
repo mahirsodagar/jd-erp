@@ -15,6 +15,7 @@ from .views import (
     LeaveReportSummaryView,
     LeaveTypeDetailView,
     LeaveTypeListCreateView,
+    ManagerOptionsView,
     ReportingManagerView,
 )
 
@@ -33,6 +34,7 @@ urlpatterns = [
     path("applications/<int:pk>/decision/", LeaveDecisionView.as_view(), name="application-decision"),
 
     path("reporting-manager/", ReportingManagerView.as_view(), name="reporting-manager"),
+    path("manager-options/", ManagerOptionsView.as_view(), name="manager-options"),
 
     path("comp-off/", CompOffListCreateView.as_view(), name="compoff-list-create"),
     path("comp-off/balance/", CompOffBalanceView.as_view(), name="compoff-balance"),

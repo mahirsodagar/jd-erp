@@ -515,6 +515,31 @@ class ReportingManagerView(APIView):
         }})
 
 
+class ManagerOptionsView(APIView):
+    """GET — `{"managers": [{id, name, emp_code, email}, ...]}`: every
+    active employee with an email, for the "Manager email" dropdown on
+    the apply forms. Legacy DKUL listed all employee emails here, so any
+    signed-in employee may read it; the applicant is left out since a
+    leave cannot be routed to oneself."""
+    permission_classes = [IsAuthenticated, LeaveAccessPolicy]
+
+    def get(self, request):
+        me = get_employee_for(request.user)
+        qs = (
+            Employee.objects
+            .filter(status=Employee.Status.ACTIVE)
+            .exclude(email_primary="")
+            .order_by("first_name", "family_name", "emp_code")
+        )
+        if me is not None:
+            qs = qs.exclude(pk=me.pk)
+        return Response({"managers": [
+            {"id": e.id, "name": e.full_name,
+             "emp_code": e.emp_code, "email": e.email_primary}
+            for e in qs
+        ]})
+
+
 class CompOffBalanceView(APIView):
     permission_classes = [IsAuthenticated, LeaveAccessPolicy]
 

@@ -257,27 +257,31 @@ class PublicApplicationView(APIView):
                 status=http.HTTP_400_BAD_REQUEST,
             )
 
-        # "Pay registration fee" step — JD Institute applicants only, and
-        # only when it can actually be paid online right now (None hides
-        # the step). Raised on every submit so a student who returns to
-        # finish the form still gets the button if they skipped it.
-        from apps.payments.registration_fee import registration_payment_summary
-        registration_payment = registration_payment_summary(student, create=True)
+        # "Pay fees" page — the full fee structure for every applicant,
+        # with a pay button on each row the institute collects online at
+        # this stage (registration for all, course + other for JDSD). The
+        # payable requests are raised on every submit so a student who
+        # returns to finish the form still gets the buttons.
+        from apps.payments.applicant_fees import (
+            fee_page_for, registration_payment_from,
+        )
+        fee_page = fee_page_for(student, create=True)
 
         if first_submit:
             # Acknowledgement + form PDF to the student and campus inbox.
             # Re-submits (incremental fills after counsellor review) are
             # silent so the student isn't mailed on every edit.
             from .services_application_email import send_application_acknowledgement
-            send_application_acknowledgement(
-                student, registration_payment=registration_payment,
-            )
+            send_application_acknowledgement(student, fee_page=fee_page)
 
         return Response(
             {
                 "student_id": student.id,
                 "application_form_id": student.application_form_id,
-                "registration_payment": registration_payment,
+                "fee_page": fee_page,
+                # The registration row alone, for screens built before
+                # the page existed.
+                "registration_payment": registration_payment_from(fee_page),
                 **creds,
             },
             status=http.HTTP_201_CREATED,
@@ -289,20 +293,22 @@ def _fee_structures() -> list[dict]:
     panel on the public form.
 
     The student can change campus/program on the form, so we ship every
-    active template and let the frontend pick the matching one. Only the
-    program-wide template (course is NULL) is published — course-level
-    templates are an internal refinement the student hasn't chosen yet.
-    Where several academic years exist we keep the most recent, matching
-    the lookup order in `apps.leads.send_links`.
+    active template and let the frontend pick the matching one. A
+    template with a program year set counts like any other (user,
+    2026-11-03: pick "like enrolment" — the first active match). Where
+    several academic years exist we keep the most recent, and within it
+    the first row, the same choice `payments.applicant_fees` makes.
     """
     from apps.master.models import FeeTemplate
 
     rows: dict[tuple[int, int], dict] = {}
     for t in (
         FeeTemplate.objects
-        .filter(is_active=True, course__isnull=True)
+        .filter(is_active=True)
         .select_related("academic_year")
-        .order_by("academic_year__id", "id")  # newest last — it wins
+        # Newest year last so it wins; within a year the lowest id is
+        # written last, so it wins too.
+        .order_by("academic_year__id", "-id")
     ):
         rows[(t.campus_id, t.program_id)] = {
             "campus": t.campus_id,
@@ -401,14 +407,18 @@ def _prefill(lead: Lead) -> dict:
     existing = getattr(lead, "promoted_student", None)
     student_data = None
     if existing is not None:
-        from apps.payments.registration_fee import registration_payment_summary
+        from apps.payments.applicant_fees import (
+            fee_page_for, registration_payment_from,
+        )
+        fee_page = fee_page_for(existing)
         student_data = {
             "id": existing.id,
             "application_form_id": existing.application_form_id,
-            # Registration fee due/paid for a returning JD Institute
-            # applicant; null when the step doesn't apply. Read-only
-            # here — the request itself is raised on submit.
-            "registration_payment": registration_payment_summary(existing),
+            # The "Pay fees" page for a returning applicant; null when
+            # there is nothing to show. Read-only here — the requests
+            # themselves are raised on submit.
+            "fee_page": fee_page,
+            "registration_payment": registration_payment_from(fee_page),
             "student_name": existing.student_name,
             "father_name": existing.father_name,
             "mother_name": existing.mother_name,

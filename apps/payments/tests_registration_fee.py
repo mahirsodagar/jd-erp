@@ -1,8 +1,9 @@
-"""Registration fee paid straight after the application form (JDIFT).
+"""Registration fee paid straight after the application form.
 
-What matters: the step appears only for a JD Institute applicant whose
-fee template carries a registration fee and whose gateway is on; it is
-hidden — not swapped for a manual page — otherwise. Paying it reserves a
+What matters: the step appears for an applicant whose fee template
+carries a registration fee and whose gateway is on — every institute
+since 2026-11-03, restrictable per environment — and is hidden, not
+swapped for a manual page, otherwise. Paying it reserves a
 receipt number, mails the receipt, and later settles against the
 registration installment at enrolment under that same number. No
 network — the Razorpay client is never reached.
@@ -113,7 +114,7 @@ class RegistrationFeeAtApplicationTests(RequiredFixture):
         self.assertIn(rp["pay_url"], mail.outbox[0].body)
         self.assertIn("Registration fee: Rs. 10,000.00", mail.outbox[0].body)
 
-    def test_jdsd_applicants_are_not_offered_it(self):
+    def _jdsd_submit(self):
         jdsd = Institute.objects.create(name="JDSD", code="JDSD")
         program = Program.objects.create(
             name="B.Des Interior", code="BDES-I", institute=jdsd,
@@ -130,7 +131,19 @@ class RegistrationFeeAtApplicationTests(RequiredFixture):
             campus=self.campus, program=program, city=self.city,
         ))
         self.assertEqual(r.status_code, 201, r.content)
-        data = r.json()
+        return r.json()
+
+    def test_jdsd_applicants_are_offered_it_on_razorpay_too(self):
+        data = self._jdsd_submit()
+        rp = data["registration_payment"]
+        self.assertEqual((rp["status"], rp["gateway"]), ("DUE", "razorpay"))
+        pr = PaymentRequest.objects.get()
+        self.assertEqual((pr.gateway, pr.account), ("razorpay", "JDIFT_ROYALTY"))
+        self.assertIn("Registration fee", mail.outbox[0].body)
+
+    @override_settings(REGISTRATION_FEE_AT_APPLICATION_INSTITUTES=["JDIFT"])
+    def test_the_setting_can_still_restrict_it_to_an_institute(self):
+        data = self._jdsd_submit()
         self.assertIsNone(data["registration_payment"])
         self.assertEqual(PaymentRequest.objects.count(), 0)
         self.assertNotIn("Registration fee", mail.outbox[0].body)

@@ -55,6 +55,10 @@ class PaymentRequest(models.Model):
         FEE_INSTALLMENT = "FEE_INSTALLMENT", "Fee installment (student)"
         REGISTRATION_FEE = "REGISTRATION_FEE", "Registration fee (applicant)"
         OTHER_FEE = "OTHER_FEE", "Other fee (student)"
+        # Paid from the "Pay fees" page straight after the application
+        # form, before any enrollment exists — see payments.applicant_fees.
+        COURSE_FEE = "COURSE_FEE", "Course fee (applicant)"
+        OTHER_FEE_APPLICANT = "OTHER_FEE_APPLICANT", "Other fee (applicant)"
 
     class Status(models.TextChoices):
         PENDING = "PENDING", "Awaiting payment"
@@ -90,9 +94,10 @@ class PaymentRequest(models.Model):
     student = models.ForeignKey(
         "admissions.Student", null=True, blank=True,
         on_delete=models.CASCADE, related_name="payment_requests",
-        help_text="Set for REGISTRATION_FEE requests — raised the moment "
-                  "the application form is submitted, before the student "
-                  "has an enrollment to hang an installment off.",
+        help_text="Set for REGISTRATION_FEE, COURSE_FEE and "
+                  "OTHER_FEE_APPLICANT requests — raised the moment the "
+                  "application form is submitted, before the student has "
+                  "an enrollment to hang an installment off.",
     )
     #: Receipt number reserved when a REGISTRATION_FEE request settles,
     #: so the PDF mailed on payment and the FeeReceipt written at
