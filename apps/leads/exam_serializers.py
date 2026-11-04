@@ -4,9 +4,45 @@
 from rest_framework import serializers
 
 from .exam_models import (
-    EntranceExam, EntranceExamAttempt, EntranceExamQuestion,
-    EntranceExamResponse,
+    EntranceExam, EntranceExamAttachment, EntranceExamAttempt,
+    EntranceExamQuestion, EntranceExamResponse,
 )
+
+
+class EntranceExamAttachmentSerializer(serializers.ModelSerializer):
+    """Read payload for both the candidate (public) and staff pages."""
+
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EntranceExamAttachment
+        fields = ["id", "question", "original_name", "size", "note",
+                  "file_url", "created_at"]
+        read_only_fields = fields
+
+    def get_file_url(self, obj):
+        request = self.context.get("request")
+        if not obj.file:
+            return None
+        return request.build_absolute_uri(obj.file.url) if request else obj.file.url
+
+
+class UploadAttachmentSerializer(serializers.Serializer):
+    """Multipart body of the candidate's upload."""
+
+    file = serializers.FileField()
+    question = serializers.IntegerField(required=False, allow_null=True)
+    note = serializers.CharField(required=False, allow_blank=True, max_length=200)
+
+    def validate_file(self, f):
+        ext = (f.name.rsplit(".", 1)[-1] if "." in f.name else "").lower()
+        if ext not in EntranceExamAttachment.ALLOWED_EXT:
+            allowed = ", ".join(e.upper() for e in EntranceExamAttachment.ALLOWED_EXT)
+            raise serializers.ValidationError(f"File must be one of: {allowed}.")
+        if f.size > EntranceExamAttachment.MAX_BYTES:
+            mb = EntranceExamAttachment.MAX_BYTES // (1024 * 1024)
+            raise serializers.ValidationError(f"File exceeds {mb} MB.")
+        return f
 
 
 class EntranceExamQuestionSerializer(serializers.ModelSerializer):

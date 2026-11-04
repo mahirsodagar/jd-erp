@@ -9,6 +9,7 @@ apps/admissions/public_views.py.
 from django.http import Http404
 from django.utils import timezone
 from rest_framework import status as http
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -16,14 +17,15 @@ from rest_framework.views import APIView
 from apps.academics.permissions import has_perm
 
 from .exam_models import (
-    EntranceExam, EntranceExamAttempt, EntranceExamQuestion,
-    EntranceExamResponse,
+    EntranceExam, EntranceExamAttachment, EntranceExamAttempt,
+    EntranceExamQuestion, EntranceExamResponse,
 )
 from .exam_serializers import (
-    EntranceExamAttemptSerializer, EntranceExamQuestionPublicSerializer,
-    EntranceExamQuestionSerializer, EntranceExamResponseSerializer,
-    EntranceExamSerializer, MapExamSerializer, ReviewResponseSerializer,
-    SubmitAttemptSerializer,
+    EntranceExamAttachmentSerializer, EntranceExamAttemptSerializer,
+    EntranceExamQuestionPublicSerializer, EntranceExamQuestionSerializer,
+    EntranceExamResponseSerializer, EntranceExamSerializer,
+    MapExamSerializer, ReviewResponseSerializer, SubmitAttemptSerializer,
+    UploadAttachmentSerializer,
 )
 from .exam_service import (
     can_attempt_now, exam_report, map_exam_to_leads, recompute_total_marks,
@@ -330,6 +332,10 @@ class ExamAttemptDetailView(APIView):
             "responses": EntranceExamResponseSerializer(
                 attempt.responses.all(), many=True,
             ).data,
+            "attachments": EntranceExamAttachmentSerializer(
+                attempt.attachments.all(), many=True,
+                context={"request": request},
+            ).data,
         })
 
 
@@ -452,6 +458,15 @@ class PublicExamView(APIView):
             {"question": r.question_id, "answer": r.answer}
             for r in attempt.responses.all()
         ]
+        body["attachments"] = EntranceExamAttachmentSerializer(
+            attempt.attachments.all(), many=True,
+            context={"request": request},
+        ).data
+        body["attachment_limits"] = {
+            "max_files": EntranceExamAttachment.MAX_PER_ATTEMPT,
+            "max_bytes": EntranceExamAttachment.MAX_BYTES,
+            "allowed_ext": list(EntranceExamAttachment.ALLOWED_EXT),
+        }
         return Response(body)
 
 
@@ -496,3 +511,77 @@ class PublicExamSubmitView(APIView):
             attempt=attempt, answers=s.validated_data["answers"],
         )
         return Response({"status": result["status"], **result})
+
+
+def _attachments_locked(attempt) -> str | None:
+    """Why the candidate may not change attachments right now, or None."""
+    ok, reason = can_attempt_now(attempt)
+    if not ok:
+        return reason
+    if attempt.status != EntranceExamAttempt.Status.IN_PROGRESS:
+        return "Start the exam before adding attachments."
+    return None
+
+
+class PublicExamAttachmentView(APIView):
+    """POST multipart — the candidate attaches a file (sketch, worksheet
+    photo, PDF) while the exam is in progress. Optional `question` id ties
+    it to one answer; optional `note` is a short caption."""
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, token):
+        attempt = _resolve_attempt(token)
+        locked = _attachments_locked(attempt)
+        if locked:
+            return Response({"detail": locked},
+                            status=http.HTTP_400_BAD_REQUEST)
+        if attempt.attachments.count() >= EntranceExamAttachment.MAX_PER_ATTEMPT:
+            return Response(
+                {"detail": f"You can attach at most "
+                           f"{EntranceExamAttachment.MAX_PER_ATTEMPT} files."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+        s = UploadAttachmentSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+
+        question = None
+        qid = s.validated_data.get("question")
+        if qid:
+            question = attempt.exam.questions.filter(pk=qid).first()
+            if question is None:
+                return Response({"question": ["Not a question in this exam."]},
+                                status=http.HTTP_400_BAD_REQUEST)
+
+        f = s.validated_data["file"]
+        att = EntranceExamAttachment.objects.create(
+            attempt=attempt, question=question, file=f,
+            original_name=f.name[:255], size=f.size,
+            note=s.validated_data.get("note", ""),
+        )
+        return Response(
+            EntranceExamAttachmentSerializer(att, context={"request": request}).data,
+            status=http.HTTP_201_CREATED,
+        )
+
+
+class PublicExamAttachmentDeleteView(APIView):
+    """DELETE — the candidate removes one of their own attachments, only
+    while the exam is still in progress."""
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def delete(self, request, token, pk):
+        attempt = _resolve_attempt(token)
+        locked = _attachments_locked(attempt)
+        if locked:
+            return Response({"detail": locked},
+                            status=http.HTTP_400_BAD_REQUEST)
+        try:
+            att = attempt.attachments.get(pk=pk)
+        except EntranceExamAttachment.DoesNotExist as e:
+            raise Http404 from e
+        att.file.delete(save=False)
+        att.delete()
+        return Response(status=http.HTTP_204_NO_CONTENT)

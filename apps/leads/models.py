@@ -333,6 +333,7 @@ class LeadUtm(models.Model):
 # them here so Django registers them under the `leads` app_label.
 from .exam_models import (  # noqa: E402,F401
     EntranceExam,
+    EntranceExamAttachment,
     EntranceExamAttempt,
     EntranceExamQuestion,
     EntranceExamResponse,

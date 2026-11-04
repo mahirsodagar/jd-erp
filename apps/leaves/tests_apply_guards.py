@@ -89,6 +89,25 @@ class ApplyGuardTests(TestCase):
         self.assertEqual(self._apply(self.perm, "2026-10-05", session=4).status_code, 201)
         self.assertEqual(self._apply(self.perm, "2026-10-05", session=3).status_code, 400)
 
+    def test_permission_type_matched_by_name_not_only_code(self):
+        # HR creates "Permission" from the Leave Types page with its own
+        # code; it must still be restricted to the two session slots.
+        perm2 = LeaveType.objects.create(
+            code="PERM", name="Permission Leave",
+            category=LeaveType.Category.LEAVE, half_day_allowed=True,
+        )
+        self.assertTrue(perm2.is_permission)
+        self.assertFalse(self.cl.is_permission)
+        r = self._apply(perm2, "2026-10-06", session=1)
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("Session 1", r.json()["from_session"][0])
+        self.assertEqual(self._apply(perm2, "2026-10-06", session=3).status_code, 201)
+        types = self.client.get("/api/leaves/types/").json()
+        rows = types["results"] if isinstance(types, dict) else types
+        by_code = {t["code"]: t for t in rows}
+        self.assertTrue(by_code["PERM"]["is_permission"])
+        self.assertFalse(by_code["CASUAL"]["is_permission"])
+
     def test_first_and_second_half_same_day_coexist(self):
         r = self._apply(self.cl, "2026-10-05", session=5)
         self.assertEqual(r.status_code, 201, r.content)

@@ -188,3 +188,39 @@ class EntranceExamResponse(models.Model):
 
     def __str__(self):
         return f"resp {self.id} of attempt {self.attempt_id}"
+
+
+class EntranceExamAttachment(models.Model):
+    """A file the candidate uploads while taking the exam (a sketch, a
+    scanned worksheet, a portfolio page). Optionally tied to one question
+    so graders can see which answer it belongs to. Uploaded through the
+    public tokenized link, so there is no `uploaded_by` user."""
+
+    ALLOWED_EXT = ("pdf", "jpg", "jpeg", "png", "webp", "heic")
+    MAX_BYTES = 10 * 1024 * 1024  # 10 MB
+    MAX_PER_ATTEMPT = 10
+
+    attempt = models.ForeignKey(
+        EntranceExamAttempt, on_delete=models.CASCADE,
+        related_name="attachments",
+    )
+    question = models.ForeignKey(
+        EntranceExamQuestion, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="attachments",
+        help_text="Which question this file answers, if any.",
+    )
+    file = models.FileField(upload_to="leads/exam_attachments/%Y/%m/")
+    original_name = models.CharField(max_length=255)
+    size = models.PositiveIntegerField(default=0)
+    note = models.CharField(max_length=200, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("attempt", "created_at", "id")
+        indexes = [
+            models.Index(fields=["attempt", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.original_name} on attempt {self.attempt_id}"

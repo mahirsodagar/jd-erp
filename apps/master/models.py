@@ -247,6 +247,12 @@ class Program(models.Model):
     duration_months = models.PositiveSmallIntegerField(null=True, blank=True)
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
+    id_card_affiliation = models.CharField(
+        max_length=120, blank=True,
+        help_text="Affiliation line printed on the student ID card, e.g. "
+                  "\"Affiliated to Dr. MS Bengaluru City University\". "
+                  "Blank prints nothing.",
+    )
 
     campuses = models.ManyToManyField(
         Campus, related_name="programs", blank=True,

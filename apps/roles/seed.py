@@ -203,6 +203,7 @@ CATALOGUE = [
     ("admissions", "admissions.student.promote", "Promote students to the next batch or semester"),
     ("admissions", "admissions.student.send_credentials", "Send portal credentials and reset the student's password"),
     ("admissions", "admissions.student.send_handbook", "Email the student handbook"),
+    ("admissions", "admissions.student.id_card", "Download a student's ID card (single or whole batch)"),
 
     ("admissions", "admissions.document.view", "See a student's documents"),
     ("admissions", "admissions.document.add", "Upload a document for a student"),

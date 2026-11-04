@@ -81,7 +81,7 @@ class ProgramSerializer(serializers.ModelSerializer):
             "university", "university_name", "university_code",
             "certification",
             "degree", "degree_name", "degree_type",
-            "duration_months",
+            "duration_months", "id_card_affiliation",
             "description", "is_active",
             "campuses", "campus_ids",
             "created_at", "updated_at",

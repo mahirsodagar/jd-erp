@@ -5,6 +5,7 @@ from django.urls import include, path
 
 from apps.admissions.public_views import PublicApplicationView
 from apps.leads.exam_views import (
+    PublicExamAttachmentDeleteView, PublicExamAttachmentView,
     PublicExamStartView, PublicExamSubmitView, PublicExamView,
 )
 from apps.payments.views import (
@@ -25,6 +26,11 @@ urlpatterns = [
          PublicExamStartView.as_view(), name="public-exam-start"),
     path("api/public/exam/<uuid:token>/submit/",
          PublicExamSubmitView.as_view(), name="public-exam-submit"),
+    path("api/public/exam/<uuid:token>/attachments/",
+         PublicExamAttachmentView.as_view(), name="public-exam-attachment"),
+    path("api/public/exam/<uuid:token>/attachments/<int:pk>/",
+         PublicExamAttachmentDeleteView.as_view(),
+         name="public-exam-attachment-delete"),
     # Public, no-auth manual-payment page (UPI QR + bank details) — what
     # the fee SMS/email points at when the fee has no online route.
     path("api/public/pay/manual/<str:institute>/",

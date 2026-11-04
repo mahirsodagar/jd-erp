@@ -33,6 +33,7 @@ from .services import (
     sync_student_placement_from_enrollment, transfer_enrollment,
 )
 from .services_handbook import send_handbook_email
+from .services_idcard import render_id_card
 from .services_portal_email import send_portal_credentials_email
 from .services_undertaking import render_undertaking_pdf, send_undertaking
 
@@ -226,6 +227,32 @@ class StudentDetailView(APIView):
         s.is_valid(raise_exception=True)
         s.save(updated_by=request.user)
         return Response(StudentDetailSerializer(student, context={"request": request}).data)
+
+
+class StudentIdCardView(APIView):
+    """GET /api/admissions/students/{pk}/id-card.pdf — the student's ID
+    card (front + back) in the institute's 2026 design. Needs
+    `admissions.student.id_card` on top of the usual student scope."""
+
+    permission_classes = [IsAuthenticated, StudentAccessPolicy]
+
+    def get(self, request, pk):
+        if not has_perm(request.user, "admissions.student.id_card"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        try:
+            student = Student.objects.select_related(
+                "institute", "campus", "program",
+            ).get(pk=pk)
+        except Student.DoesNotExist as e:
+            raise Http404 from e
+        self.check_object_permissions(request, student)
+        pdf = render_id_card(student)
+        resp = HttpResponse(pdf, content_type="application/pdf")
+        name = (student.registration_number or student.application_form_id
+                or student.pk)
+        resp["Content-Disposition"] = f'inline; filename="id-card-{name}.pdf"'
+        return resp
 
 
 # --- Student self-service ("my" panel) ---------------------------------

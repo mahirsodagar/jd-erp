@@ -45,6 +45,13 @@ def eligible_counsellors():
     )
 
 
+def can_take_leads(user) -> bool:
+    """True when `user` is an eligible counsellor right now."""
+    if user is None:
+        return False
+    return eligible_counsellors().filter(employee__user_account=user).exists()
+
+
 def assign_via_round_robin():
     """Pick the next eligible counsellor. Returns a User or None.
 
@@ -168,8 +175,15 @@ def create_lead(*, data: dict, created_by=None, utm: dict | None = None) -> Lead
     ).count()
     next_seq = family_count + 1
 
-    # Auto-assign to original counsellor (overrides any incoming assign_to).
-    data["assign_to"] = root.assign_to
+    # Auto-assign to the original counsellor (overrides any incoming
+    # assign_to) so one person keeps the whole conversation — unless they
+    # can no longer take leads (paused on the Counsellors page, left, or
+    # lost their portal account). Then an explicit assign_to wins, and
+    # failing that the lead goes round the rotation like a fresh one.
+    owner = root.assign_to
+    if owner is not None and not can_take_leads(owner):
+        owner = None
+    data["assign_to"] = owner or data.get("assign_to") or assign_via_round_robin()
 
     lead = Lead.objects.create(
         created_by=created_by,

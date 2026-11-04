@@ -11,12 +11,14 @@ from .models import (
 # --- Master ------------------------------------------------------------
 
 class LeaveTypeSerializer(serializers.ModelSerializer):
+    is_permission = serializers.BooleanField(read_only=True)
+
     class Meta:
         model = LeaveType
         fields = ["id", "code", "name", "category",
                   "half_day_allowed", "enforce_balance", "is_active",
-                  "created_at", "updated_at"]
-        read_only_fields = ["id", "created_at", "updated_at"]
+                  "is_permission", "created_at", "updated_at"]
+        read_only_fields = ["id", "is_permission", "created_at", "updated_at"]
 
 
 # --- Allocations -------------------------------------------------------
@@ -124,9 +126,10 @@ class LeaveApplyInputSerializer(serializers.Serializer):
                 {"to_date": "Must be on/after from_date."}
             )
         lt = attrs["leave_type"]
-        if lt.code == "PERMISSION" and attrs["from_session"] not in (3, 4):
+        if lt.is_permission and attrs["from_session"] not in (3, 4):
             raise serializers.ValidationError(
-                {"from_session": "Permission leaves use sessions 3 or 4 only."}
+                {"from_session": "Permission leaves use Session 1 "
+                                 "(9:30–11:00 AM) or Session 2 (4:00–5:30 PM)."}
             )
         if lt.code == "SATURDAY_OFF" and attrs["from_session"] != 2:
             raise serializers.ValidationError(

@@ -157,6 +157,7 @@ Note the cross-module rule: **promoting a lead requires both
 | `GET/POST /api/admissions/students/<id>/parent/` | Provision the parent account (handled by `apps.portal.views.ProvisionParentView`) |
 | `POST /api/admissions/students/<id>/send-portal-credentials/` | Resets the password, returns it once (not stored), emails it |
 | `POST /api/admissions/students/<id>/send-handbook/` | |
+| `GET /api/admissions/students/<id>/id-card.pdf` | Student ID card, front + back, 54x85 mm, institute-specific design (`services_idcard.py`); needs `admissions.student.id_card`. Batch-wide PDF: `GET /api/academics/batch-report/<id>/id-cards/` |
 | `GET /api/admissions/me/`, `GET /api/admissions/me/documents/` | Student's own record |
 | `GET/POST /api/admissions/enrollments/`, `GET/PATCH /api/admissions/enrollments/<id>/` | |
 | `POST /api/admissions/enrollments/<id>/undertaking/` | Renders + emails the fee-undertaking PDF |

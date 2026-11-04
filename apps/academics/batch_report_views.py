@@ -21,6 +21,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.admissions.services_idcard import render_batch_id_cards
 from apps.master.models import Batch
 
 from . import batch_report as reports
@@ -158,3 +159,25 @@ class BatchPhotosView(APIView):
         resp["Content-Disposition"] = f'attachment; filename="{name}-photos.zip"'
         return resp
 
+
+
+class BatchIdCardsView(APIView):
+    """GET — one PDF with the ID card (front + back) of every active
+    student in the batch, for the card printer. Roster gate plus
+    `admissions.student.id_card`, the same key as the single-student
+    download."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        if not (_can_view_roster(request.user)
+                and has_perm(request.user, "admissions.student.id_card")):
+            return _deny()
+        batch = _get_batch(pk)
+        if not _in_scope(request.user, batch):
+            raise Http404
+        data, _ = render_batch_id_cards(batch)
+        name = reports._slug(batch.short_name or batch.name) or f"batch-{batch.pk}"
+        resp = HttpResponse(data, content_type="application/pdf")
+        resp["Content-Disposition"] = f'attachment; filename="{name}-id-cards.pdf"'
+        return resp

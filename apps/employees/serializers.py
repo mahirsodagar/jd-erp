@@ -79,13 +79,14 @@ class EmployeeListSerializer(serializers.ModelSerializer):
     designation = serializers.CharField(source="designation.name", read_only=True)
     department = serializers.CharField(source="department.name", read_only=True)
     campus = serializers.CharField(source="campus.name", read_only=True)
+    campus_id = serializers.IntegerField(read_only=True)
     photo_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Employee
         fields = [
             "id", "emp_code", "full_name",
-            "designation", "department", "campus",
+            "designation", "department", "campus", "campus_id",
             "email_primary", "mobile_primary",
             "photo_url", "status", "date_of_joining",
         ]

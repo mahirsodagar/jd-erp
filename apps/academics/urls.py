@@ -3,6 +3,7 @@ from django.urls import path
 from .batch_report_views import (
     BatchFeedbackView,
     BatchReportListView,
+    BatchIdCardsView,
     BatchPhotosView,
     BatchRosterView,
 )
@@ -111,6 +112,8 @@ urlpatterns = [
          name="batch-report-list"),
     path("batch-report/<int:pk>/photos/", BatchPhotosView.as_view(),
          name="batch-report-photos"),
+    path("batch-report/<int:pk>/id-cards/", BatchIdCardsView.as_view(),
+         name="batch-report-id-cards"),
     path("batch-report/<int:pk>/roster/", BatchRosterView.as_view(),
          name="batch-report-roster"),
     path("batch-report/<int:pk>/feedback/", BatchFeedbackView.as_view(),

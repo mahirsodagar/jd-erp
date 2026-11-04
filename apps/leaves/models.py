@@ -27,6 +27,15 @@ class LeaveType(models.Model):
     def __str__(self):
         return f"{self.code} ({self.name})"
 
+    @property
+    def is_permission(self) -> bool:
+        """Legacy "Permission" type: taken in one of two fixed time slots
+        (Session 1 = 9:30–11:00 AM, Session 2 = 4:00–5:30 PM) instead of
+        half/full days. Matched by code or by name so an HR-created type
+        with a different code still gets the slot picker."""
+        return (self.code or "").upper() == "PERMISSION" \
+            or "permission" in (self.name or "").lower()
+
 
 class LeaveAllocation(models.Model):
     """Grant of LEAVE-category days for an employee, valid over an open/close
@@ -83,8 +92,8 @@ class LeaveApplication(models.Model):
     SESSION_LABELS = {
         1: "First half (morning)",
         2: "Full day",
-        3: "Permission (9:30 AM – 11:00 AM)",
-        4: "Permission (4:00 PM – 5:30 PM)",
+        3: "Session 1 (9:30 AM – 11:00 AM)",
+        4: "Session 2 (4:00 PM – 5:30 PM)",
         5: "Second half (afternoon)",
     }
     # Sessions worth 0.5 day on a single-day request.
