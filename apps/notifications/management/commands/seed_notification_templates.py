@@ -75,12 +75,23 @@ TEMPLATES = [
     # apps/leads/send_links.py.)
     ("lead.application_link.sms", "SMS", "",
      "Dear{name}, Thank you for selecting JD, Your inquiry has been submitted. Please click the link to complete your application - {url}"),
+    # MSG91 template `application_form_link` (vars Student_Name,
+    # Course_Name, Application_Form_Link); this body is the SMTP fallback.
     ("lead.application_link.email", "EMAIL",
-     "JD Student Application Link : {name}",
-     "Greetings from JD!\nDear {name},\n\n"
-     "Thank you for selecting JD, Your inquiry has been submitted.\n\n"
-     "Please click the link to complete your application - {url}\n\n"
-     "With Regards,\nJD"),
+     "JD Institute Application Form Link",
+     "Dear {Student_Name},\n\n"
+     "Thank you for your interest in {Course_Name} at JD Institute.\n\n"
+     "You can now take the next step by completing your application form "
+     "using the link below:\n\n{Application_Form_Link}\n\n"
+     "Before you begin, please keep these ready:\n"
+     "  - Academic marksheets (10th to up to latest qualification)\n"
+     "  - Passport-size photograph with white background\n"
+     "  - Adhaar ID proof\n\n"
+     "Once you submit the form, our admissions team will review your "
+     "application and contact you with the next steps.\n\n"
+     "We look forward to welcoming you to JD Institute.\n\n"
+     "Warm regards,\nAdmissions Team\n"
+     "JD School of Design | JD Institute of Fashion Technology"),
     # WhatsApp leg of the application-link send. XIRCLS stores the approved
     # body on their side (trigger "application_form"); this body_template
     # is only used for the dispatch-log audit row. Variables: {name}, {url}.
@@ -116,14 +127,18 @@ TEMPLATES = [
     ("lead.fee_link.wa", "WHATSAPP", "",
      "Dear {name}, Thank you for choosing JD. Click the link {url} to pay "
      "your fees and complete the admission process. — JD Admissions Team"),
+    # MSG91 template `application_fee_payment_link_3` (vars Student_Name,
+    # Course_Name, Payment_Link); this body is the SMTP fallback.
     ("lead.fee_link.email", "EMAIL",
-     "{institute} — Application fee payment link",
-     "Dear {name},\n\n"
-     "Thank you for choosing {institute} for your Design/Art/Media "
-     "course.\n\n"
-     "Click the link below to pay your fees and complete the "
-     "admission process:\n\n{url}\n\n"
-     "Best Regards,\nJD Admissions Team"),
+     "Application Fee Payment Link",
+     "Dear {Student_Name},\n\n"
+     "Thank you for your interest in {Course_Name} at JD Institute.\n\n"
+     "To begin your application, please pay the application fee using "
+     "the secure link below:\n\n{Payment_Link}\n\n"
+     "Please note: the application form link will be shared with you as "
+     "soon as your payment is confirmed.\n\n"
+     "Warm regards,\nAdmissions Team\n"
+     "JD School of Design | JD Institute of Fashion Technology"),
     ("lead.welcome.email", "EMAIL",
      "Welcome Note for New Students and Parents",
      "Dear {name},\n\n"
@@ -167,6 +182,77 @@ TEMPLATES = [
      "Sign in at: {login_url}\n\n"
      "If you didn't request this, contact your admissions office.\n\n"
      "— JD Admissions"),
+
+    # Student leave approved. Sent via MSG91 template
+    # `student_leave_accepted` (vars: Student_Name, Leave_Start_Date,
+    # Leave_End_Date, Leave_Count, Reason); this body is the SMTP fallback.
+    ("student_leaves.accepted.email", "EMAIL",
+     "Leave Application Accepted",
+     "Hi {Student_Name},\n\n"
+     "Your leave application has been accepted.\n\n"
+     "  Leave Start Date : {Leave_Start_Date}\n"
+     "  Leave End Date   : {Leave_End_Date}\n"
+     "  Leave Count      : {Leave_Count}\n"
+     "  Reason           : {Reason}\n\n"
+     "Regards,\nJDSD / JDINST\n\n"
+     "Note: This is an auto-generated email. Please do not reply to this email."),
+
+    # Lead moved to Inactive. MSG91 template `inactive_lead` (var First_Name).
+    ("lead.inactive.email", "EMAIL",
+     "We'd love to stay in touch | JD Institute",
+     "Dear {First_Name},\n\n"
+     "It's been a while since we last connected. If your plans have "
+     "changed, no problem at all.\n\n"
+     "If you'd like to revisit your options, just let us know and we'll "
+     "pick up where we left off.\n\n"
+     "Warm regards,\nAdmissions Team\n"
+     "JD School of Design | JD Institute of Fashion Technology"),
+
+    # Lead moved to Non Responsive. MSG91 template `non_responsive`
+    # (vars First_Name, Course_Name).
+    ("lead.non_responsive.email", "EMAIL",
+     "JD Institute | Course Inquiry Follow-up",
+     "Dear {First_Name},\n\n"
+     "We've tried reaching you a few times and haven't been able to "
+     "connect. We understand you may be busy.\n\n"
+     "Could you let us know a convenient time to talk to further address "
+     "your queries regarding your Design course interest {Course_Name}? "
+     "If you are no longer interested, please let us know as well.\n\n"
+     "We look forward to your response.\n\n"
+     "Warm regards,\nAdmissions Team\n"
+     "JD School of Design | JD Institute of Fashion Technology"),
+
+    # Application received — student copy. MSG91 template
+    # `application_submitted_3`; this body is the SMTP fallback.
+    ("admissions.application_submitted.email", "EMAIL",
+     "Application Received - JD Institute",
+     "Dear {Student_Name},\n\n"
+     "Thank you for submitting your application for {Course_Name} at JD "
+     "Institute. We're pleased to confirm that your application has been "
+     "received.\n\n"
+     "Your application details\n"
+     "  Application ID     : {Application_ID}\n"
+     "  Course applied for : {Course_Name}\n"
+     "  Date of submission : {Submission_Date}\n\n"
+     "What happens next\n"
+     "  1. Our admissions team will review your application.\n"
+     "  2. Pay your College Registration Fee to reserve the seat.\n\n"
+     "Warm regards,\nAdmissions Team\n"
+     "JD School of Design | JD Institute of Fashion Technology"),
+
+    # Student leave submitted → batch mentor. MSG91 template
+    # `student_leave_application_` (same 5 vars as accepted).
+    ("student_leaves.applied.email", "EMAIL",
+     "Student Leave Application Submitted",
+     "Student Leave Application Submitted\n\n"
+     "A new leave application has been recorded with the following details:\n\n"
+     "  Student Name     : {Student_Name}\n"
+     "  Leave Start Date : {Leave_Start_Date}\n"
+     "  Leave End Date   : {Leave_End_Date}\n"
+     "  Total Leave Days : {Leave_Count}\n"
+     "  Reason           : {Reason}\n\n"
+     "Regards,\nJDSD / JDINST\n\n"
+     "Note: This is an auto-generated email. Please do not reply to this email."),
 
     # ------------------------------------------------------------------
     # SMS templates — bodies match DLT-approved wording exactly (any

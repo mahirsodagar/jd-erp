@@ -21,7 +21,7 @@ def apply_leave(*, student, leave_date: date, leave_edate: date,
         raise ValueError(
             "You already have a pending leave for this start date."
         )
-    return StudentLeaveApplication.objects.create(
+    app = StudentLeaveApplication.objects.create(
         student=student,
         leave_date=leave_date, leave_edate=leave_edate,
         student_remarks=student_remarks,
@@ -29,6 +29,10 @@ def apply_leave(*, student, leave_date: date, leave_edate: date,
         module_mentor_email=module_mentor_email or "",
         cc_emails=cc_emails or [],
     )
+    from .notifications import send_leave_applied
+    # After commit, so a rolled-back create never mails the mentor.
+    transaction.on_commit(lambda: send_leave_applied(app))
+    return app
 
 
 @transaction.atomic
@@ -47,4 +51,8 @@ def decide_leave(*, application: StudentLeaveApplication,
     application.save(update_fields=[
         "status", "approver_remarks", "decided_by", "decided_at", "updated_at",
     ])
+    if decision == StudentLeaveApplication.Status.APPROVED:
+        from .notifications import send_leave_accepted
+        # After commit, so a rolled-back decision never mails the student.
+        transaction.on_commit(lambda: send_leave_accepted(application))
     return application

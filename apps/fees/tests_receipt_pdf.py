@@ -74,6 +74,16 @@ class PolicyPageTests(TestCase):
         self.assertEqual(policy_for("M.Sc")[0][1], "BSC/MSC PROGRAM POLICIES")
         self.assertEqual(policy_for("")[0][1], "BSC/MSC PROGRAM POLICIES")
 
+    def test_receipt_variant_drops_the_agreement_clause(self):
+        """The paper receipt ends at section 3; only the undertaking
+        carries AGREEMENT and the signature boxes."""
+        for degree_type in ("Diploma", "B.Sc"):
+            full = policy_for(degree_type)
+            receipt = policy_for(degree_type, agreement=False)
+            self.assertIn(("h2", "AGREEMENT"), full)
+            self.assertNotIn(("h2", "AGREEMENT"), receipt)
+            self.assertEqual(len(full) - len(receipt), 2)
+
 
 class RenderTests(TestCase):
 

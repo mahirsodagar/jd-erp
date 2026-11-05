@@ -1,16 +1,23 @@
-"""Application form → PDF.
+"""Application form → PDF (the "Application form Acknowledgement").
 
 What the student filled in, plus the terms they accepted and when, laid
-out as a printable record. Rendered on demand and never stored: the
-source data is all in the DB, so a re-render is idempotent.
+out like the acknowledgement the institutes issue: the institute's
+stacked logo, two centred titles, plain capitalised section headings
+over grey-label rows, a qualifications table, the rules on their own
+page with a signature / date / accept line, and the declaration last.
 
-fpdf2, matching the receipt and undertaking renderers — the built-in
-fonts are Latin-1 only, hence `_safe()`.
+Rendered on demand and never stored: the source data is all in the DB,
+so a re-render is idempotent. fpdf2, matching the receipt and
+undertaking renderers — the built-in fonts are Latin-1 only, hence
+`_safe()`.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fpdf import FPDF
+from PIL import Image
 
 from .application_terms import institute_code_for_student, terms_for
 from .models import Student, StudentDocument
@@ -27,12 +34,16 @@ _UNICODE_FALLBACKS = {
     "·": "-",
 }
 
+_ASSETS = Path(__file__).resolve().parent / "application_assets"
+
 #: Page geometry. The body sits between these margins; `_LABEL_W` is the
 #: left column of every two-column row.
-_MARGIN = 15.0
+_MARGIN = 20.0
 _PAGE_W = 210.0
 _BODY_W = _PAGE_W - 2 * _MARGIN
-_LABEL_W = 55.0
+_LABEL_W = 70.0
+_ROW_H = 9.0
+_LINE_H = 4.5
 
 
 def _safe(text) -> str:
@@ -53,7 +64,7 @@ def _fmt_aadhaar(value: str) -> str:
     return f"{digits[:4]} {digits[4:8]} {digits[8:]}"
 
 
-def _fmt_date(value, fmt: str = "%d-%m-%y") -> str:
+def _fmt_date(value, fmt: str = "%d-%m-%Y") -> str:
     """Format a date/datetime, tolerating one that is still a string.
 
     An unsaved Student carries whatever the form posted — `dob` is an
@@ -67,41 +78,43 @@ def _fmt_date(value, fmt: str = "%d-%m-%y") -> str:
     return str(value)
 
 
-class _ApplicationPDF(FPDF):
-    """Adds the page footer. Everything else is drawn by the functions
-    below so the layout reads top-to-bottom."""
+# --- Building blocks ------------------------------------------------
 
-    def footer(self):
-        self.set_y(-12)
-        self.set_font("Helvetica", "I", 7)
-        self.set_text_color(130, 130, 130)
-        self.cell(0, 6, f"Page {self.page_no()} of {{nb}}", align="C")
-
-
-def _section(pdf: FPDF, title: str) -> None:
-    pdf.ln(3)
+def _heading(pdf: FPDF, title: str) -> None:
+    """Section heading: bold capitals, no fill, as on the issued form."""
+    pdf.ln(5)
     pdf.set_x(_MARGIN)
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.set_fill_color(238, 238, 242)
-    pdf.set_text_color(30, 30, 30)
-    pdf.cell(_BODY_W, 7, f"  {_safe(title)}", fill=True,
-             new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("Helvetica", "", 9)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(0, 0, 0)
+    pdf.cell(_BODY_W, 7, _safe(title).upper(), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(1.5)
 
 
 def _row(pdf: FPDF, label: str, value) -> None:
-    """One label/value line. `multi_cell` on the value so a long address
-    wraps instead of running off the page."""
+    """One bordered label/value row. The label cell is tinted; the value
+    wraps so a long address grows the row instead of running off."""
     text = _safe(value) if value not in (None, "") else "-"
-    pdf.set_x(_MARGIN)
-    top = pdf.get_y()
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.multi_cell(_LABEL_W, 5.5, _safe(label), border="LTB",
-                   new_x="RIGHT", new_y="TOP", max_line_height=5.5)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_xy(_MARGIN + _LABEL_W, top)
-    pdf.multi_cell(_BODY_W - _LABEL_W, 5.5, text, border="RTB",
-                   new_x="LMARGIN", new_y="NEXT", max_line_height=5.5)
+    pdf.set_font("Helvetica", "", 8.5)
+    lines = pdf.multi_cell(_BODY_W - _LABEL_W - 4, _LINE_H, text,
+                           dry_run=True, output="LINES")
+    h = max(_ROW_H, len(lines) * _LINE_H + 4)
+    if pdf.get_y() + h > pdf.page_break_trigger:
+        pdf.add_page()
+
+    x, y = _MARGIN, pdf.get_y()
+    pdf.set_fill_color(247, 247, 247)
+    pdf.rect(x, y, _LABEL_W, h, style="F")
+    pdf.rect(x, y, _LABEL_W, h)
+    pdf.rect(x + _LABEL_W, y, _BODY_W - _LABEL_W, h)
+
+    pdf.set_xy(x + 2.5, y + (h - _LINE_H) / 2)
+    pdf.set_font("Helvetica", "B", 8.5)
+    pdf.cell(_LABEL_W - 3, _LINE_H, _safe(label))
+
+    pdf.set_xy(x + _LABEL_W + 2.5, y + (h - len(lines) * _LINE_H) / 2)
+    pdf.set_font("Helvetica", "", 8.5)
+    pdf.multi_cell(_BODY_W - _LABEL_W - 4, _LINE_H, text, align="L")
+    pdf.set_y(y + h)
 
 
 def _pairs(pdf: FPDF, rows: list[tuple[str, object]]) -> None:
@@ -109,289 +122,289 @@ def _pairs(pdf: FPDF, rows: list[tuple[str, object]]) -> None:
         _row(pdf, label, value)
 
 
+def _logo_path(student: Student) -> Path | None:
+    code = (institute_code_for_student(student) or "").lower()
+    for candidate in (_ASSETS / f"{code}-logo.png",):
+        if candidate.is_file():
+            return candidate
+    logo = getattr(student.institute, "logo", None)
+    if logo:
+        try:
+            return Path(logo.path)
+        except Exception:  # noqa: BLE001
+            return None
+    return None
+
+
 def _header(pdf: FPDF, student: Student) -> None:
-    institute = student.institute
-    pdf.set_fill_color(20, 60, 120)
-    pdf.rect(0, 0, _PAGE_W, 22, style="F")
-    pdf.set_y(5)
-    pdf.set_font("Helvetica", "B", 15)
-    pdf.set_text_color(255, 255, 255)
-    pdf.cell(0, 8, _safe(getattr(institute, "name", "") or "Application"),
-             align="C", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("Helvetica", "", 9)
-    pdf.cell(0, 5, _safe(student.campus.name), align="C")
+    """Centred logo, then the institute name and form title."""
+    y = 15.0
+    path = _logo_path(student)
+    if path is not None:
+        try:
+            w_px, h_px = Image.open(path).size
+            h = 36.0
+            w = h * w_px / h_px
+            if w > 90:
+                w, h = 90.0, 90.0 * h_px / w_px
+            pdf.image(str(path), x=(_PAGE_W - w) / 2, y=y, w=w, h=h)
+            y += h + 10
+        except Exception:  # noqa: BLE001 — bad artwork must not 500 the form
+            pass
 
-    pdf.set_y(26)
+    pdf.set_y(y)
     pdf.set_text_color(0, 0, 0)
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.cell(0, 8, "Student Application Form", align="C",
+    pdf.set_font("Helvetica", "B", 14)
+    name = getattr(student.institute, "name", "") or "JD Institute"
+    pdf.cell(0, 8, _safe(name).upper(), align="C",
              new_x="LMARGIN", new_y="NEXT")
-
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(90, 90, 90)
-    ref = student.application_form_id or "-"
-    if student.registration_number:
-        ref += f"   |   Reg. No: {student.registration_number}"
-    pdf.cell(0, 5, _safe(ref), align="C", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(
-        0, 5,
-        _safe(f"Submitted: {_fmt_date(student.created_on, '%d-%m-%y %H:%M')}"),
-        align="C", new_x="LMARGIN", new_y="NEXT",
-    )
-    pdf.set_text_color(0, 0, 0)
-
-
-def _photo(pdf: FPDF, student: Student) -> None:
-    """Top-right passport photo. A missing or unreadable file is not
-    worth failing a download over — the box is simply left empty."""
-    if not student.photo:
-        return
-    try:
-        pdf.image(student.photo.path, x=_PAGE_W - _MARGIN - 25, y=26,
-                  w=25, h=30)
-    except Exception:
-        return
-
-
-def _terms(pdf: FPDF, student: Student) -> None:
-    terms = terms_for(institute_code_for_student(student))
-
-    # The bundle carries its own heading — JDSD's 2026 document calls
-    # this section "Undertaking by the student", the earlier wording a
-    # declaration.
-    heading = terms.get("declaration_title") or "Declaration"
-    if terms.get("preamble"):
-        _section(pdf, "Terms & Conditions")
-        pdf.set_x(_MARGIN)
-        pdf.set_font("Helvetica", "I", 8.5)
-        pdf.multi_cell(_BODY_W, 4.5, _safe(terms["preamble"]))
-        pdf.ln(0.8)
-    _section(pdf, heading)
-    pdf.set_x(_MARGIN)
-    pdf.set_font("Helvetica", "", 8.5)
-    # `multi_cell` honours the blank lines between the undertaking's
-    # paragraphs, so no per-paragraph loop is needed.
-    pdf.multi_cell(_BODY_W, 4.5, _safe(terms["declaration"]))
-    _accepted_line(pdf, f"{heading} accepted", student.declaration_accepted_at)
-
-    _section(pdf, "Terms & Conditions - Rules and Regulations")
-    pdf.set_font("Helvetica", "", 8.5)
-    alpha = terms.get("list_style") == "upper-alpha"
-    for n, rule in enumerate(terms["rules"], start=1):
-        # The bundle carries each section's own marker (JDIFT's are
-        # lettered A, B, C, C-1, D…; JDSD's numbered). Older bundles
-        # without one fall back to the list style.
-        marker = rule.get("label") or (
-            chr(ord("A") + n - 1) if alpha else str(n)
-        )
-        pdf.set_x(_MARGIN)
-        pdf.set_font("Helvetica", "B" if rule["emphasis"] else "", 8.5)
-        pdf.multi_cell(_BODY_W, 4.5, _safe(f"{marker}. {rule['text']}"))
-        pdf.set_font("Helvetica", "", 8.5)
-        if rule.get("intro"):
-            pdf.set_x(_MARGIN + 3)
-            pdf.multi_cell(_BODY_W - 3, 4.5, _safe(rule["intro"]))
-        for j, sub in enumerate(rule["subs"], start=1):
-            # An unordered section (JDIFT's C) is bulleted, not numbered.
-            label = f"{marker}.{j}" if rule.get("ordered", True) else "-"
-            pdf.set_x(_MARGIN + 6)
-            pdf.multi_cell(_BODY_W - 6, 4.5, _safe(f"{label} {sub['text']}"))
-            for bullet in sub["bullets"]:
-                pdf.set_x(_MARGIN + 12)
-                pdf.multi_cell(_BODY_W - 12, 4.5, _safe(f"- {bullet}"))
-            if sub.get("after"):
-                pdf.set_x(_MARGIN + 6)
-                pdf.multi_cell(_BODY_W - 6, 4.5, _safe(sub["after"]))
-        pdf.ln(0.8)
-
-    fee_note = terms.get("fee_note") or []
-    if fee_note:
-        pdf.ln(0.8)
-        pdf.set_font("Helvetica", "I", 8)
-        for line in fee_note:
-            pdf.set_x(_MARGIN)
-            pdf.multi_cell(_BODY_W, 4.5, _safe(line))
-        pdf.set_font("Helvetica", "", 8.5)
-
-    _accepted_line(pdf, "Rules & Regulations accepted", student.rules_accepted_at)
-
-    disclaimer = terms.get("disclaimer")
-    if disclaimer:
-        _disclaimer(pdf, disclaimer)
-
-
-def _accepted_line(pdf: FPDF, label: str, accepted_at) -> None:
-    """States plainly whether consent is on record, and when. Never
-    claims acceptance the database cannot evidence."""
-    pdf.ln(1.5)
-    pdf.set_x(_MARGIN)
-    pdf.set_font("Helvetica", "B", 8.5)
-    if accepted_at:
-        pdf.set_text_color(20, 100, 60)
-        text = (
-            f"[X] {label} by the student on "
-            f"{_fmt_date(accepted_at, '%d-%m-%y %H:%M')}"
-        )
-    else:
-        pdf.set_text_color(150, 60, 20)
-        text = f"[ ] {label} - not recorded"
-    pdf.multi_cell(_BODY_W, 5, _safe(text))
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_font("Helvetica", "", 9)
-
-
-def _disclaimer(pdf: FPDF, disclaimer: dict) -> None:
-    _section(pdf, disclaimer["title"])
-    pdf.set_font("Helvetica", "I", 8)
-    if disclaimer.get("note"):
-        pdf.set_x(_MARGIN)
-        pdf.multi_cell(_BODY_W, 4.5, _safe(f"Note:- {disclaimer['note']}"))
-    pdf.set_font("Helvetica", "", 8.5)
-    if disclaimer.get("intro"):
-        pdf.set_x(_MARGIN)
-        pdf.multi_cell(_BODY_W, 4.5, _safe(disclaimer["intro"]))
-    for n, section in enumerate(disclaimer.get("sections") or [], start=1):
-        pdf.ln(1)
-        pdf.set_x(_MARGIN)
-        pdf.set_font("Helvetica", "B", 8.5)
-        pdf.multi_cell(_BODY_W, 4.5, _safe(f"{n}. {section['heading']}"))
-        pdf.set_font("Helvetica", "", 8.5)
-        for bullet in section["bullets"]:
-            pdf.set_x(_MARGIN + 6)
-            pdf.multi_cell(_BODY_W - 6, 4.5, _safe(f"- {bullet}"))
-    for line in disclaimer.get("footer_lines") or []:
-        pdf.set_x(_MARGIN)
-        pdf.multi_cell(_BODY_W, 4.5, _safe(line))
+    pdf.ln(3)
+    pdf.cell(0, 8, "STUDENT APPLICATION FORM", align="C",
+             new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
 
 
 def _documents(pdf: FPDF, student: Student) -> None:
-    _section(pdf, "Education History")
+    _heading(pdf, "Educational Qualifications")
     docs = list(student.documents.all().order_by("id"))
     if not docs:
         pdf.set_x(_MARGIN)
-        pdf.set_font("Helvetica", "I", 9)
+        pdf.set_font("Helvetica", "I", 8.5)
         pdf.multi_cell(_BODY_W, 5.5, "No education records were submitted.")
         return
 
     headers = dict(StudentDocument.Header.choices)
-    widths = [26, 26, 44, 44, 20, 20]
-    titles = ["Type", "Reg / Year", "School / College",
-              "Board / University", "Cert no.", "%"]
+    widths = [26, 27, 36, 36, 25, 20]
+    titles = ["Qualifying Exam", "Reg No./Month & Year of Passing",
+              "School/College", "University/Board", "Certificate No.",
+              "% Obtained"]
 
-    pdf.set_x(_MARGIN)
-    pdf.set_font("Helvetica", "B", 8)
-    pdf.set_fill_color(245, 245, 248)
-    for w, title in zip(widths, titles):
-        pdf.cell(w, 6, _safe(title), border=1, fill=True)
-    pdf.ln()
+    def table_row(cells, bold: bool) -> None:
+        pdf.set_font("Helvetica", "B" if bold else "", 7.5)
+        wrapped = [
+            pdf.multi_cell(w - 3, 3.8, _safe(c), dry_run=True, output="LINES")
+            for w, c in zip(widths, cells)
+        ]
+        h = max(len(ls) for ls in wrapped) * 3.8 + 4
+        if pdf.get_y() + h > pdf.page_break_trigger:
+            pdf.add_page()
+        x, y = _MARGIN, pdf.get_y()
+        for w, c in zip(widths, cells):
+            if bold:
+                pdf.set_fill_color(247, 247, 247)
+                pdf.rect(x, y, w, h, style="F")
+            pdf.rect(x, y, w, h)
+            pdf.set_xy(x + 1.5, y + 2)
+            pdf.multi_cell(w - 3, 3.8, _safe(c), align="L")
+            x += w
+        pdf.set_y(y + h)
 
-    pdf.set_font("Helvetica", "", 8)
+    table_row(titles, bold=True)
     for d in docs:
-        cells = [
+        table_row([
             headers.get(d.header, d.header),
             d.regno_yearpassing or "-",
             d.school_college or "-",
             d.university_board or "-",
             d.certificate_no or "-",
             str(d.percent_obtained) if d.percent_obtained is not None else "-",
-        ]
+        ], bold=False)
+
+
+# --- Rules & declaration ---------------------------------------------
+
+def _para(pdf: FPDF, text: str, *, bold: bool = False, indent: float = 0,
+          size: float = 8.0) -> None:
+    pdf.set_x(_MARGIN + indent)
+    pdf.set_font("Helvetica", "B" if bold else "", size)
+    pdf.multi_cell(_BODY_W - indent, _LINE_H - 0.5, _safe(text))
+
+
+def _rules(pdf: FPDF, student: Student, terms: dict) -> None:
+    _heading(pdf, "Rules & Regulations")
+    if terms.get("preamble"):
+        _para(pdf, terms["preamble"])
+        pdf.ln(2)
+
+    alpha = terms.get("list_style") == "upper-alpha"
+    for n, rule in enumerate(terms["rules"], start=1):
+        marker = rule.get("label") or (
+            chr(ord("A") + n - 1) if alpha else str(n)
+        )
+        # Top-level rules print bold, their sub-points plain, as on the
+        # issued form.
+        _para(pdf, f"{marker}. {rule['text']}", bold=True)
+        if rule.get("intro"):
+            _para(pdf, rule["intro"], indent=3)
+        for j, sub in enumerate(rule["subs"], start=1):
+            if rule.get("ordered", True):
+                label = chr(ord("A") + j - 1) if j <= 26 else str(j)
+            else:
+                label = "-"
+            _para(pdf, f"{label}. {sub['text']}" if label != "-"
+                  else f"- {sub['text']}")
+            for bullet in sub["bullets"]:
+                _para(pdf, f"- {bullet}", indent=6)
+            if sub.get("after"):
+                _para(pdf, sub["after"])
+        pdf.ln(2.5)
+
+    for line in terms.get("fee_note") or []:
+        pdf.set_font("Helvetica", "I", 7.5)
         pdf.set_x(_MARGIN)
-        for w, value in zip(widths, cells):
-            # Truncation rather than wrapping: a fixed-height row keeps
-            # the table readable, and the full value is always in the
-            # portal.
-            text = _safe(value)
-            while text and pdf.get_string_width(text) > w - 2:
-                text = text[:-1]
-            pdf.cell(w, 5.5, text, border=1)
-        pdf.ln()
+        pdf.multi_cell(_BODY_W, _LINE_H - 0.5, _safe(line))
+
+    disclaimer = terms.get("disclaimer")
+    if disclaimer:
+        _disclaimer(pdf, disclaimer)
+
+    # Signature / date / accept line.
+    if pdf.get_y() + 40 > pdf.page_break_trigger:
+        pdf.add_page()
+    pdf.ln(6)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_x(_MARGIN)
+    pdf.cell(0, 6, "Signature: _________________________",
+             new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(3)
+    pdf.set_x(_MARGIN)
+    pdf.cell(0, 6, "Date: _________________________",
+             new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(3)
+    _accept_line(pdf, "I Accept above mentioned Rules & Regulations",
+                 student.rules_accepted_at)
 
 
-def _signatures(pdf: FPDF) -> None:
-    pdf.ln(10)
-    y = pdf.get_y()
+def _accept_line(pdf: FPDF, label: str, accepted_at) -> None:
+    """A checkbox, ticked only when consent is on record. Never claims
+    acceptance the database cannot evidence."""
+    x, y = _MARGIN, pdf.get_y()
+    pdf.rect(x, y + 0.5, 5, 5)
+    if accepted_at:
+        pdf.set_line_width(0.5)
+        pdf.line(x + 1, y + 3, x + 2.2, y + 4.5)
+        pdf.line(x + 2.2, y + 4.5, x + 4.3, y + 1.3)
+        pdf.set_line_width(0.2)
+    pdf.set_xy(x + 6.5, y)
+    pdf.set_font("Helvetica", "B", 9)
+    text = _safe(label)
+    if accepted_at:
+        text += f"  (accepted on {_fmt_date(accepted_at, '%d-%m-%Y %H:%M')})"
+    pdf.cell(0, 6, text, new_x="LMARGIN", new_y="NEXT")
+
+
+def _disclaimer(pdf: FPDF, disclaimer: dict) -> None:
+    _heading(pdf, disclaimer["title"])
+    if disclaimer.get("note"):
+        pdf.set_font("Helvetica", "I", 7.5)
+        pdf.set_x(_MARGIN)
+        pdf.multi_cell(_BODY_W, _LINE_H - 0.5, _safe(f"Note:- {disclaimer['note']}"))
+    if disclaimer.get("intro"):
+        _para(pdf, disclaimer["intro"])
+    for n, section in enumerate(disclaimer.get("sections") or [], start=1):
+        pdf.ln(1)
+        _para(pdf, f"{n}. {section['heading']}", bold=True)
+        for bullet in section["bullets"]:
+            _para(pdf, f"- {bullet}", indent=6)
+    for line in disclaimer.get("footer_lines") or []:
+        _para(pdf, line)
+
+
+def _declaration(pdf: FPDF, student: Student, terms: dict) -> None:
+    pdf.add_page()
+    _heading(pdf, terms.get("declaration_title") or "Declaration")
+    _para(pdf, terms["declaration"])
+    pdf.ln(4)
+    pdf.set_x(_MARGIN)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(12, 6, "Date:")
     pdf.set_font("Helvetica", "", 9)
-    for x, label in ((_MARGIN, "Signature of the Student"),
-                     (_PAGE_W - _MARGIN - 60, "Signature of the Parent / Guardian")):
-        pdf.line(x, y, x + 60, y)
-        pdf.set_xy(x, y + 1)
-        pdf.cell(60, 5, _safe(label), align="C")
+    accepted = student.declaration_accepted_at
+    pdf.cell(0, 6, _fmt_date(accepted) if accepted
+             else "_________________________",
+             new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+    pdf.set_x(_MARGIN)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(0, 6, "Signature: _________________________",
+             new_x="LMARGIN", new_y="NEXT")
+    if not accepted:
+        pdf.ln(2)
+        pdf.set_x(_MARGIN)
+        pdf.set_font("Helvetica", "I", 8)
+        pdf.set_text_color(150, 60, 20)
+        pdf.cell(0, 5, "Declaration not yet accepted on record.",
+                 new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(0, 0, 0)
 
+
+# --- Entry point -----------------------------------------------------
 
 def render_application_pdf(student: Student) -> bytes:
     """The student's application form as a PDF, terms included."""
-    pdf = _ApplicationPDF(orientation="P", unit="mm", format="A4")
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=18)
     pdf.set_margins(_MARGIN, _MARGIN, _MARGIN)
-    pdf.alias_nb_pages()
     pdf.add_page()
 
     _header(pdf, student)
-    _photo(pdf, student)
-    pdf.set_y(48)
 
-    _section(pdf, "Placement")
+    personal = [
+        ("Name of Candidate:", student.student_name),
+        ("Date of Birth:", _fmt_date(student.dob)),
+        ("Gender:", student.get_gender_display()),
+        ("Blood Group:", student.blood_group),
+        ("Nationality:", student.get_nationality_display()),
+        ("Category:", student.get_category_display()),
+        ("Mobile Number:", student.student_mobile),
+        ("Email:", student.student_email),
+    ]
+    if student.aadhaar_number:
+        personal.append(("Aadhaar:", _fmt_aadhaar(student.aadhaar_number)))
+    _heading(pdf, "Personal Information")
+    _pairs(pdf, personal)
+
+    _heading(pdf, "Academic Information")
     _pairs(pdf, [
-        ("Institute", student.institute.name),
-        ("Campus", student.campus.name),
-        ("Program", student.program.name),
-        ("Course", getattr(student.course, "name", None)),
-        ("Academic year", student.academic_year.code),
+        ("Academic Year:", getattr(student.academic_year, "full_name", "")
+         or student.academic_year.code),
+        ("Campus:", (student.campus.name or "").upper()),
+        ("Program:", student.program.name),
+        ("Course:", getattr(student.course, "name", None)),
     ])
 
-    _section(pdf, "Personal Details")
+    pdf.add_page()
+    _heading(pdf, "Parent/Guardian Information")
     _pairs(pdf, [
-        ("Full name", student.student_name),
-        ("Date of birth", _fmt_date(student.dob)),
-        ("Gender", student.get_gender_display()),
-        ("Category", student.get_category_display()),
-        ("Study medium", student.get_study_medium_display()),
-        ("Nationality", student.get_nationality_display()),
-        ("Aadhaar", _fmt_aadhaar(student.aadhaar_number)),
-        ("Blood group", student.blood_group),
+        ("Father/Guardian Name:", student.father_name),
+        ("Father/Guardian Mobile:", student.father_mobile),
+        ("Father/Guardian Email:", student.father_email),
+        ("Father/Guardian Occupation:", student.father_occupation),
+        ("Mother/Spouse Name:", student.mother_name),
+        ("Mother/Spouse Mobile:", student.mother_mobile),
+        ("Mother/Spouse Email:", student.mother_email),
+        ("Mother/Spouse Occupation:", student.mother_occupation),
     ])
 
-    _section(pdf, "Contact")
+    _heading(pdf, "Address Information")
     _pairs(pdf, [
-        ("Mobile", student.student_mobile),
-        ("Email", student.student_email),
-        ("Institute email", student.institute_email),
-    ])
-
-    _section(pdf, "Family")
-    _pairs(pdf, [
-        ("Father's name", student.father_name),
-        ("Father's mobile", student.father_mobile),
-        ("Father's email", student.father_email),
-        ("Father's occupation", student.father_occupation),
-        ("Mother's name", student.mother_name),
-        ("Mother's mobile", student.mother_mobile),
-        ("Mother's email", student.mother_email),
-        ("Mother's occupation", student.mother_occupation),
-    ])
-
-    _section(pdf, "Current Address")
-    _pairs(pdf, [
-        ("Address", student.current_address),
-        ("City", getattr(student.current_city, "name", None)),
-        ("State", getattr(student.current_state, "name", None)),
-        ("PIN code", student.current_pincode),
-    ])
-
-    _section(pdf, "Permanent Address")
-    _pairs(pdf, [
-        ("Address", student.permanent_address),
-        ("City", getattr(student.permanent_city, "name", None)),
-        ("State", getattr(student.permanent_state, "name", None)),
-        ("PIN code", student.permanent_pincode),
+        ("Correspondence Address:", student.current_address),
+        ("Correspondence State:", getattr(student.current_state, "name", None)),
+        ("Correspondence City:", getattr(student.current_city, "name", None)),
+        ("Correspondence Pincode:", student.current_pincode),
+        ("Permanent Address:", student.permanent_address),
+        ("Permanent State:", getattr(student.permanent_state, "name", None)),
+        ("Permanent City:", getattr(student.permanent_city, "name", None)),
+        ("Permanent Pincode:", student.permanent_pincode),
     ])
 
     _documents(pdf, student)
 
     # Terms start on their own page: they run long, and a form split
-    # mid-declaration reads badly when printed.
+    # mid-rule reads badly when printed.
+    terms = terms_for(institute_code_for_student(student))
     pdf.add_page()
-    _terms(pdf, student)
-    _signatures(pdf)
+    _rules(pdf, student, terms)
+    _declaration(pdf, student, terms)
 
     return bytes(pdf.output(dest="S"))

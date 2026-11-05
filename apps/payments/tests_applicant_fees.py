@@ -172,7 +172,7 @@ class ApplicantFeePageTests(RequiredFixture):
         )
         self.assertEqual(self._request(student, OTHER).account, "JDSD_TRUST")
 
-        # The acknowledgement carries every link.
+        # The office acknowledgement copy carries every link.
         body = mail.outbox[0].body
         self.assertIn("Registration fee: Rs. 30,000.00", body)
         self.assertIn("Course fee: Rs. 100,000.00", body)

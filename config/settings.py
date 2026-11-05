@@ -648,6 +648,12 @@ MSG91_DOMAIN = env(
     "MSG91_DOMAIN", default="mail.jdinstitute.com",
 )
 MSG91_TIMEOUT = env.int("MSG91_TIMEOUT", default=10)
+# True = build the payload but never POST it (send reports success).
+# Forced on under `manage.py test` — the default authkey is real, so any
+# test that fires a MSG91-routed trigger would otherwise send live mail.
+MSG91_DRY_RUN = env.bool("MSG91_DRY_RUN", default=False) or (
+    len(sys.argv) > 1 and sys.argv[1] == "test"
+)
 
 # Routing policy:
 #
@@ -673,14 +679,30 @@ MSG91_EMAIL_TEMPLATES = {
 
     # Leaves — STUDENT leave status (employee leave stays on SMTP).
     "leaves.application_status_student.email": "leave_application_status_student",
+    # Student leave approved → student (apps/student_leaves/notifications.py).
+    "student_leaves.accepted.email":           "student_leave_accepted",
+    # Student leave submitted → batch mentor (CC module mentor/CCs/student).
+    # NB: the MSG91 template id really ends in an underscore.
+    "student_leaves.applied.email":            "student_leave_application_",
 
     # Student portal credential + reset (student-facing).
     "student.portal_credentials.email": "student_portal_credentials",
 
     # Lead / CRM — to leads (external prospects).
-    "lead.application_link.email": "lead_application_link",
-    "lead.fee_link.email":         "lead_fee_link",
+    # Vars: Student_Name, Course_Name, Application_Form_Link.
+    "lead.application_link.email": "application_form_link",
+    # Vars: Student_Name, Course_Name, Payment_Link.
+    "lead.fee_link.email":         "application_fee_payment_link_3",
     "lead.welcome.email":          "lead_welcome",
+
+    # Admissions — application received, student copy (vars Student_Name,
+    # Course_Name, Application_ID, Submission_Date). The campus/office copy
+    # with the PDF stays on SMTP as admissions.form_submitted.email.
+    "admissions.application_submitted.email": "application_submitted_3",
+    # Lead moved to Inactive → "we'd love to stay in touch" (var First_Name).
+    "lead.inactive.email":         "inactive_lead",
+    # Lead moved to Non Responsive → follow-up (vars First_Name, Course_Name).
+    "lead.non_responsive.email":   "non_responsive",
 }
 
 # --- Email — per-trigger sender domain routing ------------------------
@@ -714,8 +736,12 @@ EMAIL_DOMAIN_HR = env("EMAIL_DOMAIN_HR", default="jdinstitute.edu.in")
 # domain. Triggers absent here keep the provider's default From.
 EMAIL_SENDER_DOMAIN_POLICY = {
     # Fees + admission, to students/parents — domain by course type.
-    "lead.fee_link.email":                "COURSE",
-    "lead.application_link.email":         "COURSE",
+    # Fee link → mail.jdinstitute.com so it uses the MSG91
+    # `application_fee_payment_link_3` template (was COURSE → SMTP).
+    "lead.fee_link.email":                "PORTAL",
+    # Application link → mail.jdinstitute.com so it uses the MSG91
+    # `application_form_link` template (was COURSE → Zoho/Workspace SMTP).
+    "lead.application_link.email":         "PORTAL",
     "fees.receipt.email":                 "COURSE",
     "fees.application_fee_receipt.email":  "COURSE",
     "admissions.form_submitted.email":     "COURSE",  # "admission form filled"
@@ -730,6 +756,13 @@ EMAIL_SENDER_DOMAIN_POLICY = {
     "lead.entrance_exam_link.email":       "jdinstitute.edu.in",
     # Student credentials / password reset → mail.jdinstitute.com.
     "student.portal_credentials.email":    "PORTAL",
+    # Student leave approved → mail.jdinstitute.com so it goes via MSG91.
+    "student_leaves.accepted.email":       "PORTAL",
+    "student_leaves.applied.email":        "PORTAL",
+    # Inactive-lead nudge → mail.jdinstitute.com so it goes via MSG91.
+    "lead.inactive.email":                 "PORTAL",
+    "lead.non_responsive.email":           "PORTAL",
+    "admissions.application_submitted.email": "PORTAL",
     # HR / leave / relieving workflows → jdinstitute.edu.in.
     "leaves.application_employee.email":          "HR",
     "leaves.application_status_employee.email":   "HR",
@@ -781,6 +814,13 @@ if _jdindia_smtp_host:
         # From-address recipients see; defaults to the auth username.
         "from_email": env("SMTP_JDINDIA_FROM", default=_jdindia_user),
     }
+# Under `manage.py test` never open a dedicated SMTP connection: the dev
+# .env carries real Zoho creds, and Django's locmem swap only covers the
+# default backend, so any test missing EMAIL_SMTP_BY_DOMAIN={} sent live
+# mail (and tripped Zoho's abuse block on 2026-11-05). Tests that need a
+# domain entry still set it with override_settings.
+if len(sys.argv) > 1 and sys.argv[1] == "test":
+    EMAIL_SMTP_BY_DOMAIN = {}
 
 # Department / role group inboxes used as additional recipients or CC on
 # certain triggers (spec: fee receipt → +Accounts, admission filled →

@@ -189,6 +189,10 @@ def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict
             template_key="lead.application_link.email",
             recipient=lead.email,
             context={
+                # MSG91 `application_form_link` vars.
+                "Student_Name": lead.name,
+                "Course_Name": lead.program.name if lead.program_id else "",
+                "Application_Form_Link": long_url,
                 "name": lead.name, "url": long_url,
                 "institute": institute_label,
                 # Drives the From domain (Diploma → jdinstitute.edu.in,
@@ -469,6 +473,10 @@ def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
             template_key="lead.fee_link.email",
             recipient=lead.email,
             context={
+                # MSG91 `application_fee_payment_link_3` vars.
+                "Student_Name": lead.name,
+                "Course_Name": lead.program.name if lead.program_id else "",
+                "Payment_Link": url,
                 "name": lead.name, "url": url,
                 "institute": institute_label,
                 # Drives the From domain (Diploma → jdinstitute.edu.in,
@@ -656,6 +664,54 @@ def send_entrance_exam_link(*, attempt, actor=None) -> dict:
         "communication_id": comm.id,
         "url": url,
     }
+
+
+# Status → (template_key, timeline subject). Fired from
+# services.change_status when a lead enters that status; each key maps to
+# an MSG91 template in settings.MSG91_EMAIL_TEMPLATES.
+STATUS_EMAILS = {
+    Lead.Status.INACTIVE: (
+        "lead.inactive.email", "We'd love to stay in touch | JD Institute",
+    ),
+    Lead.Status.NON_RESPONSIVE: (
+        "lead.non_responsive.email", "JD Institute | Course Inquiry Follow-up",
+    ),
+}
+
+
+def send_status_email(*, lead: Lead, status: str, actor=None):
+    """Mail the lead when moved to a status in STATUS_EMAILS and log it on
+    the lead timeline. MSG91 vars: First_Name, Course_Name (templates
+    ignore vars they don't use). Never raises — a mail failure must not
+    undo the status change."""
+    if status not in STATUS_EMAILS or not lead.email:
+        return None
+    key, subject = STATUS_EMAILS[status]
+    try:
+        log = queue_notification(
+            template_key=key,
+            recipient=lead.email,
+            context={
+                "First_Name": _first_name(lead.name),
+                "Course_Name": lead.program.name if lead.program_id else "",
+            },
+            related=lead,
+        )
+        LeadCommunication.objects.create(
+            lead=lead,
+            type=LeadCommunication.Type.EMAIL,
+            subject=subject,
+            message=getattr(log, "body", "") or subject,
+            sent_at=timezone.now(),
+            logged_by=actor,
+        )
+        return log
+    except Exception:  # noqa: BLE001 — log and move on
+        import logging
+        logging.getLogger(__name__).exception(
+            "lead %s: %s mail failed", lead.pk, key,
+        )
+        return None
 
 
 def send_welcome_message(*, lead: Lead, actor=None) -> dict:

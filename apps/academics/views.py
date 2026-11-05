@@ -79,6 +79,8 @@ class ScheduleSlotListCreateView(APIView):
         )
         qs = _scope(qs, request.user)
         params = request.query_params
+        if v := params.get("campus"):
+            qs = qs.filter(batch__campus_id=v)
         if v := params.get("batch"):
             qs = qs.filter(batch_id=v)
         if v := params.get("instructor"):

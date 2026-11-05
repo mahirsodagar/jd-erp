@@ -36,7 +36,10 @@ MAIL = dict(
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
     EMAIL_SMTP_OUTBOUND_ENABLED=True,
     EMAIL_SMTP_BY_DOMAIN={},
-    APPLICATION_ACK_CAMPUS_INBOXES={},
+    # The office copy of the application acknowledgement (campus inbox)
+    # is the mail that carries the fee pay links; the student copy goes
+    # via MSG91 without them.
+    APPLICATION_ACK_CAMPUS_INBOXES={"BLR": "ack.blr@jdinstitute.edu.in"},
     FEE_RECEIPT_CAMPUS_INBOXES={"BLR": "receipts.blr@jdinstitute.edu.in"},
     OPERATIONS_INBOX="", ACCOUNTS_INBOX="",
 )
@@ -109,7 +112,7 @@ class RegistrationFeeAtApplicationTests(RequiredFixture):
         self.assertEqual(pr.amount, Decimal("10000.00"))
         self.assertIn(str(pr.token), rp["pay_url"])
 
-        # The acknowledgement carries the link for later.
+        # The office acknowledgement copy carries the link.
         self.assertEqual(len(mail.outbox), 1)
         self.assertIn(rp["pay_url"], mail.outbox[0].body)
         self.assertIn("Registration fee: Rs. 10,000.00", mail.outbox[0].body)

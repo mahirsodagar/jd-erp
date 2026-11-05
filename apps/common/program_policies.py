@@ -19,11 +19,17 @@ Blocks are `(kind, *args)` tuples `apps.common.pdf_theme.draw_policy_page`
 lays out:
 
     ("h1", text)          document title, centred
+    ("sub", text)         small grey subtitle under the title, centred
     ("h2", text)          numbered section heading
     ("h3", text)          sub-heading inside a section
     ("p", text)           body paragraph
+    ("note", lead, rest)  shaded callout; `lead` prints bold
     ("li", lead, rest)    bullet; `lead` prints bold, `rest` regular
     ("li2", text)         indented second-level bullet
+
+The closing AGREEMENT clause is only part of the document the student
+signs: the fee receipt prints the policies without it (and without the
+signature boxes), exactly as the paper receipt does.
 """
 
 from __future__ import annotations
@@ -97,7 +103,7 @@ DIPLOMA = [
 
 DEGREE = [
     ("h1", "BSC/MSC PROGRAM POLICIES"),
-    ("p", "Respective University"),
+    ("sub", "Respective University"),
     ("h2", "1. ADMISSIONS & FEES"),
     ("h3", "Fees Policy"),
     ("li", "Non-refundable & Non-transferable:",
@@ -117,8 +123,8 @@ DEGREE = [
      "Physical/mental health conditions and criminal records must be "
      "declared at admission."),
     ("li", "Fee Revision:", "Tuition fees may be revised per institutional policies."),
-    ("p", "Note: Degrees are awarded by the respective affiliated "
-          "university, not JD Institute."),
+    ("note", "Note:", "Degrees are awarded by the respective affiliated "
+             "university, not JD Institute."),
 
     ("h2", "2. ACADEMIC REQUIREMENTS"),
     ("p", "To graduate, students must:"),
@@ -153,8 +159,14 @@ SIGNATORIES = ("Authorised Signatory", "Student Signature",
                "Parents/Guardian Signature")
 
 
-def policy_for(degree_type: str | None) -> list[tuple]:
-    """Pick the policy document for a program's free-text degree type."""
+def policy_for(degree_type: str | None, *, agreement: bool = True) -> list[tuple]:
+    """Pick the policy document for a program's free-text degree type.
+
+    `agreement=False` drops the AGREEMENT clause — the receipt variant,
+    which nobody signs."""
     from apps.notifications.sender import is_diploma
 
-    return DIPLOMA if is_diploma(degree_type) else DEGREE
+    doc = DIPLOMA if is_diploma(degree_type) else DEGREE
+    if agreement:
+        return doc
+    return [b for b in doc if b not in _AGREEMENT]

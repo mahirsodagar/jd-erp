@@ -106,6 +106,29 @@ class BatchWiseReportView(APIView):
         ))
 
 
+class ProgramWiseReportView(APIView):
+    """Program Wise tab: one row per batch of the program."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        if not _can(request.user):
+            return _deny()
+        from apps.master.models import Program
+        try:
+            program = Program.objects.get(pk=pk)
+        except Program.DoesNotExist as e:
+            raise Http404 from e
+        p = request.query_params
+        return Response(reports.program_wise_report(
+            program=program,
+            campus=_int(p, "campus"),
+            academic_year=_int(p, "academic_year"),
+            from_date=parse_date(p.get("from") or "") or None,
+            to_date=parse_date(p.get("to") or "") or None,
+        ))
+
+
 class ShortageLetterView(APIView):
     """GET — Shortage of Attendance letter PDF (legacy Batch-Wise
     "Shortage of Attendance (Download)"). `?student=<id>` for one

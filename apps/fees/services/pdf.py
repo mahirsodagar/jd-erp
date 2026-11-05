@@ -3,7 +3,9 @@
 Lays out the invoice finance hands to students: institute letterhead
 (logo + billing address + GSTIN, all off `Institute`), the student
 block, a one-row payment table, the amount in words, and — on page 2 —
-the program policies the student signs against.
+the program policies (without the agreement clause or signature boxes,
+which only the undertaking carries). Matches the paper receipts issued
+in 2026 for both institutes, down to the 4-digit dates.
 
 The tax columns (Basic Fee / SGST / CGST / IGST) only appear when the
 receipt actually carries tax. A JD School of Design receipt against the
@@ -16,8 +18,8 @@ output (status flag included, so cancelled receipts watermark clearly).
 """
 
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
-from django.utils import timezone
 from fpdf import FPDF
 
 from apps.common.pdf_theme import (
@@ -34,6 +36,11 @@ from apps.common.pdf_theme import (
     safe as _safe,
 )
 from apps.common.program_policies import policy_for
+
+#: Receipts are stamped in Indian time whatever the server runs on
+#: (settings.TIME_ZONE is UTC) — the paper ones show the clock on the
+#: counter, not Greenwich.
+_RECEIPT_TZ = ZoneInfo("Asia/Kolkata")
 
 
 def _amount_str(v) -> str:
@@ -196,7 +203,7 @@ def _mode_label(receipt) -> str:
 def _draw_payment_table(pdf: FPDF, receipt) -> None:
     taxes = _tax_columns(receipt)
 
-    ref_date = (receipt.received_date.strftime("%d-%m-%y")
+    ref_date = (receipt.received_date.strftime("%d-%m-%Y")
                 if receipt.received_date else "")
     base = [
         ("Sl. No", "1", "C"),
@@ -215,8 +222,10 @@ def _draw_payment_table(pdf: FPDF, receipt) -> None:
                  + [(label, _plain(amount), "R") for label, amount in taxes]
                  + [("Fee\nPaid", _amount_str(receipt.amount), "R")])
     else:
-        base_w = [14.0, 30.0, 20.0, 40.0, 24.0, 30.0]
-        money_w = [_BODY_W - sum(base_w)]
+        # The single-column table does not stretch to the margin — on
+        # the paper receipt it sits left, at roughly 80% of the body.
+        base_w = [12.0, 20.0, 22.0, 30.0, 22.0, 26.0]
+        money_w = [18.0]
         money = [("Fee Paid", _amount_str(receipt.amount), "R")]
 
     cols = base + money
@@ -263,11 +272,12 @@ def _draw_receipt_page(pdf: FPDF, receipt) -> None:
     # Two different dates, as on the paper receipts: this line is when
     # the invoice was raised, while the table's "Ref. Date" is when the
     # money was received.
-    issued_at = timezone.localtime(receipt.created_on) if receipt.created_on else None
+    issued_at = (receipt.created_on.astimezone(_RECEIPT_TZ)
+                 if receipt.created_on else None)
     if issued_at:
-        date_s = issued_at.strftime("%d-%m-%y %H:%M:%S")
+        date_s = issued_at.strftime("%d-%m-%Y %H:%M:%S")
     elif receipt.received_date:
-        date_s = receipt.received_date.strftime("%d-%m-%y")
+        date_s = receipt.received_date.strftime("%d-%m-%Y")
     else:
         date_s = ""
 
@@ -327,7 +337,7 @@ def _draw_receipt_page(pdf: FPDF, receipt) -> None:
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(0, 6, "CANCELLED", new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("Helvetica", "", 9)
-        when = (receipt.cancelled_on.strftime("%d-%m-%y")
+        when = (receipt.cancelled_on.strftime("%d-%m-%Y")
                 if receipt.cancelled_on else "")
         detail = receipt.cancellation_reason or ""
         if when:
@@ -336,10 +346,13 @@ def _draw_receipt_page(pdf: FPDF, receipt) -> None:
         pdf.set_text_color(0, 0, 0)
 
     pdf.ln(4)
+    # The payee prints bold, the rest of the line regular — as printed.
     pdf.set_font("Helvetica", "", 9)
-    pdf.cell(0, 5, _safe("Cheque/Demand Draft to be made in favor of "
-                         f"{institute.cheque_payee}"),
-             new_x="LMARGIN", new_y="NEXT")
+    lead = "Cheque/Demand Draft to be made in favor of "
+    pdf.cell(pdf.get_string_width(lead), 5, lead)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(0, 5, _safe(institute.cheque_payee), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 9)
     pdf.cell(0, 5, "All Invoices required to be produced by student whenever "
                    "asked for by the institute authorities.",
              new_x="LMARGIN", new_y="NEXT")
@@ -372,8 +385,15 @@ def render_receipt_pdf(receipt) -> bytes:
 
     _draw_receipt_page(pdf, receipt)
 
+    # Page 2: the policies alone. The AGREEMENT clause and the signature
+    # boxes belong to the undertaking the student signs; the receipt the
+    # institute hands over carries neither.
     program = receipt.enrollment.program
-    draw_policy_page(pdf, policy_for(program.degree_type if program else None))
+    draw_policy_page(
+        pdf,
+        policy_for(program.degree_type if program else None, agreement=False),
+        signatures=False,
+    )
 
     out = pdf.output(dest="S")  # bytearray in fpdf2
     return bytes(out)

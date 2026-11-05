@@ -205,6 +205,105 @@ def batch_wise_report(*, batch, from_date=None, to_date=None,
     }
 
 
+# === Tab — Program Wise ==============================================
+
+def program_wise_report(*, program, campus=None, academic_year=None,
+                        from_date=None, to_date=None) -> dict:
+    """One row per batch of a program: strength, classes held / marked,
+    overall % and how many students sit below the 75% line. Rolls the
+    batches up into a programme total."""
+    batches = (Batch.objects
+               .filter(program=program, is_active=True)
+               .select_related("campus", "academic_year")
+               .order_by("-academic_year__start_date", "campus__name", "name"))
+    if campus:
+        batches = batches.filter(campus_id=campus)
+    if academic_year:
+        batches = batches.filter(academic_year_id=academic_year)
+    batches = list(batches)
+    batch_ids = [b.id for b in batches]
+
+    slots = _slot_qs(program=program.id, from_date=from_date, to_date=to_date,
+                     campus=campus, academic_year=academic_year)
+    slot_agg = {
+        r["batch_id"]: r
+        for r in (slots.values("batch_id")
+                  .annotate(held=Count("id", distinct=True),
+                            marked_slots=Count(
+                                "id", filter=Q(attendance_entries__isnull=False),
+                                distinct=True)))
+    }
+
+    strength = dict(
+        Enrollment.objects
+        .filter(batch_id__in=batch_ids, status=Enrollment.Status.ACTIVE)
+        .values_list("batch_id")
+        .annotate(n=Count("id"))
+    )
+
+    # Per (batch, student) present/total → shortage count per batch.
+    per_student = (Attendance.objects
+                   .filter(schedule_slot__in=slots)
+                   .values("schedule_slot__batch_id", "student_id")
+                   .annotate(present=Count("id", filter=Q(status__in=PRESENT_LIKE)),
+                             total=Count("id")))
+    totals = {bid: [0, 0, 0] for bid in batch_ids}  # present, marked, shortage
+    for r in per_student:
+        t = totals.setdefault(r["schedule_slot__batch_id"], [0, 0, 0])
+        t[0] += r["present"]
+        t[1] += r["total"]
+        if r["total"] and _pct(r["present"], r["total"]) < SHORTAGE_THRESHOLD:
+            t[2] += 1
+
+    rows = []
+    sum_students = sum_held = sum_marked_slots = sum_present = sum_marked = sum_short = 0
+    for b in batches:
+        present, marked, short = totals.get(b.id, [0, 0, 0])
+        sa = slot_agg.get(b.id, {})
+        held = sa.get("held", 0)
+        marked_slots = sa.get("marked_slots", 0)
+        n = strength.get(b.id, 0)
+        rows.append({
+            "batch_id": b.id,
+            "batch_name": b.name,
+            "short_name": b.short_name,
+            "campus": b.campus.name,
+            "academic_year": b.academic_year.code,
+            "students": n,
+            "slots_held": held,
+            "slots_marked": marked_slots,
+            "present": present,
+            "marked": marked,
+            "pct": _pct(present, marked),
+            "shortage_count": short,
+        })
+        sum_students += n
+        sum_held += held
+        sum_marked_slots += marked_slots
+        sum_present += present
+        sum_marked += marked
+        sum_short += short
+
+    return {
+        "program_id": program.id,
+        "program_name": program.name,
+        "program_code": program.code,
+        "from": str(from_date) if from_date else None,
+        "to": str(to_date) if to_date else None,
+        "rows": rows,
+        "totals": {
+            "batches": len(rows),
+            "students": sum_students,
+            "slots_held": sum_held,
+            "slots_marked": sum_marked_slots,
+            "present": sum_present,
+            "marked": sum_marked,
+            "pct": _pct(sum_present, sum_marked),
+            "shortage_count": sum_short,
+        },
+    }
+
+
 # === Tab 3 — Student Wise ============================================
 
 def student_wise_report(*, student, from_date=None, to_date=None) -> dict:

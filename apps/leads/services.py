@@ -252,6 +252,12 @@ def change_status(*, lead: Lead, new_status: str, changed_by, note: str = "") ->
         lead=lead, old_status=old, new_status=new_status,
         changed_by=changed_by, note=note,
     )
+    from .send_links import STATUS_EMAILS, send_status_email
+    if new_status in STATUS_EMAILS:
+        # After commit, so a rolled-back status change never mails the lead.
+        transaction.on_commit(lambda: send_status_email(
+            lead=lead, status=new_status, actor=changed_by,
+        ))
     return lead
 
 

@@ -18,6 +18,7 @@ from .attendance_report_views import (
     BatchWiseReportView as AR_BatchWiseReportView,
     InstructorLogView as AR_InstructorLogView,
     ModuleGridView as AR_ModuleGridView,
+    ProgramWiseReportView as AR_ProgramWiseReportView,
     RemarksReportView as AR_RemarksReportView,
     StudentWiseReportView as AR_StudentWiseReportView,
 )
@@ -104,6 +105,8 @@ urlpatterns = [
          AR_BatchSemestersView.as_view(), name="attendance-report-batch-semesters"),
     path("attendance/report/student/<int:pk>/",
          AR_StudentWiseReportView.as_view(), name="attendance-report-student"),
+    path("attendance/report/program/<int:pk>/",
+         AR_ProgramWiseReportView.as_view(), name="attendance-report-program"),
     path("attendance/report/instructor/<int:pk>/",
          AR_InstructorLogView.as_view(), name="attendance-report-instructor"),
 

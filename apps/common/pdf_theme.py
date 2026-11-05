@@ -170,14 +170,41 @@ def draw_logo(pdf: FPDF, institute, *, x: float, y: float,
 
 # --- Policy page (page 2 of both documents) ----------------------------
 
+def bullet(pdf: FPDF, x: float, line_h: float, size: float = 1.2) -> None:
+    """A filled dot at `x` on the current line. Drawn, not typed:
+    Helvetica's built-in encoding is Latin-1 and has no U+2022."""
+    pdf.set_fill_color(0, 0, 0)
+    pdf.ellipse(x, pdf.get_y() + line_h / 2 - size / 2, size, size, style="F")
+
+
+def _policy_bullet(pdf: FPDF, lead: str, rest: str, *, indent: float,
+                   line_h: float = 4.5) -> None:
+    """`• Lead: rest` with the dot at `indent` and the text 4mm in from it."""
+    bullet(pdf, MARGIN + indent, line_h)
+    text_x = MARGIN + indent + 4.0
+    pdf.set_x(text_x)
+    lead_w = 0.0
+    if lead:
+        pdf.set_font("Helvetica", "B", 8.5)
+        lead_w = pdf.get_string_width(safe(lead)) + 1
+        pdf.cell(lead_w, line_h, safe(lead))
+    pdf.set_font("Helvetica", "", 8.5)
+    pdf.multi_cell(PAGE_W - MARGIN - text_x - lead_w, line_h, safe(rest),
+                   new_x="LMARGIN", new_y="NEXT")
+
+
 def draw_policy_page(pdf: FPDF, blocks: list[tuple], *,
-                     signature: str | None = None) -> None:
+                     signature: str | None = None,
+                     signatures: bool = True) -> None:
     """Render a `program_policies` document on a fresh page, followed by
     the three signature boxes.
 
     `signature` is a path to the authorised signatory's image, drawn in
     the first box. The student and parent boxes are always left empty to
     be signed by hand.
+
+    `signatures=False` omits the boxes altogether and closes the page
+    with a rule instead — the fee receipt, which is issued, not signed.
 
     Block kinds are documented in `apps.common.program_policies`.
     """
@@ -187,6 +214,11 @@ def draw_policy_page(pdf: FPDF, blocks: list[tuple], *,
         if kind == "h1":
             pdf.set_font(SERIF, "B", 13)
             pdf.cell(0, 8, safe(args[0]), align="C", new_x="LMARGIN", new_y="NEXT")
+        elif kind == "sub":
+            pdf.set_font("Helvetica", "", 8)
+            pdf.set_text_color(110, 110, 110)
+            pdf.cell(0, 4.5, safe(args[0]), align="C", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(0, 0, 0)
         elif kind == "h2":
             pdf.ln(2)
             pdf.set_font(SERIF, "B", 10.5)
@@ -198,23 +230,34 @@ def draw_policy_page(pdf: FPDF, blocks: list[tuple], *,
             pdf.set_font("Helvetica", "", 8.5)
             pdf.multi_cell(BODY_W, 4.5, safe(args[0]),
                            new_x="LMARGIN", new_y="NEXT")
+        elif kind == "note":
+            # Shaded callout with a darker bar down its left edge, as on
+            # the printed BSc/MSc policies.
+            lead, rest = args
+            pdf.ln(1)
+            y = pdf.get_y()
+            pdf.set_fill_color(242, 242, 242)
+            pdf.rect(MARGIN, y, BODY_W, 6, style="F")
+            pdf.set_fill_color(200, 200, 200)
+            pdf.rect(MARGIN, y, 1.0, 6, style="F")
+            pdf.set_xy(MARGIN + 3, y + 0.75)
+            pdf.set_font("Helvetica", "B", 8)
+            lead_w = pdf.get_string_width(safe(lead)) + 1
+            pdf.cell(lead_w, 4.5, safe(lead))
+            pdf.set_font("Helvetica", "", 8)
+            pdf.cell(BODY_W - 3 - lead_w, 4.5, safe(rest),
+                     new_x="LMARGIN", new_y="NEXT")
+            pdf.set_y(y + 6)
+            pdf.ln(1)
         elif kind == "li":
             lead, rest = args
-            indent = 6.0
-            pdf.set_x(MARGIN + indent)
-            pdf.set_font("Helvetica", "B", 8.5)
-            prefix = f"- {lead}" if lead else "- "
-            lead_w = pdf.get_string_width(prefix) + 1
-            pdf.cell(lead_w, 4.5, safe(prefix))
-            pdf.set_font("Helvetica", "", 8.5)
-            pdf.multi_cell(BODY_W - indent - lead_w, 4.5, safe(rest),
-                           new_x="LMARGIN", new_y="NEXT")
+            _policy_bullet(pdf, lead, rest, indent=6.0)
         elif kind == "li2":
-            indent = 14.0
-            pdf.set_x(MARGIN + indent)
-            pdf.set_font("Helvetica", "", 8.5)
-            pdf.multi_cell(BODY_W - indent, 4.5, safe(f"- {args[0]}"),
-                           new_x="LMARGIN", new_y="NEXT")
+            _policy_bullet(pdf, "", args[0], indent=14.0)
+
+    if not signatures:
+        rule(pdf, gap_before=3.0)
+        return
 
     pdf.ln(4)
     w = BODY_W / len(SIGNATORIES)

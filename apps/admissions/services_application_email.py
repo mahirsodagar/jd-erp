@@ -1,12 +1,17 @@
 """Acknowledge a submitted application form by email.
 
 Fires once, on the student's first submit of the public self-fill form
-(`PublicApplicationView.post`). The message carries the application
-form PDF (`services_application_pdf.render_application_pdf`) and goes
-to the student with the campus acknowledgement inbox in CC, so both
-hold the same copy. The campus inbox comes from
-`APPLICATION_ACK_CAMPUS_INBOXES` (keyed on `Campus.code`); a campus
-with no inbox configured still gets the student copy.
+(`PublicApplicationView.post`), as two mails:
+
+* Student copy — MSG91 template `application_submitted_3` via
+  `queue_notification` (key `admissions.application_submitted.email`).
+  MSG91 can't carry the PDF or the fee pay links; the student sees the
+  "Pay fees" page right after submitting anyway.
+* Office copy — the original SMTP mail with the application form PDF
+  (`services_application_pdf.render_application_pdf`) and fee lines, To
+  the campus acknowledgement inbox (`APPLICATION_ACK_CAMPUS_INBOXES`,
+  keyed on `Campus.code`), CC `OPERATIONS_INBOX`. Skipped when neither
+  inbox is configured.
 
 Best-effort: a mail problem is logged in `NotificationDispatchLog` and
 never fails the submission itself.
@@ -22,7 +27,8 @@ from .services_application_pdf import render_application_pdf
 
 logger = logging.getLogger(__name__)
 
-TEMPLATE_KEY = "admissions.form_submitted.email"
+TEMPLATE_KEY = "admissions.form_submitted.email"  # office copy (SMTP + PDF)
+STUDENT_TEMPLATE_KEY = "admissions.application_submitted.email"  # MSG91
 
 
 def campus_inbox_for(campus) -> str:
@@ -89,64 +95,95 @@ def _compose(student, fee_page: dict | None = None) -> tuple[str, str]:
     return subject, body
 
 
-def send_application_acknowledgement(
-    student, fee_page: dict | None = None,
-) -> NotificationDispatchLog | None:
-    """Email the application form PDF to the student and the campus
-    inbox. `fee_page` is the summary from
-    `payments.applicant_fees.fee_page_for`; every fee still due online
-    rides along with its pay link. Returns the dispatch log row, or None
-    when there was nobody to send to. Never raises."""
+def _send_student_copy(student):
+    """MSG91 `application_submitted_3` to the student. Never raises."""
+    to = (student.student_email or "").strip()
+    if not to:
+        return None
     try:
-        student_email = (student.student_email or "").strip()
-        campus_email = campus_inbox_for(student.campus)
-        operations = (getattr(settings, "OPERATIONS_INBOX", "") or "").strip()
-
-        to = student_email or campus_email
-        cc = [e for e in (campus_email, operations)
-              if e and e.lower() != to.lower()]
-        if not to:
-            logger.info("Application %s: no recipient (student has no email, "
-                        "campus %s has no inbox).", student.application_form_id,
-                        getattr(student.campus, "code", ""))
-            return None
-
-        subject, body = _compose(student, fee_page)
-        log = NotificationDispatchLog.objects.create(
-            channel=NotificationTemplate.Channel.EMAIL,
-            template_key=TEMPLATE_KEY, recipient=to, cc=", ".join(cc),
-            subject=subject, body=body, related_object=student,
-        )
-
-        if not getattr(settings, "EMAIL_SMTP_OUTBOUND_ENABLED", True):
-            log.error = "SMTP outbound disabled on this host."
-            log.save(update_fields=["error"])
-            return log
-
         from django.utils import timezone
 
-        from apps.notifications.email import send_email
+        from apps.notifications.services import queue_notification
 
-        pdf = render_application_pdf(student)
-        smtp_cfg, from_email = _transport(
-            getattr(student.program, "degree_type", "") or "",
+        submitted = timezone.localdate()
+        return queue_notification(
+            template_key=STUDENT_TEMPLATE_KEY,
+            recipient=to,
+            context={
+                "Student_Name": student.student_name,
+                "Course_Name": getattr(student.program, "name", "") or "",
+                "Application_ID": student.application_form_id,
+                "Submission_Date": submitted.strftime("%d-%m-%Y"),
+            },
+            related=student,
         )
-        ok, detail = send_email(
-            recipient=to, cc=", ".join(cc), subject=subject, body=body,
-            attachments=[(f"Application-{student.application_form_id}.pdf",
-                          pdf, "application/pdf")],
-            smtp=smtp_cfg, from_email=from_email,
-        )
-        log.status = (NotificationDispatchLog.Status.SENT if ok
-                      else NotificationDispatchLog.Status.FAILED)
-        log.sent_at = timezone.now() if ok else None
-        log.error = "" if ok else detail
-        log.save(update_fields=["status", "sent_at", "error"])
-        if not ok:
-            logger.warning("Application %s acknowledgement to %s failed: %s",
-                           student.application_form_id, to, detail)
-        return log
     except Exception:  # noqa: BLE001 — never break the submission
-        logger.exception("Application acknowledgement failed for student id=%s",
-                         getattr(student, "pk", None))
+        logger.exception("Application %s: student MSG91 ack failed",
+                         getattr(student, "application_form_id", ""))
         return None
+
+
+def _send_office_copy(student, fee_page):
+    """SMTP mail with the form PDF to the campus inbox (CC operations)."""
+    campus_email = campus_inbox_for(student.campus)
+    operations = (getattr(settings, "OPERATIONS_INBOX", "") or "").strip()
+    to = campus_email or operations
+    cc = [e for e in (operations,) if e and e.lower() != to.lower()]
+    if not to:
+        logger.info("Application %s: no office copy (campus %s has no inbox, "
+                    "no OPERATIONS_INBOX).", student.application_form_id,
+                    getattr(student.campus, "code", ""))
+        return None
+
+    subject, body = _compose(student, fee_page)
+    log = NotificationDispatchLog.objects.create(
+        channel=NotificationTemplate.Channel.EMAIL,
+        template_key=TEMPLATE_KEY, recipient=to, cc=", ".join(cc),
+        subject=subject, body=body, related_object=student,
+    )
+
+    if not getattr(settings, "EMAIL_SMTP_OUTBOUND_ENABLED", True):
+        log.error = "SMTP outbound disabled on this host."
+        log.save(update_fields=["error"])
+        return log
+
+    from django.utils import timezone
+
+    from apps.notifications.email import send_email
+
+    pdf = render_application_pdf(student)
+    smtp_cfg, from_email = _transport(
+        getattr(student.program, "degree_type", "") or "",
+    )
+    ok, detail = send_email(
+        recipient=to, cc=", ".join(cc), subject=subject, body=body,
+        attachments=[(f"Application-{student.application_form_id}.pdf",
+                      pdf, "application/pdf")],
+        smtp=smtp_cfg, from_email=from_email,
+    )
+    log.status = (NotificationDispatchLog.Status.SENT if ok
+                  else NotificationDispatchLog.Status.FAILED)
+    log.sent_at = timezone.now() if ok else None
+    log.error = "" if ok else detail
+    log.save(update_fields=["status", "sent_at", "error"])
+    if not ok:
+        logger.warning("Application %s office copy to %s failed: %s",
+                       student.application_form_id, to, detail)
+    return log
+
+
+def send_application_acknowledgement(
+    student, fee_page: dict | None = None,
+) -> tuple:
+    """Student MSG91 ack + office SMTP copy with the PDF. `fee_page` is
+    the summary from `payments.applicant_fees.fee_page_for`; fees still
+    due online ride along in the office copy. Returns
+    (student_log, office_log) — either may be None. Never raises."""
+    student_log = _send_student_copy(student)
+    try:
+        office_log = _send_office_copy(student, fee_page)
+    except Exception:  # noqa: BLE001 — never break the submission
+        logger.exception("Application office copy failed for student id=%s",
+                         getattr(student, "pk", None))
+        office_log = None
+    return student_log, office_log

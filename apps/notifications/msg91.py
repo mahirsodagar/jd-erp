@@ -138,7 +138,7 @@ def send_msg91_template(
         "template_id": template_name,
     }
 
-    if dry_run:
+    if dry_run or getattr(settings, "MSG91_DRY_RUN", False):
         return True, json.dumps(payload, indent=2)
 
     data = json.dumps(payload).encode("utf-8")
