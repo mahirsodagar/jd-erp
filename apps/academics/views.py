@@ -684,22 +684,30 @@ class AssignmentListCreateView(APIView):
         if not has_perm(u, "academics.assignment.view"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
-        qs = Assignment.objects.select_related("subject", "program", "batch")
+        qs = Assignment.objects.select_related(
+            "subject", "program", "campus", "batch",
+        )
         params = request.query_params
+        from django.db.models import Q
         if v := params.get("subject"):
             qs = qs.filter(subject_id=v)
         if v := params.get("program"):
             qs = qs.filter(program_id=v)
+        if v := params.get("campus"):
+            # Rows from before the campus field (null) reach every campus.
+            qs = qs.filter(Q(campus_id=v) | Q(campus__isnull=True))
         if v := params.get("batch"):
             # Show assignments for this batch plus program-wide ones that
-            # reach it (batch=null, same program).
-            from django.db.models import Q
+            # reach it (batch=null, same program, its campus or none).
             from apps.master.models import Batch
-            prog_id = (Batch.objects.filter(pk=v)
-                       .values_list("program_id", flat=True).first())
+            b = (Batch.objects.filter(pk=v)
+                 .values("program_id", "campus_id").first()) or {}
             qs = qs.filter(
                 Q(batch_id=v)
-                | Q(batch__isnull=True, program_id=prog_id)
+                | Q(batch__isnull=True, program_id=b.get("program_id"),
+                    campus__isnull=True)
+                | Q(batch__isnull=True, program_id=b.get("program_id"),
+                    campus_id=b.get("campus_id"))
             )
         if v := params.get("due_after"):
             if d := parse_date(v):
@@ -712,7 +720,11 @@ class AssignmentListCreateView(APIView):
         # their campus(es). This used to key off the Slot module's
         # `academics.schedule.view_all`.
         if not has_perm(u, "academics.assignment.view_all_campuses"):
-            qs = qs.filter(batch__campus__in=u.campuses.all())
+            mine = u.campuses.all()
+            qs = qs.filter(
+                Q(batch__campus__in=mine)
+                | Q(batch__isnull=True, campus__in=mine)
+            )
         return Response(AssignmentSerializer(
             qs[:500], many=True, context={"request": request}).data)
 

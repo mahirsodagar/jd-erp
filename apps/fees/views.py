@@ -429,7 +429,8 @@ class ConcessionListCreateView(APIView):
 
     def get(self, request):
         qs = Concession.objects.select_related(
-            "enrollment", "enrollment__student", "requested_by", "approver",
+            "enrollment", "enrollment__student", "enrollment__campus",
+            "requested_by", "approver",
         )
         qs = visible_enrollments_filter(qs, request.user)
         params = request.query_params
@@ -437,6 +438,8 @@ class ConcessionListCreateView(APIView):
             qs = qs.filter(status=v)
         if v := params.get("enrollment"):
             qs = qs.filter(enrollment_id=v)
+        if v := params.get("campus"):
+            qs = qs.filter(enrollment__campus_id=v)
         if v := params.get("requested_from"):
             if d := parse_date(v):
                 qs = qs.filter(requested_on__date__gte=d)

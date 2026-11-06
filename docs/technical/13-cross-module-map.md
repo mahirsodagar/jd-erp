@@ -110,7 +110,7 @@ Non-obvious dependencies worth memorising:
 | `academics.cert_service` | `MarksEntry` | COMPLETION / PROVISIONAL eligibility |
 | `courseware` publish | `Enrollment` (ACTIVE) | Creates one mapping per active student |
 | `leaves` | `Employee.reporting_manager_1` | Snapshotted into `manager_email` |
-| `relieving` | `Employee.reporting_manager_1..4` | Snapshotted into `RelievingApproval` |
+| `relieving` | `RelievingManager` (per-institute L1–L4 master), `Employee.institute` | Snapshotted into `RelievingApproval` at submission |
 | `student_leaves` | `Batch.mentor` | Snapshotted into `batch_mentor_email` |
 | `audit_reports.services` | `academics`, `leaves`, `fees`, `admissions` | Every dashboard is a cross-module read |
 | `portal` | `Student.user_account` / `.parent_user_account` | The entire identity model |

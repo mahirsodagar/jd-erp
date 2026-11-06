@@ -1,6 +1,14 @@
 from django.contrib import admin
 
-from .models import RelievingApplication, RelievingApproval
+from .models import RelievingApplication, RelievingApproval, RelievingManager
+
+
+@admin.register(RelievingManager)
+class RelievingManagerAdmin(admin.ModelAdmin):
+    list_display = ("institute", "level", "label", "approver", "updated_at")
+    list_filter = ("institute", "level")
+    autocomplete_fields = ("approver",)
+    readonly_fields = ("updated_at", "updated_by")
 
 
 class RelievingApprovalInline(admin.TabularInline):
@@ -13,11 +21,11 @@ class RelievingApprovalInline(admin.TabularInline):
 @admin.register(RelievingApplication)
 class RelievingApplicationAdmin(admin.ModelAdmin):
     list_display = (
-        "id", "employee", "status",
+        "id", "employee", "application_type", "status",
         "last_working_date_requested", "last_working_date_approved",
         "submitted_at", "finalized_at",
     )
-    list_filter = ("status",)
+    list_filter = ("status", "application_type")
     search_fields = (
         "employee__emp_code", "employee__first_name", "employee__family_name",
         "relieving_letter_no", "experience_letter_no",
@@ -35,7 +43,7 @@ class RelievingApplicationAdmin(admin.ModelAdmin):
 
 @admin.register(RelievingApproval)
 class RelievingApprovalAdmin(admin.ModelAdmin):
-    list_display = ("id", "application", "level", "approver",
+    list_display = ("id", "application", "level", "label", "approver",
                     "status", "decided_at")
     list_filter = ("status", "level")
     search_fields = (

@@ -16,7 +16,10 @@ from apps.employees.models import Employee
 from .models import (
     CompOffApplication, LeaveAllocation, LeaveApplication, LeaveType,
 )
-from .permissions import LeaveAccessPolicy, get_employee_for, has_perm
+from .permissions import (
+    LeaveAccessPolicy, get_employee_for, has_perm, is_manager_for,
+    manager_email_q,
+)
 from .serializers import (
     BulkAllocationSerializer,
     CompOffApplicationSerializer,
@@ -187,8 +190,9 @@ def _scope_applications(qs, user, scope: str):
             return qs.none()
         return qs
     if scope == "team":
-        # Legacy: manager sees leaves whose manager_mail snapshot == their email.
-        return qs.filter(manager_email__iexact=user.email)
+        # Legacy: manager sees leaves whose manager_mail snapshot names
+        # them (login email or either employee email — see manager_emails).
+        return qs.filter(manager_email_q(user))
     me = get_employee_for(user)
     if me is None:
         return qs.none()
@@ -295,7 +299,7 @@ class LeaveApplicationDetailView(APIView):
             u.is_superuser
             or has_perm(u, "leaves.application.view_all")
             or (me and app.employee_id == me.id)
-            or app.manager_email.lower() == (u.email or "").lower()
+            or is_manager_for(u, app)
         )
         if not allowed:
             raise Http404
@@ -333,7 +337,7 @@ class LeaveDecisionView(APIView):
 
         # The applicant's own manager decides without any key; anyone
         # else needs the matching override for that outcome.
-        is_manager = app.manager_email.lower() == (u.email or "").lower()
+        is_manager = is_manager_for(u, app)
         override = (
             "leaves.application.approve_any"
             if s.validated_data["status"] == LeaveApplication.Status.APPROVED
@@ -422,8 +426,7 @@ class CompOffListCreateView(APIView):
                 return Response([], status=http.HTTP_200_OK)
         elif scope == "team":
             # Same as leave: matched on the manager_email snapshot.
-            qs = qs.filter(manager_email__iexact=request.user.email) \
-                if request.user.email else qs.none()
+            qs = qs.filter(manager_email_q(request.user))
         else:
             me = get_employee_for(request.user)
             qs = qs.filter(employee=me) if me else qs.none()
@@ -481,9 +484,7 @@ class CompOffDecisionView(APIView):
         s = DecisionSerializer(data=request.data)
         s.is_valid(raise_exception=True)
 
-        is_manager = bool(
-            u.email and co.manager_email.lower() == u.email.lower()
-        )
+        is_manager = is_manager_for(u, co)
         override = (
             "leaves.compoff.approve_any"
             if s.validated_data["status"] == CompOffApplication.Status.APPROVED
@@ -517,10 +518,12 @@ class ReportingManagerView(APIView):
 
 class ManagerOptionsView(APIView):
     """GET — `{"managers": [{id, name, emp_code, email}, ...]}`: every
-    active employee with an email, for the "Manager email" dropdown on
-    the apply forms. Legacy DKUL listed all employee emails here, so any
-    signed-in employee may read it; the applicant is left out since a
-    leave cannot be routed to oneself."""
+    active employee with an email **at the caller's campus**, for the
+    "Manager email" dropdown on the apply forms. Any signed-in employee
+    may read it; the applicant is left out since a leave cannot be
+    routed to oneself. (The reporting manager is shown separately by
+    ReportingManagerView, so one from another campus stays selectable.)
+    A caller with no employee profile sees every campus."""
     permission_classes = [IsAuthenticated, LeaveAccessPolicy]
 
     def get(self, request):
@@ -532,7 +535,7 @@ class ManagerOptionsView(APIView):
             .order_by("first_name", "family_name", "emp_code")
         )
         if me is not None:
-            qs = qs.exclude(pk=me.pk)
+            qs = qs.filter(campus_id=me.campus_id).exclude(pk=me.pk)
         return Response({"managers": [
             {"id": e.id, "name": e.full_name,
              "emp_code": e.emp_code, "email": e.email_primary}

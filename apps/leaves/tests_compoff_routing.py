@@ -74,6 +74,21 @@ class CompOffRoutingTests(TestCase):
             set(r.json()["managers"][0]), {"id", "name", "emp_code", "email"},
         )
 
+    def test_manager_options_limited_to_own_campus(self):
+        other_campus = Campus.objects.create(name="Far", code="FAR")
+        far_user = User.objects.create_user(
+            username="far", email="far@jdinstitute.edu.in", password="x",
+        )
+        far = make_employee("FAR1", institute=self.emp.institute,
+                            campus=other_campus, user_account=far_user)
+        r = self._client(self.user).get("/api/leaves/manager-options/")
+        emails = {m["email"] for m in r.json()["managers"]}
+        self.assertIn(self.boss.email_primary, emails)
+        self.assertNotIn(far.email_primary, emails)
+        # And from the other side only that campus shows up.
+        r = self._client(far_user).get("/api/leaves/manager-options/")
+        self.assertEqual([m["email"] for m in r.json()["managers"]], [])
+
     def test_defaults_to_reporting_manager_and_copies_hr(self):
         r = self._apply(self.user, cc_emails="peer@jdinstitute.edu.in")
         self.assertEqual(r.status_code, 201, r.content)

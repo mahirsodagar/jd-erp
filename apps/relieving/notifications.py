@@ -11,7 +11,10 @@ Legacy sent four mails:
                                                     (experience_letter_employee)
 
 Legacy hard-coded the four approver addresses; here the chain is the
-per-application snapshot in `RelievingApproval` (reporting managers 1–4).
+per-application snapshot in `RelievingApproval`, taken from the
+institute's Relieving Managers master (L1–L4). A PART_TIME application
+("Full time to Part time") uses the same apply / reject mails and, on
+completion, a plain approval mail instead of the letter.
 Legacy's personal / institutional mail (`emp_email2` / `emp_email1`) map
 to `Employee.email_alternate` / `email_primary`. The letter goes to the
 personal address because the institutional mailbox is typically closed
@@ -35,6 +38,7 @@ from .models import RelievingApproval
 # SMTP_INTERNAL_TEMPLATE_KEYS.
 TPL_APPLICATION = "hr.relieving.application.email"
 TPL_REJECTED = "hr.relieving.application_rejected.email"
+TPL_APPROVED = "hr.relieving.application_approved.email"  # PART_TIME completion
 TPL_RELIEVING_LETTER = "hr.relieving.letter.email"
 TPL_EXPERIENCE_LETTER = "hr.relieving.experience_letter.email"
 
@@ -124,21 +128,29 @@ def _safe_send(**kw) -> NotificationDispatchLog | None:
 
 # --- Events --------------------------------------------------------
 
+def _kind(application) -> tuple[str, str]:
+    """(subject noun, last-day caption) per application type."""
+    if application.is_relieving:
+        return "Relieving", "Last Working Date"
+    return "Full-time to Part-time", "Last Working Date as Full-time"
+
+
 def notify_submitted(application) -> None:
     emp = application.employee
     approvers = _approver_emails(application)
     if not approvers:
         return
     doj = emp.date_of_joining
+    noun, caption = _kind(application)
     _safe_send(
         template=TPL_APPLICATION, application=application,
         to=approvers[0], cc=_join(approvers[1:]),
-        subject=f"Employee Relieving Application — {emp.full_name} ({emp.emp_code})",
+        subject=f"Employee {noun} Application — {emp.full_name} ({emp.emp_code})",
         body=(
-            "Employee submitted a relieving application.\n\n"
+            f"Employee submitted a {noun.lower()} application.\n\n"
             f"Employee Name: {emp.full_name} [{emp.emp_code}]\n"
             f"Date of Join: {f'{doj:%d %b %Y}' if doj else '—'}\n"
-            f"Last Working Date: {application.last_working_date_requested:%d %b %Y}\n"
+            f"{caption}: {application.last_working_date_requested:%d %b %Y}\n"
             f"Reason: {application.reason}"
             + _FOOTER
         ),
@@ -150,12 +162,13 @@ def notify_rejected(application) -> None:
     approvers = _approver_emails(application)
     if not approvers:
         return
+    noun, _ = _kind(application)
     _safe_send(
         template=TPL_REJECTED, application=application,
         to=approvers[0], cc=_join(approvers[1:]),
-        subject=f"Employee Relieving Application Rejected — {emp.full_name}",
+        subject=f"Employee {noun} Application Rejected — {emp.full_name}",
         body=(
-            "Employee relieving application has been rejected.\n\n"
+            f"Employee {noun.lower()} application has been rejected.\n\n"
             f"Employee Name: {emp.full_name} [{emp.emp_code}]\n"
             f"Rejected at level: {application.rejected_at_level}\n"
             f"Reason for Rejection: {application.rejection_reason or '(none)'}"
@@ -165,17 +178,39 @@ def notify_rejected(application) -> None:
 
 
 def notify_completed(application) -> None:
-    """Email the relieving letter to the employee. The experience letter
-    is not sent here — HR sends it from its own button (legacy parity),
-    see `send_experience_letter`."""
+    """RELIEVING: email the relieving letter to the employee. The
+    experience letter is not sent here — HR sends it from its own button
+    (legacy parity), see `send_experience_letter`. PART_TIME: a plain
+    approval mail to the employee, cc the four approvers, so HR knows to
+    update the employee record."""
     emp = application.employee
-    personal = emp.email_alternate or emp.email_primary
-    if not personal:
-        return
     approvers = _approver_emails(application)
     last_day = (application.last_working_date_approved
                 or application.last_working_date_requested)
     inst_name = emp.institute.name
+
+    if not application.is_relieving:
+        to = emp.email_primary or emp.email_alternate
+        if not to:
+            return
+        _safe_send(
+            template=TPL_APPROVED, application=application,
+            to=to, cc=_join(approvers),
+            subject=f"Full-time to Part-time Approved — {emp.full_name} ({emp.emp_code})",
+            body=(
+                f"Dear {emp.full_name},\n\n"
+                "Your application to move from full-time to part-time has "
+                "been approved by all four levels. Your last working date "
+                f"as a full-time employee is {last_day:%d %b %Y}.\n\n"
+                "HR will update your employment record.\n\n"
+                "Regards,\nHR" + _FOOTER
+            ),
+        )
+        return
+
+    personal = emp.email_alternate or emp.email_primary
+    if not personal:
+        return
 
     _safe_send(
         template=TPL_RELIEVING_LETTER, application=application,

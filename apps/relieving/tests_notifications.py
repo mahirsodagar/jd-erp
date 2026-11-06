@@ -1,6 +1,5 @@
 """Relieving emails go out on apply, reject and completion (legacy parity);
-the experience letter goes out from HR's own button. Also covers HR's
-direct accept."""
+the experience letter goes out from HR's own button."""
 
 from datetime import date
 from unittest.mock import patch
@@ -13,10 +12,14 @@ from rest_framework.test import APIClient
 from apps.employees.models import Department, Designation, Employee
 from apps.master.models import Campus, City, Institute, State
 from apps.notifications.models import NotificationDispatchLog as Log
+from apps.relieving import services
 from apps.relieving.models import RelievingApplication
 from apps.relieving.notifications import (
-    TPL_APPLICATION, TPL_EXPERIENCE_LETTER, TPL_REJECTED, TPL_RELIEVING_LETTER,
+    TPL_APPLICATION, TPL_APPROVED, TPL_EXPERIENCE_LETTER, TPL_REJECTED,
+    TPL_RELIEVING_LETTER,
 )
+
+User = get_user_model()
 
 
 def make_employee(code, *, institute, campus, email_alternate="", **extra):
@@ -44,10 +47,6 @@ def make_employee(code, *, institute, campus, email_alternate="", **extra):
 @override_settings(
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
     DEFAULT_FROM_EMAIL="JD Communications <admin.a@jdinstitute.edu.in>",
-    # Route purely by reporting managers here; the fixed L3/L4 approvers
-    # have their own tests in tests_workflow.
-    RELIEVING_L3_APPROVER_EMAIL="",
-    RELIEVING_L4_APPROVER_EMAIL="",
 )
 class RelievingEmailTests(TestCase):
 
@@ -56,25 +55,31 @@ class RelievingEmailTests(TestCase):
         inst = Institute.objects.create(name="JDIFT", code="JDIFT")
         campus = Campus.objects.create(name="Main", code="MAIN")
         kw = dict(institute=inst, campus=campus)
-        cls.m1 = make_employee("MGR1", **kw)
-        cls.m2 = make_employee("MGR2", **kw)
-        cls.m4 = make_employee("MGR4", **kw)  # level 3 left unset → SKIPPED
+        cls.mgrs = []
+        for i in (1, 2, 3, 4):
+            m = make_employee(f"MGR{i}", **kw)
+            m.user_account = User.objects.create_user(f"mgr{i}", m.email_primary, "x")
+            m.save(update_fields=["user_account"])
+            cls.mgrs.append(m)
         cls.emp = make_employee(
-            "EMP1", email_alternate="asha.personal@gmail.com",
-            reporting_manager_1=cls.m1, reporting_manager_2=cls.m2,
-            reporting_manager_4=cls.m4, **kw,
+            "EMP1", email_alternate="asha.personal@gmail.com", **kw,
         )
-        cls.admin = get_user_model().objects.create_superuser(
+        cls.admin = User.objects.create_superuser(
             "hradmin", "hr@jdinstitute.edu.in", "x",
+        )
+        services.save_managers(
+            institute=inst, updated_by=cls.admin,
+            levels=[{"level": i + 1, "approver": m} for i, m in enumerate(cls.mgrs)],
         )
 
     def setUp(self):
         self.client = APIClient()
         self.client.force_authenticate(self.admin)
 
-    def _submit(self):
+    def _submit(self, application_type="RELIEVING"):
         r = self.client.post("/api/hr/relieving/", {
             "employee": self.emp.id,
+            "application_type": application_type,
             "reason": "Relocating to another city.",
             "last_working_date_requested": "2026-10-31",
         }, format="json")
@@ -82,9 +87,10 @@ class RelievingEmailTests(TestCase):
         return r.data["id"]
 
     def _decide(self, pk, level, decision, remarks=""):
-        r = self.client.post(f"/api/hr/relieving/{pk}/decide/{level}/",
-                             {"decision": decision, "remarks": remarks},
-                             format="json")
+        c = APIClient()
+        c.force_authenticate(self.mgrs[level - 1].user_account)
+        r = c.post(f"/api/hr/relieving/{pk}/decide/{level}/",
+                   {"decision": decision, "remarks": remarks}, format="json")
         self.assertEqual(r.status_code, 200, r.data)
 
     def test_apply_mails_first_approver_and_ccs_the_rest(self):
@@ -94,6 +100,7 @@ class RelievingEmailTests(TestCase):
         msg = mail.outbox[0]
         self.assertEqual(msg.to, ["mgr1@jdinstitute.edu.in"])
         self.assertEqual(msg.cc, ["mgr2@jdinstitute.edu.in",
+                                  "mgr3@jdinstitute.edu.in",
                                   "mgr4@jdinstitute.edu.in"])
         self.assertIn("Relocating to another city.", msg.body)
         self.assertIn("EMP1", msg.body)
@@ -101,6 +108,12 @@ class RelievingEmailTests(TestCase):
         log = Log.objects.get(template_key=TPL_APPLICATION)
         self.assertEqual(log.status, Log.Status.SENT)
         self.assertEqual(log.object_id, str(pk))
+
+    def test_part_time_apply_mail_says_so(self):
+        self._submit("PART_TIME")
+        msg, = mail.outbox
+        self.assertIn("Full-time to Part-time", msg.subject)
+        self.assertIn("Last Working Date as Full-time", msg.body)
 
     def test_reject_mails_approvers_with_the_reason(self):
         pk = self._submit()
@@ -118,15 +131,15 @@ class RelievingEmailTests(TestCase):
         self.assertEqual(Log.objects.get(template_key=TPL_REJECTED).status,
                          Log.Status.SENT)
 
-    def _complete(self):
-        pk = self._submit()
-        for level in (1, 2, 4):
+    def _complete(self, application_type="RELIEVING"):
+        pk = self._submit(application_type)
+        for level in (1, 2, 3, 4):
             self._decide(pk, level, "APPROVED")
         return pk
 
     def test_final_approval_sends_only_the_relieving_letter(self):
         pk = self._submit()
-        for level in (1, 2):
+        for level in (1, 2, 3):
             self._decide(pk, level, "APPROVED")
         mail.outbox.clear()
 
@@ -138,7 +151,8 @@ class RelievingEmailTests(TestCase):
         self.assertEqual(relieving.to, ["asha.personal@gmail.com"])
         self.assertEqual(relieving.cc, [
             "mgr1@jdinstitute.edu.in", "mgr2@jdinstitute.edu.in",
-            "mgr4@jdinstitute.edu.in", "emp1@jdinstitute.edu.in",
+            "mgr3@jdinstitute.edu.in", "mgr4@jdinstitute.edu.in",
+            "emp1@jdinstitute.edu.in",
         ])
         (name, content, ctype), = relieving.attachments
         self.assertTrue(name.startswith("REL-JDIFT-"))
@@ -149,6 +163,23 @@ class RelievingEmailTests(TestCase):
                          Log.Status.SENT)
         self.assertFalse(Log.objects.filter(
             template_key=TPL_EXPERIENCE_LETTER).exists())
+
+    def test_part_time_completion_sends_a_plain_approval_mail(self):
+        pk = self._submit("PART_TIME")
+        for level in (1, 2, 3):
+            self._decide(pk, level, "APPROVED")
+        mail.outbox.clear()
+
+        self._decide(pk, 4, "APPROVED")
+
+        msg, = mail.outbox
+        self.assertEqual(msg.to, ["emp1@jdinstitute.edu.in"])
+        self.assertEqual(msg.attachments, [])
+        self.assertIn("31 Oct 2026", msg.body)
+        self.assertEqual(Log.objects.get(template_key=TPL_APPROVED).status,
+                         Log.Status.SENT)
+        self.assertFalse(Log.objects.filter(
+            template_key=TPL_RELIEVING_LETTER).exists())
 
     def test_hr_button_sends_experience_letter_and_can_resend(self):
         pk = self._complete()
@@ -181,48 +212,6 @@ class RelievingEmailTests(TestCase):
         self.assertIn("SMTPServerDisconnected", r.data["detail"])
         self.assertIsNone(
             RelievingApplication.objects.get(pk=pk).experience_letter_sent_at)
-
-    def test_hr_accept_completes_in_one_step(self):
-        pk = self._submit()
-        self._decide(pk, 1, "APPROVED")
-        mail.outbox.clear()
-
-        r = self.client.post(f"/api/hr/relieving/{pk}/accept/", {
-            "last_working_date_approved": "2026-10-15",
-            "remarks": "Notice waived.",
-        }, format="json")
-        self.assertEqual(r.status_code, 200, r.data)
-        self.assertEqual(r.data["status"], "COMPLETED")
-        self.assertEqual(r.data["last_working_date_approved"], "2026-10-15")
-        self.assertTrue(r.data["relieving_letter_no"].startswith("REL-JDIFT-"))
-
-        by_level = {a["level"]: a for a in r.data["approvals"]}
-        self.assertEqual(by_level[1]["remarks"], "")  # decided by RM1 itself
-        self.assertEqual(by_level[2]["status"], "APPROVED")
-        self.assertIn("Accepted directly by HR. Notice waived.",
-                      by_level[2]["remarks"])
-        self.assertEqual(by_level[3]["status"], "SKIPPED")
-
-        self.emp.refresh_from_db()
-        self.assertEqual(self.emp.status, Employee.Status.INACTIVE)
-        self.assertEqual(len(mail.outbox), 1)  # relieving letter only
-
-    def test_accept_rejected_application_fails(self):
-        pk = self._submit()
-        self._decide(pk, 1, "REJECTED", "No.")
-        r = self.client.post(f"/api/hr/relieving/{pk}/accept/", {
-            "last_working_date_approved": "2026-10-15",
-        }, format="json")
-        self.assertEqual(r.status_code, 400)
-
-    def test_accept_needs_finalize_permission(self):
-        pk = self._submit()
-        self.client.force_authenticate(
-            get_user_model().objects.create_user("plain", "p@x.in", "x"))
-        r = self.client.post(f"/api/hr/relieving/{pk}/accept/", {
-            "last_working_date_approved": "2026-10-15",
-        }, format="json")
-        self.assertEqual(r.status_code, 403)
 
     def test_mail_failure_does_not_break_the_workflow(self):
         with patch("apps.notifications.email.send_email",

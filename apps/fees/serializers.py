@@ -280,6 +280,12 @@ class ConcessionDetailSerializer(serializers.ModelSerializer):
     student_application_id = serializers.CharField(
         source="enrollment.student.application_form_id", read_only=True,
     )
+    campus = serializers.IntegerField(
+        source="enrollment.campus_id", read_only=True,
+    )
+    campus_name = serializers.CharField(
+        source="enrollment.campus.name", read_only=True, default="",
+    )
     requested_by_name = serializers.CharField(
         source="requested_by.username", read_only=True, default="",
     )
@@ -291,6 +297,7 @@ class ConcessionDetailSerializer(serializers.ModelSerializer):
         model = Concession
         fields = [
             "id", "enrollment", "student_name", "student_application_id",
+            "campus", "campus_name",
             "amount", "reason", "status",
             "requested_by", "requested_by_name", "requested_on",
             "approver", "approver_name", "approver_remarks", "decided_on",

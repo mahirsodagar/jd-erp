@@ -546,11 +546,14 @@ CATALOGUE = [
     ("dashboard", "dashboard.daily_report.submit", "Fill in my daily report"),
     ("dashboard", "dashboard.admin_daily.submit", "Fill in my admin daily report"),
 
-    # Module HR — Relieving (exit workflow + experience letter)
+    # Module HR — Relieving (exit workflow + experience letter). Deciding
+    # a level needs no key: only the snapshotted L1–L4 approver can, and
+    # there is no override / direct-accept shortcut (user rule
+    # 2026-11-06: strict four-manager approval).
     ("hr", "hr.relieving.submit_for_others", "Submit relieving on behalf of others"),
     ("hr", "hr.relieving.view_all", "View all relieving applications"),
-    ("hr", "hr.relieving.finalize", "HR finalizes relieving + generates letters"),
-    ("hr", "hr.relieving.override", "Override approval sequence (skip levels)"),
+    ("hr", "hr.relieving.finalize", "Send the experience letter; finalize a legacy APPROVED application"),
+    ("hr", "hr.relieving.managers", "Manage the Relieving Managers master (L1–L4 per institute)"),
     # Module HR — Holiday Calendar. Viewing is open to every employee
     # (own campus), so there is no `.view` key.
     ("hr", "hr.holiday.add", "Add a holiday to the calendar"),

@@ -156,6 +156,8 @@ class AttendanceCalendarView(APIView):
             events.append({
                 "id": a.id,
                 "title": f"{ss.subject.code} ({a.status[:1]})",
+                "subject_name": ss.subject.name,
+                "subject_code": ss.subject.code,
                 "start": f"{ss.date}T{ss.time_slot.start_time}",
                 "end": f"{ss.date}T{ss.time_slot.end_time}",
                 "color": _ATT_COLORS.get(a.status, "#6c757d"),
@@ -257,9 +259,13 @@ class TimetableView(APIView):
 def _assignments_for_batch(batch) -> Q:
     """Assignments visible to a student in `batch`: ones targeted at that
     exact batch, plus program-wide ones (no batch) for the batch's
-    program."""
+    program at the batch's campus (or with no campus — rows from before
+    the field reach every campus)."""
     return (Q(batch=batch)
-            | Q(batch__isnull=True, program_id=batch.program_id))
+            | Q(batch__isnull=True, program_id=batch.program_id,
+                campus__isnull=True)
+            | Q(batch__isnull=True, program_id=batch.program_id,
+                campus_id=batch.campus_id))
 
 
 class AssignmentSubjectsView(APIView):
@@ -591,6 +597,57 @@ class LeaveListCreateView(APIView):
                             status=http.HTTP_400_BAD_REQUEST)
         return Response(PortalLeaveSerializer(app).data,
                         status=http.HTTP_201_CREATED)
+
+
+class LeaveMentorsView(APIView):
+    """Who a student may address a leave application to.
+
+    Legacy student portal (`student/leaves.php`) filled both mentor
+    dropdowns with every active faculty / HOD login as "Name (email)".
+    Here that is every active employee whose portal account holds the
+    Faculty or HOD role. Should no one hold those roles yet (fresh
+    tenant), every active employee with a login is listed instead, so
+    the dropdown is never empty. `batch_mentor_email` is the student's
+    own batch mentor, for the form to pre-select.
+    """
+
+    permission_classes = [IsStudentOnly]
+    ROLE_NAMES = ("Faculty", "HOD")
+
+    def get(self, request):
+        from django.db.models import Q
+        from apps.employees.models import Employee
+
+        base = (Employee.objects
+                .filter(status=Employee.Status.ACTIVE,
+                        user_account__isnull=False)
+                .exclude(email_primary="")
+                .select_related("department"))
+        match = Q()
+        for n in self.ROLE_NAMES:
+            match |= Q(user_account__roles__name__iexact=n)
+        qs = base.filter(match).distinct()
+        if not qs.exists():
+            qs = base
+        mentors = [
+            {
+                "id": e.id,
+                "name": e.full_name,
+                "email": e.email_primary,
+                "department": e.department.name if e.department_id else "",
+            }
+            for e in qs.order_by("first_name", "family_name")
+        ]
+
+        batch_mentor_email = ""
+        enrollment = request.portal_ctx.enrollment
+        batch = enrollment.batch if enrollment else None
+        if batch and batch.mentor_id and batch.mentor.email_primary:
+            batch_mentor_email = batch.mentor.email_primary
+        return Response({
+            "mentors": mentors,
+            "batch_mentor_email": batch_mentor_email,
+        })
 
 
 # --- Document requests ---------------------------------------------

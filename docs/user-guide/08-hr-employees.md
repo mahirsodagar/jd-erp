@@ -124,62 +124,85 @@ If someone has left the institute, the proper route is the relieving workflow
 **This page needs no permission.** You see your own applications and any you
 must approve. The see-all permission widens it to every application.
 
+There are two kinds of application, picked at the top of the Apply form:
+
+- **Relieving** — leaving the institute.
+- **Full-time to Part-time** — staying, but moving to part-time. The date
+  you enter is your last working day as full-time.
+
+Both go through the same four approvers.
+
+### Who approves — the Relieving Managers master
+
+**HR → Relieving Managers.** For each institute, HR sets the four approvers
+in order:
+
+| Level | Default title |
+|---|---|
+| 1 | Academic Manager |
+| 2 | Vice Principal |
+| 3 | Principal |
+| 4 | Operations / HR — the final approver |
+
+The titles can be renamed, and any active employee can be picked for any
+level. **All four must be set** before employees of that institute can
+apply — the Apply form shows the chain and tells you if HR has not finished
+setting it up. If an approver leaves and is deactivated, that institute's
+applications are blocked until HR picks someone else.
+
+Changing the master affects **new** applications only.
+
 ### The steps
 
 **1. The application is submitted.** By the employee, or by HR on their behalf
-(a separate permission). It records the reason and the requested last working
-date.
+(a separate permission). It records the reason and the requested date.
 
-At this moment the system **captures the four approvers** onto the application:
+At this moment the system **captures the four approvers** from the master
+onto the application.
 
-| Level | Approver |
-|---|---|
-| 1 and 2 | The employee's first and second reporting managers |
-| 3 | The **Principal** |
-| 4 | **HR** (Trupti), the final approver |
+> Because the approvers are captured at submission, **changing the master
+> afterwards does not reroute an application already in progress.** New
+> applications use the new approvers.
 
-The Principal and HR approvers are the same for every employee and are set by
-your technical team. If one is not set up, the employee's own third or fourth
-reporting manager is used instead. Levels with nobody to approve are marked
-as skipped.
+If the person applying is themselves one of the four (for example the
+Principal resigning), that level is skipped — nobody approves their own exit.
 
-> Because the approvers are captured at submission, **changing someone's
-> reporting manager afterwards does not reroute an application already in
-> progress.** New applications use the new manager.
+**2. Each level approves or rejects** in order, with remarks. Only the
+person named at that level can decide it — there is no HR shortcut and no
+override. Any level can reject; a rejection records which level rejected it
+and why, and ends the application.
 
-**2. Each level approves or rejects** in order, with remarks.
-A rejection records which level rejected it and why.
+**3. The final (level 4) approval completes the application** at once.
+There is no separate finalise step.
 
-**3. The final approval issues the letters.** When HR (level 4) approves,
-the application is completed at once. There is no separate finalise step.
-The system:
+For a **relieving** the system:
 
 - stamps a relieving-letter number and an experience-letter number
 - takes the requested last working date as the final one
 - marks the employee inactive
-- emails both letters to the employee's personal email address
+- emails the relieving letter to the employee's personal email address
+
+For a **full-time to part-time** move the system only records the approval
+and emails the employee (copying the four approvers). HR then updates the
+employment type on the employee record by hand. No letters are issued.
 
 **4. The employee downloads the letters.** On the Relieving page, the
-employee can view or download both PDFs immediately.
+employee can view or download both PDFs immediately. HR sends the
+experience letter by email from its own button, usually after full and
+final settlement.
 
 ### Other things to know
 
 - **An employee can only have one open application at a time.**
 - The employee can **withdraw** their application while it is open.
-- Someone with the override permission can skip approval levels where the
-  normal chain cannot proceed.
-- Notification emails go to the employee and, where configured, to the
-  Operations, Principal, Vice-Principal and Academic Manager mailboxes.
-
-> The relieving screens are still being built out. Some of the finer actions
-> may not yet have a button — if you cannot find one, ask your technical team.
+- The CSV download lists every application with all four decisions.
 
 ## 8.9 What your actions affect
 
 | When you… | This happens elsewhere |
 |---|---|
-| Set an employee's first reporting manager | Determines who approves their **future** leave and relieving requests |
-| Change a reporting manager | Requests already in progress keep the original approver |
+| Set an employee's first reporting manager | Determines who approves their **future** leave requests (relieving uses the Relieving Managers master instead) |
+| Change a reporting manager, or the Relieving Managers master | Requests already in progress keep the original approver |
 | Create a portal account | The employee can log in immediately with the baseline access |
 | Deactivate an employee | They stop appearing in active lists; their history stays intact |
 | Give the final (HR) approval on a relieving application | Letter numbers are stamped, the employee is marked inactive, and the letters are emailed and become available to download |

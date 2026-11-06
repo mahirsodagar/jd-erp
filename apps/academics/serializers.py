@@ -184,6 +184,8 @@ class AssignmentSerializer(serializers.ModelSerializer):
     subject_code = serializers.CharField(source="subject.code", read_only=True)
     program_name = serializers.CharField(source="program.name", read_only=True,
                                          default="")
+    campus_name = serializers.CharField(source="campus.name", read_only=True,
+                                        default="")
     batch_name = serializers.CharField(source="batch.name", read_only=True,
                                        default="")
     semester_name = serializers.CharField(source="semester.name", read_only=True,
@@ -196,7 +198,8 @@ class AssignmentSerializer(serializers.ModelSerializer):
         model = Assignment
         fields = [
             "id", "subject", "subject_name", "subject_code",
-            "program", "program_name", "batch", "batch_name",
+            "program", "program_name", "campus", "campus_name",
+            "batch", "batch_name",
             "semester", "semester_name",
             "title", "description", "max_marks",
             "due_date", "attachment", "image", "image_url", "is_published",
@@ -204,8 +207,8 @@ class AssignmentSerializer(serializers.ModelSerializer):
             "created_by", "created_at", "updated_at",
         ]
         read_only_fields = [
-            "id", "subject_name", "subject_code", "program_name", "batch_name",
-            "semester_name", "image_url",
+            "id", "subject_name", "subject_code", "program_name", "campus_name",
+            "batch_name", "semester_name", "image_url",
             "submission_count", "graded_count",
             "created_by", "created_at", "updated_at",
         ]
@@ -221,11 +224,25 @@ class AssignmentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"program": "This field is required."}
             )
-        # When a batch is chosen it must belong to the selected program —
-        # otherwise the targeting is contradictory.
+        # `campus` is required on create; rows from before the field keep
+        # their null (every campus) until someone edits the targeting.
+        campus = attrs.get("campus")
+        if campus is None and self.instance is not None and "campus" not in attrs:
+            campus = self.instance.campus
+        if campus is None and self.instance is None:
+            raise serializers.ValidationError(
+                {"campus": "This field is required."}
+            )
+        # When a batch is chosen it must belong to the selected program
+        # and campus — otherwise the targeting is contradictory.
         if batch is not None and batch.program_id != program.id:
             raise serializers.ValidationError(
                 {"batch": "Batch does not belong to the selected program."}
+            )
+        if (batch is not None and campus is not None
+                and batch.campus_id != campus.id):
+            raise serializers.ValidationError(
+                {"batch": "Batch does not belong to the selected campus."}
             )
         # Same for the subject; legacy subjects with no program pass.
         subject = attrs.get("subject") or getattr(self.instance, "subject", None)

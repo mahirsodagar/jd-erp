@@ -40,6 +40,8 @@ def recipients_for(assignment):
         qs = qs.filter(batch_id=assignment.batch_id)
     elif assignment.program_id:
         qs = qs.filter(program_id=assignment.program_id)
+        if assignment.campus_id:
+            qs = qs.filter(batch__campus_id=assignment.campus_id)
         if assignment.semester_id:
             qs = qs.filter(semester_id=assignment.semester_id)
     else:

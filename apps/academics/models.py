@@ -157,11 +157,17 @@ class Assignment(models.Model):
     subject = models.ForeignKey(
         "master.Subject", on_delete=models.PROTECT, related_name="assignments",
     )
-    # Targeting: `program` is always set. When `batch` is also set the
-    # assignment is limited to that one batch; when `batch` is null it
-    # applies to every batch in the program.
+    # Targeting: `program` and `campus` are always set on new rows. When
+    # `batch` is also set the assignment is limited to that one batch;
+    # when `batch` is null it applies to every batch of the program at
+    # that campus. `campus` is nullable only for rows that predate it —
+    # those reach every campus, as they always did.
     program = models.ForeignKey(
         "master.Program", on_delete=models.PROTECT, related_name="assignments",
+        null=True, blank=True,
+    )
+    campus = models.ForeignKey(
+        "master.Campus", on_delete=models.PROTECT, related_name="assignments",
         null=True, blank=True,
     )
     batch = models.ForeignKey(

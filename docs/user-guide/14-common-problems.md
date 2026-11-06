@@ -138,6 +138,7 @@ These are rules, not faults. Each exists for a reason.
 | **"Task already exists"** | The same task name is already assigned to that person | Use a more specific name |
 | **"You already have an open appointment"** (students) | One open request per team or person | Wait for a reply |
 | **Only one relieving application at a time** | | Complete or withdraw the existing one |
+| **"Relieving managers are not fully configured"** on apply | HR has not set all four approvers for your institute | HR → Relieving Managers: pick an active employee for every level |
 
 ## 14.7 File uploads
 

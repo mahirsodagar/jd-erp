@@ -2,13 +2,66 @@ from django.conf import settings
 from django.db import models
 
 
+class RelievingManager(models.Model):
+    """Relieving Managers master — one row per institute × level 1–4.
+
+    Legacy `hrsave.php` hard-coded four approver mailboxes (Academic
+    Manager → Vice Principal → Principal → Operations) for everyone.
+    This master is the "one step up": HR picks the four approvers per
+    institute from the employee list, with no deploy. Every application
+    is routed through all four; `services.submit` refuses to route while
+    any level is unset or its approver is inactive.
+    """
+
+    LEVELS = (1, 2, 3, 4)
+    DEFAULT_LABELS = {
+        1: "Academic Manager",
+        2: "Vice Principal",
+        3: "Principal",
+        4: "Operations / HR",
+    }
+
+    institute = models.ForeignKey(
+        "master.Institute", on_delete=models.PROTECT,
+        related_name="relieving_managers",
+    )
+    level = models.PositiveSmallIntegerField()  # 1..4
+    label = models.CharField(
+        max_length=60,
+        help_text="Shown as the level's title (e.g. 'Vice Principal').",
+    )
+    approver = models.ForeignKey(
+        "employees.Employee", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="relieving_manager_levels",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+    )
+
+    class Meta:
+        ordering = ("institute", "level")
+        unique_together = (("institute", "level"),)
+
+    def __str__(self):
+        return f"{self.institute_id} L{self.level} {self.label} → {self.approver_id}"
+
+
 class RelievingApplication(models.Model):
     """Exit workflow. Submitted by the employee (or by HR on behalf),
-    walks through up to 4 approvals snapshotted at submission time
-    (RM1, RM2, Principal, HR), or is accepted directly by HR. Completion
-    issues both letter numbers and mails the relieving letter; HR sends
-    the experience letter separately.
+    walks through the 4 approvals snapshotted at submission time from
+    the institute's `RelievingManager` master. Completion of a RELIEVING
+    application issues both letter numbers and mails the relieving
+    letter; HR sends the experience letter separately. A PART_TIME
+    application (legacy "Full time to Part time", rltype=2) runs the
+    same chain but completion only records the decision — no letters,
+    employee stays active.
     """
+
+    class Type(models.TextChoices):
+        RELIEVING = "RELIEVING", "Relieving"
+        PART_TIME = "PART_TIME", "Full-time to Part-time"
 
     class Status(models.TextChoices):
         SUBMITTED = "SUBMITTED", "Submitted"
@@ -21,6 +74,10 @@ class RelievingApplication(models.Model):
     employee = models.ForeignKey(
         "employees.Employee", on_delete=models.PROTECT,
         related_name="relieving_applications",
+    )
+    application_type = models.CharField(
+        max_length=12, choices=Type.choices, default=Type.RELIEVING,
+        db_index=True,
     )
     reason = models.TextField()
     last_working_date_requested = models.DateField()
@@ -75,23 +132,31 @@ class RelievingApplication(models.Model):
     def __str__(self):
         return f"Relieving {self.id} for {self.employee_id} ({self.status})"
 
+    @property
+    def is_relieving(self) -> bool:
+        return self.application_type == self.Type.RELIEVING
+
 
 class RelievingApproval(models.Model):
-    """Per-level approval row. Approver is snapshotted from the
-    employee's reporting_manager_<level> at submission time so later
-    RM changes don't reroute already-pending applications."""
+    """Per-level approval row. Approver (and the level's label) are
+    snapshotted from the institute's `RelievingManager` master at
+    submission time so later master edits don't reroute already-pending
+    applications."""
 
     class Status(models.TextChoices):
         PENDING = "PENDING", "Pending"
         APPROVED = "APPROVED", "Approved"
         REJECTED = "REJECTED", "Rejected"
-        SKIPPED = "SKIPPED", "Skipped (RM not configured)"
+        # Only when the level's approver is the applicant themselves
+        # (e.g. the Principal resigning) — nobody approves their own exit.
+        SKIPPED = "SKIPPED", "Skipped"
 
     application = models.ForeignKey(
         RelievingApplication, on_delete=models.CASCADE,
         related_name="approvals",
     )
     level = models.PositiveSmallIntegerField()  # 1..4
+    label = models.CharField(max_length=60, blank=True)
     approver = models.ForeignKey(
         "employees.Employee", null=True, blank=True,
         on_delete=models.SET_NULL, related_name="relieving_approvals",

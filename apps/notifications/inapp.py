@@ -8,6 +8,7 @@ that triggered it (a task save, a leave decision, a timetable publish).
 import logging
 
 from django.contrib.auth import get_user_model
+from django.db.models import Q
 
 from .models import InAppNotification
 
@@ -57,4 +58,19 @@ def user_by_email(email: str):
     email = (email or "").strip()
     if not email:
         return None
-    return User.objects.filter(email__iexact=email, is_active=True).first()
+    user = User.objects.filter(email__iexact=email, is_active=True).first()
+    if user is not None:
+        return user
+    # The snapshot is the manager's *employee* email; their portal login
+    # may use a different address. Fall back to the employee record.
+    from apps.employees.models import Employee
+
+    emp = (
+        Employee.objects.filter(
+            Q(email_primary__iexact=email) | Q(email_alternate__iexact=email),
+            user_account__isnull=False, user_account__is_active=True,
+        )
+        .select_related("user_account")
+        .first()
+    )
+    return emp.user_account if emp is not None else None

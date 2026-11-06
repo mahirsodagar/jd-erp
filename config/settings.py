@@ -787,6 +787,7 @@ EMAIL_SENDER_DOMAIN_POLICY = {
     "leaves.compoff_status_employee.email":       "HR",
     "hr.relieving.application.email":             "HR",
     "hr.relieving.application_rejected.email":     "HR",
+    "hr.relieving.application_approved.email":     "HR",
     "hr.relieving.experience_letter.email":        "HR",
     "hr.relieving.letter.email":                   "HR",
 }
@@ -886,11 +887,11 @@ UNDERTAKING_CAMPUS_INBOXES = {
     "VJY": env("UNDERTAKING_INBOX_VJY", default=""),
 }
 
-# Relieving approval chain: L1/L2 come from the employee's reporting
-# managers; L3 and L4 are fixed institute-wide (Principal, then HR — the
-# final approver, whose approval issues the letters). Each is matched to
-# an Employee by `email_primary`. Blank / no matching active employee =
-# fall back to that employee's reporting_manager_3 / _4.
+# Relieving approval chain: L1–L4 per institute live in the Relieving
+# Managers master (HR → Relieving Managers), not here. These two are
+# read ONLY by migration relieving.0003 to pre-fill L3 / L4 from the
+# old fixed approvers on an existing deployment; safe to drop from .env
+# once that migration has run.
 RELIEVING_L3_APPROVER_EMAIL = env(
     "RELIEVING_L3_APPROVER_EMAIL", default="principal@jdinstitute.edu.in",
 )
@@ -913,6 +914,7 @@ SMTP_INTERNAL_TEMPLATE_KEYS = {
     "leaves.compoff_status_employee.email",
     "hr.relieving.application.email",
     "hr.relieving.application_rejected.email",
+    "hr.relieving.application_approved.email",
     "hr.relieving.experience_letter.email",
     "hr.relieving.letter.email",
     "tasks.assigned.email",

@@ -1,45 +1,99 @@
-"""Submit / decide / accept / finalize / withdraw flows for relieving."""
+"""Submit / decide / finalize / withdraw flows for relieving, plus the
+Relieving Managers master helpers."""
 
 import re
 from datetime import datetime
 
-from django.conf import settings
 from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 
 from apps.employees.models import Employee
+from apps.master.models import Institute
 
-from .models import RelievingApplication, RelievingApproval
-
-
-# --- Helpers --------------------------------------------------------
-
-def _fixed_approver(email: str, *, applicant: Employee) -> Employee | None:
-    """Active employee whose primary email is `email`. Never the
-    applicant themselves — nobody approves their own exit."""
-    if not email:
-        return None
-    return (Employee.objects
-            .filter(email_primary__iexact=email.strip(),
-                    status=Employee.Status.ACTIVE)
-            .exclude(pk=applicant.pk)
-            .first())
+from .models import RelievingApplication, RelievingApproval, RelievingManager
 
 
-def _approval_chain_for(employee: Employee) -> list[Employee | None]:
-    """Snapshot at submission time: reporting_manager_1 and _2, then the
-    institute-wide L3 (Principal) and L4 (HR) from settings. L3/L4 fall
-    back to reporting_manager_3/_4 when the setting is blank or matches
-    no active employee."""
-    l3 = _fixed_approver(settings.RELIEVING_L3_APPROVER_EMAIL, applicant=employee)
-    l4 = _fixed_approver(settings.RELIEVING_L4_APPROVER_EMAIL, applicant=employee)
-    return [
-        employee.reporting_manager_1,
-        employee.reporting_manager_2,
-        l3 or employee.reporting_manager_3,
-        l4 or employee.reporting_manager_4,
-    ]
+# --- Relieving Managers master --------------------------------------
+
+def managers_for(institute: Institute) -> list[RelievingManager]:
+    """The institute's four master rows, in level order. Missing levels
+    are created on the fly (approver unset) so the master page and the
+    router always see exactly four rows."""
+    existing = {
+        m.level: m
+        for m in RelievingManager.objects
+        .filter(institute=institute)
+        .select_related("approver")
+    }
+    out = []
+    for level in RelievingManager.LEVELS:
+        row = existing.get(level)
+        if row is None:
+            row = RelievingManager.objects.create(
+                institute=institute, level=level,
+                label=RelievingManager.DEFAULT_LABELS[level],
+            )
+        out.append(row)
+    return out
+
+
+@transaction.atomic
+def save_managers(*, institute: Institute, levels: list[dict],
+                  updated_by) -> list[RelievingManager]:
+    """`levels` = [{level, approver (Employee|None), label}]. Levels not
+    mentioned are left untouched. Each approver must be an ACTIVE
+    employee; the same person may hold more than one level (legacy let
+    the Principal double up), but that is HR's call, not enforced."""
+    by_level = {m.level: m for m in managers_for(institute)}
+    for item in levels:
+        row = by_level[item["level"]]
+        approver = item.get("approver")
+        if approver is not None and approver.status != Employee.Status.ACTIVE:
+            raise ValueError(
+                f"L{row.level}: {approver.full_name} is not an active employee."
+            )
+        row.approver = approver
+        if (label := (item.get("label") or "").strip()):
+            row.label = label
+        row.updated_by = updated_by
+        row.save(update_fields=["approver", "label", "updated_by", "updated_at"])
+    return [by_level[level] for level in RelievingManager.LEVELS]
+
+
+class ChainNotConfigured(ValueError):
+    """Raised by `submit` when the institute's master is incomplete."""
+
+
+def _approval_chain_for(employee: Employee) -> list[tuple[str, Employee | None]]:
+    """Snapshot at submission time: the applicant's institute's L1–L4
+    from the master. Every level must have an active approver — an
+    unset or inactive level blocks submission (user rule 2026-11-06:
+    every application truly gets four approvals; HR fixes the master
+    first). The one exception is the applicant themselves holding a
+    level (the Principal resigning): that level is returned as None
+    and recorded SKIPPED, since nobody approves their own exit."""
+    rows = managers_for(employee.institute)
+    missing: list[str] = []
+    chain: list[tuple[str, Employee | None]] = []
+    for row in rows:
+        approver = row.approver
+        if approver is None:
+            missing.append(f"L{row.level} ({row.label}) is not set")
+        elif approver.status != Employee.Status.ACTIVE:
+            missing.append(
+                f"L{row.level} ({row.label}) {approver.full_name} is inactive"
+            )
+        elif approver.pk == employee.pk:
+            approver = None  # self — skipped
+        chain.append((row.label, approver))
+    if missing:
+        raise ChainNotConfigured(
+            f"Relieving managers are not fully configured for "
+            f"{employee.institute.name}: {'; '.join(missing)}. "
+            "Ask HR to complete the Relieving Managers master."
+        )
+    return chain
 
 
 def _generate_letter_no(*, kind: str, institute_code: str,
@@ -65,28 +119,29 @@ def _generate_letter_no(*, kind: str, institute_code: str,
 
 @transaction.atomic
 def submit(*, employee: Employee, reason: str,
-           last_working_date_requested, submitted_by) -> RelievingApplication:
-    """Create the application + 4 approval rows (some SKIPPED if RM
-    not configured at that level)."""
+           last_working_date_requested, submitted_by,
+           application_type: str = RelievingApplication.Type.RELIEVING,
+           ) -> RelievingApplication:
+    """Create the application + 4 approval rows snapshotted from the
+    institute's Relieving Managers master. Raises `ChainNotConfigured`
+    when any level is unset or inactive."""
     chain = _approval_chain_for(employee)
-    if chain[0] is None:
-        raise ValueError(
-            "Employee has no reporting_manager_1; relieving cannot be routed."
-        )
 
     app = RelievingApplication.objects.create(
         employee=employee, reason=reason,
+        application_type=application_type,
         last_working_date_requested=last_working_date_requested,
         submitted_by=submitted_by,
         status=RelievingApplication.Status.SUBMITTED,
     )
-    for i, mgr in enumerate(chain, start=1):
+    for i, (label, mgr) in enumerate(chain, start=1):
         RelievingApproval.objects.create(
-            application=app, level=i, approver=mgr,
+            application=app, level=i, label=label, approver=mgr,
             status=(
                 RelievingApproval.Status.SKIPPED if mgr is None
                 else RelievingApproval.Status.PENDING
             ),
+            remarks="" if mgr else "Skipped — approver is the applicant.",
         )
     return app
 
@@ -148,8 +203,8 @@ def decide(*, approval: RelievingApproval, decision: str,
         app.status = RelievingApplication.Status.IN_REVIEW
     app.save(update_fields=["status", "updated_at"])
 
-    # Final approval issues the letters straight away (legacy parity:
-    # the L4 approval in hrsave.php generated the relieving letter).
+    # Final approval completes straight away (legacy parity: the L4
+    # approval in hrsave.php generated the relieving letter).
     if pending == 0:
         finalize(
             application=app,
@@ -159,39 +214,7 @@ def decide(*, approval: RelievingApproval, decision: str,
     return approval
 
 
-# --- Accept directly (HR) -------------------------------------------
-
-@transaction.atomic
-def accept(*, application: RelievingApplication, last_working_date_approved,
-           accepted_by, remarks: str = "",
-           set_inactive: bool = True) -> RelievingApplication:
-    """HR accepts the resignation in one step: every still-pending level
-    is approved on HR's behalf (recorded as such in the chain), then the
-    application is finalized."""
-    if application.status not in (
-        RelievingApplication.Status.SUBMITTED,
-        RelievingApplication.Status.IN_REVIEW,
-    ):
-        raise ValueError(f"Application is {application.status}; cannot accept.")
-
-    note = "Accepted directly by HR." + (f" {remarks}" if remarks else "")
-    application.approvals.filter(
-        status=RelievingApproval.Status.PENDING,
-    ).update(
-        status=RelievingApproval.Status.APPROVED,
-        remarks=note, decided_at=timezone.now(), decided_by=accepted_by,
-    )
-    application.status = RelievingApplication.Status.APPROVED
-    application.save(update_fields=["status", "updated_at"])
-
-    return finalize(
-        application=application,
-        last_working_date_approved=last_working_date_approved,
-        finalized_by=accepted_by, set_inactive=set_inactive,
-    )
-
-
-# --- Finalize (letters issued) --------------------------------------
+# --- Finalize --------------------------------------------------------
 # Called by `decide` on the final approval. The HR finalize endpoint
 # remains only for applications approved before that was automatic.
 
@@ -199,30 +222,36 @@ def accept(*, application: RelievingApplication, last_working_date_approved,
 def finalize(*, application: RelievingApplication,
              last_working_date_approved, finalized_by,
              set_inactive: bool = True) -> RelievingApplication:
+    """RELIEVING: stamp both letter numbers, COMPLETE, deactivate the
+    employee. PART_TIME: COMPLETE only — the employee record is updated
+    by HR by hand (legacy parity), no letters."""
     if application.status != RelievingApplication.Status.APPROVED:
         raise ValueError(
             f"Application status is {application.status}; "
             "must be APPROVED before finalize."
         )
 
-    inst_code = application.employee.institute.code
     application.last_working_date_approved = last_working_date_approved
-    application.relieving_letter_no = _generate_letter_no(
-        kind="REL", institute_code=inst_code,
-    )
-    application.experience_letter_no = _generate_letter_no(
-        kind="EXP", institute_code=inst_code,
-    )
     application.status = RelievingApplication.Status.COMPLETED
     application.finalized_at = timezone.now()
     application.finalized_by = finalized_by
-    application.save(update_fields=[
-        "last_working_date_approved",
-        "relieving_letter_no", "experience_letter_no",
-        "status", "finalized_at", "finalized_by", "updated_at",
-    ])
+    fields = [
+        "last_working_date_approved", "status",
+        "finalized_at", "finalized_by", "updated_at",
+    ]
 
-    if set_inactive:
+    if application.is_relieving:
+        inst_code = application.employee.institute.code
+        application.relieving_letter_no = _generate_letter_no(
+            kind="REL", institute_code=inst_code,
+        )
+        application.experience_letter_no = _generate_letter_no(
+            kind="EXP", institute_code=inst_code,
+        )
+        fields += ["relieving_letter_no", "experience_letter_no"]
+    application.save(update_fields=fields)
+
+    if application.is_relieving and set_inactive:
         application.employee.set_status(
             Employee.Status.INACTIVE,
             reason=(f"Relieved — relieving letter {application.relieving_letter_no}, "

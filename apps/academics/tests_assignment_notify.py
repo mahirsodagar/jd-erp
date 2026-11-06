@@ -97,9 +97,48 @@ class AssignmentNotifyTests(TestCase):
         c.force_authenticate(self.admin)
         return c.post("/api/academics/assignments/", {
             "subject": self.subject.pk, "program": self.program.pk,
+            "campus": self.b1.campus_id,
             "batch": self.b1.pk, "title": "T", "max_marks": "10",
             "due_date": "2026-11-20T12:30:00Z", "is_published": published,
         }, format="json")
+
+    def test_create_requires_campus_and_batch_must_match_it(self):
+        c = APIClient()
+        c.force_authenticate(self.admin)
+        body = {"subject": self.subject.pk, "program": self.program.pk,
+                "title": "T", "max_marks": "10",
+                "due_date": "2026-11-20T12:30:00Z"}
+        r = c.post("/api/academics/assignments/", body, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("campus", r.json())
+        other = Campus.objects.create(name="Other", code="OTH")
+        r = c.post("/api/academics/assignments/",
+                   {**body, "campus": other.pk, "batch": self.b1.pk},
+                   format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("batch", r.json())
+
+    def test_program_wide_reach_is_limited_to_the_campus(self):
+        other = Campus.objects.create(name="Other", code="OTH")
+        b3 = Batch.objects.create(name="BD-3", program=self.program,
+                                  campus=other, academic_year=self.b1.academic_year)
+        s = Student.objects.create(
+            application_form_id="AF-9", student_name="Student 9",
+            student_email="s9@example.com", gender="M", dob="2000-01-01",
+            nationality="INDIAN", category="GENERAL",
+            institute=self.program.institute, campus=other,
+            program=self.program, academic_year=self.b1.academic_year,
+        )
+        Enrollment.objects.create(
+            student=s, program=self.program, semester=self.sem1, campus=other,
+            batch=b3, academic_year=self.b1.academic_year,
+            status=Enrollment.Status.ACTIVE)
+        # Campus-less (legacy) rows still reach every campus.
+        a = self._assignment(batch=None)
+        self.assertIn("s9@example.com", self._emails(a))
+        a.campus = self.b1.campus
+        self.assertEqual(self._emails(a),
+                         ["s1@example.com", "s2@example.com", "s3@example.com"])
 
     @mock.patch.object(an, "schedule_assignment_assigned")
     def test_create_published_schedules_mail(self, sched):

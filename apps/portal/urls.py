@@ -9,7 +9,7 @@ from .views import (
     ChangePasswordView, CoursewareListView, CoursewareSubjectsView,
     DashboardView, DocumentRequestListCreateView,
     FeedbackLinkView, FeedbackOptionsView,
-    LeaveListCreateView, LessonListView, MeView,
+    LeaveListCreateView, LeaveMentorsView, LessonListView, MeView,
     QualificationListCreateView, TestDetailView, TestListView,
     TestResultView, TestSubjectsView, TestSubmitView, TimetableView,
 )
@@ -58,6 +58,8 @@ urlpatterns = [
 
     # Leaves
     path("leaves/", LeaveListCreateView.as_view(), name="portal-leaves"),
+    path("leaves/mentors/", LeaveMentorsView.as_view(),
+         name="portal-leave-mentors"),
 
     # Document requests
     path("document-requests/", DocumentRequestListCreateView.as_view(),
