@@ -31,6 +31,7 @@ from apps.payments.registration_fee import (
     registration_payment_summary, settle_registration_payment_on_enrollment,
 )
 from apps.payments.tests_razorpay import PAID_UPI, RZP_ON, _link
+from apps.payments.tests_smartgateway import SG_ON
 
 MAIL = dict(
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
@@ -136,13 +137,22 @@ class RegistrationFeeAtApplicationTests(RequiredFixture):
         self.assertEqual(r.status_code, 201, r.content)
         return r.json()
 
-    def test_jdsd_applicants_are_offered_it_on_razorpay_too(self):
+    @override_settings(**SG_ON)
+    def test_jdsd_applicants_are_offered_it_on_smartgateway(self):
+        """User rule 2026-11-06: JDSD registration settles to the Trust
+        through SmartGateway, not Razorpay."""
         data = self._jdsd_submit()
         rp = data["registration_payment"]
-        self.assertEqual((rp["status"], rp["gateway"]), ("DUE", "razorpay"))
-        pr = PaymentRequest.objects.get()
-        self.assertEqual((pr.gateway, pr.account), ("razorpay", "JDIFT_ROYALTY"))
+        self.assertEqual((rp["status"], rp["gateway"]), ("DUE", "smartgateway"))
+        pr = self._request(self._student())
+        self.assertEqual((pr.gateway, pr.account), ("smartgateway", "JDSD_TRUST"))
         self.assertIn("Registration fee", mail.outbox[0].body)
+
+    @override_settings(SMARTGATEWAY_ENABLED=False)
+    def test_jdsd_registration_does_not_fall_back_to_razorpay(self):
+        data = self._jdsd_submit()
+        self.assertIsNone(data["registration_payment"])
+        self.assertEqual(PaymentRequest.objects.count(), 0)
 
     @override_settings(REGISTRATION_FEE_AT_APPLICATION_INSTITUTES=["JDIFT"])
     def test_the_setting_can_still_restrict_it_to_an_institute(self):

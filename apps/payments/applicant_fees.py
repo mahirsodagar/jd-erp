@@ -8,8 +8,10 @@ is submitted. It lists the whole fee structure from the fee template
 offers a pay button on each row the institute collects online at this
 stage:
 
-- **Registration fee** — payable for every institute, through Razorpay
-  (JDIFT Royalty account), as before.
+- **Registration fee** — payable for every institute: JDIFT through
+  Razorpay (JDIFT Royalty account), JDSD through HDFC SmartGateway into
+  JD Educational Trust (client rule 2026-11-06 — a JDSD program never
+  touches Razorpay).
 - **Course fee** and **other fee** — payable for JDSD only, through HDFC
   SmartGateway into JD Educational Trust, the same route as a JDSD
   installment or ad-hoc fee. JDIFT students pay those at the college, so

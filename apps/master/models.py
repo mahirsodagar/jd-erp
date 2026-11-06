@@ -5,6 +5,17 @@ from django.db import models
 from django.utils.text import slugify
 
 
+class InstituteDeletionRefused(Exception):
+    """Raised when something tries to delete an Institute row."""
+
+
+class InstituteQuerySet(models.QuerySet):
+    def delete(self):
+        raise InstituteDeletionRefused(
+            "Institutes are never deleted — set is_active=False instead."
+        )
+
+
 class Institute(models.Model):
     """Top-level legal entity.
 
@@ -12,7 +23,16 @@ class Institute(models.Model):
     NOT own Campuses. A campus hosts whichever programs are offered
     there, so a single campus can serve several institutes at once —
     reach them via `Campus.institutes`.
+
+    **Never deleted** (user rule 2026-11-06): the two institutes are the
+    legal entities every receipt, payment route and program hangs off,
+    so a row can only be disabled (`is_active=False`). The API has no
+    DELETE, the admin has no delete action, and both `Institute.delete`
+    and `Institute.objects.delete()` refuse — a stray script can't
+    cascade through programs and enrolments either.
     """
+
+    objects = InstituteQuerySet.as_manager()
 
     name = models.CharField(max_length=160, unique=True)
     code = models.CharField(max_length=20, unique=True)
@@ -86,6 +106,11 @@ class Institute(models.Model):
 
     def __str__(self):
         return self.name
+
+    def delete(self, *args, **kwargs):
+        raise InstituteDeletionRefused(
+            f"Institute {self.code!r} cannot be deleted — disable it instead."
+        )
 
     @property
     def cheque_payee(self) -> str:

@@ -157,9 +157,9 @@ class SendFeeLinkTests(TestCase):
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
 )
 class RowSendFeeLinkTests(SendFeeLinkTests):
-    """Per-row "Send link" (student details → Fees): any unpaid row,
-    registration on Razorpay, course installments and other fees on
-    SmartGateway, nothing at all for JDIFT."""
+    """Per-row "Send link" (student details → Fees): any unpaid row.
+    Every JDSD row on SmartGateway (registration included, user rule
+    2026-11-06); for JDIFT only the registration row, on Razorpay."""
 
     def _client(self):
         client = APIClient()
@@ -177,16 +177,29 @@ class RowSendFeeLinkTests(SendFeeLinkTests):
         pr = PaymentRequest.objects.get(pk=body["payment_request_id"])
         self.assertEqual((pr.installment_id, pr.account), (i2.id, "JDSD_TRUST"))
 
-    def test_registration_row_goes_to_razorpay(self):
-        enrollment, *_ = self._enroll(self.jdsd)
-        reg = Installment.objects.create(
+    def _registration_row(self, institute):
+        enrollment, *_ = self._enroll(institute)
+        return Installment.objects.create(
             enrollment=enrollment, kind=Installment.Kind.REGISTRATION,
             sequence=0, due_date=date(2026, 6, 1), amount=Decimal("11800"),
         )
+
+    def test_jdift_registration_row_goes_to_razorpay(self):
+        reg = self._registration_row(self.jdift)
         r = self._client().post(reverse("installment-send-fee-link", args=[reg.id]))
         self.assertEqual(r.status_code, 200, r.content)
         self.assertEqual(r.json()["gateway"], "razorpay")
         self.assertEqual(r.json()["installment"], "Registration fee")
+        pr = PaymentRequest.objects.get(pk=r.json()["payment_request_id"])
+        self.assertEqual(pr.account, "JDIFT_ROYALTY")
+
+    def test_jdsd_registration_row_goes_to_smartgateway_trust(self):
+        reg = self._registration_row(self.jdsd)
+        r = self._client().post(reverse("installment-send-fee-link", args=[reg.id]))
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["gateway"], "smartgateway")
+        pr = PaymentRequest.objects.get(pk=r.json()["payment_request_id"])
+        self.assertEqual(pr.account, "JDSD_TRUST")
 
     def test_paid_row_is_refused(self):
         enrollment, i1, _ = self._enroll(self.jdsd)

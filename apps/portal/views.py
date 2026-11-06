@@ -351,6 +351,10 @@ class AssignmentSubmitView(APIView):
             else AssignmentSubmission.Status.SUBMITTED
         )
         sub.save()
+        from apps.academics.assignment_notify import (
+            schedule_assignment_submitted,
+        )
+        schedule_assignment_submitted(sub)
 
         return Response(
             PortalAssignmentSerializer(

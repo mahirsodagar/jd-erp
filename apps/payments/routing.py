@@ -1,16 +1,17 @@
 """Which gateway and which bank account a fee is paid into.
 
 JD collects into three bank accounts, owned by two legal entities, and
-the client's rule for choosing between them (2026-11-02, replacing the
-2026-10-26 table, which sent JDSD's registration fee to SmartGateway):
+the client's rule for choosing between them (2026-11-06, replacing the
+2026-11-02 table, which sent JDSD's registration fee to Razorpay too):
 
-1. **Registration fee, every institute and centre** — through
-   **Razorpay** into JD Institute of Fashion Technology ROYALTY,
-   A/c 50200123417910. Both the fee paid straight after the application
-   form and the "Send link" on the REGISTRATION installment row.
+1. **JDIFT registration fee, every centre** — through **Razorpay** into
+   JD Institute of Fashion Technology ROYALTY, A/c 50200123417910. Both
+   the fee paid straight after the application form and the "Send link"
+   on the REGISTRATION installment row. Razorpay carries nothing else.
 2. **JDSD** (B.Sc / M.Sc / B.Des / M.Des) — JD Educational Trust,
-   A/c 50100515602102, through **HDFC SmartGateway**: application fee,
-   every course installment and every "other" fee.
+   A/c 50100515602102, through **HDFC SmartGateway** for *every* fee:
+   application, registration, every course installment and every
+   "other" fee.
 3. **JDIFT application fee** — through **HDFC SmartGateway** (user's
    rule, 2026-11-02: "application fees should be paid through
    SmartGateway for all programs and institutes"), settling to the JDIFT
@@ -20,7 +21,8 @@ the client's rule for choosing between them (2026-11-02, replacing the
    `SMARTGATEWAY_JDIFT_MAIN_LIVE=True` per environment.
 
 Anything the table does not cover (JDIFT course installments and other
-fees, a program with no institute) resolves to **no route**, which
+fees, a program with no institute, any institute other than these two)
+resolves to **no route**, which
 means "no online payment": JDIFT students pay those at the college
 (user, 2026-11-02), so the per-row "Send link" is hidden for them. The
 older enrollment-level link falls back to the manual fee page (our
@@ -79,13 +81,13 @@ ACCOUNTS = {
 #: per environment with settings.PAYMENT_ROUTES.
 DEFAULT_ROUTES = [
     {
-        "fee": FEE_REGISTRATION,
-        "gateway": GATEWAY_RAZORPAY, "account": "JDIFT_ROYALTY",
+        "institute": "JDSD",
+        "fee": [FEE_APPLICATION, FEE_REGISTRATION, FEE_INSTALLMENT, FEE_OTHER],
+        "gateway": GATEWAY_SMARTGATEWAY, "account": "JDSD_TRUST",
     },
     {
-        "institute": "JDSD",
-        "fee": [FEE_APPLICATION, FEE_INSTALLMENT, FEE_OTHER],
-        "gateway": GATEWAY_SMARTGATEWAY, "account": "JDSD_TRUST",
+        "institute": "JDIFT", "fee": FEE_REGISTRATION,
+        "gateway": GATEWAY_RAZORPAY, "account": "JDIFT_ROYALTY",
     },
     {
         "institute": "JDIFT", "fee": FEE_APPLICATION,

@@ -723,7 +723,10 @@ class AssignmentListCreateView(APIView):
         s = AssignmentSerializer(data=request.data,
                                  context={"request": request})
         s.is_valid(raise_exception=True)
-        s.save(created_by=request.user)
+        a = s.save(created_by=request.user)
+        if a.is_published:
+            from .assignment_notify import schedule_assignment_assigned
+            schedule_assignment_assigned(a)
         return Response(s.data, status=http.HTTP_201_CREATED)
 
 
@@ -749,10 +752,15 @@ class AssignmentDetailView(APIView):
                 or has_perm(request.user, "academics.assignment.edit_any")):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
+        was_published = a.is_published
         s = AssignmentSerializer(a, data=request.data, partial=True,
                                  context={"request": request})
         s.is_valid(raise_exception=True)
-        s.save()
+        a = s.save()
+        if a.is_published and not was_published:
+            # Unpublished → published: students see it for the first time.
+            from .assignment_notify import schedule_assignment_assigned
+            schedule_assignment_assigned(a)
         return Response(s.data)
 
     def delete(self, request, pk):
@@ -907,6 +915,8 @@ class StudentSubmitView(APIView):
         sub.submitted_at = timezone.now()
         sub.status = submission_status_after_save(sub)
         sub.save()
+        from .assignment_notify import schedule_assignment_submitted
+        schedule_assignment_submitted(sub)
         return Response(AssignmentSubmissionSerializer(
             sub, context={"request": request}).data, status=http.HTTP_200_OK)
 
@@ -1131,6 +1141,68 @@ class MyTranscriptView(APIView):
                 status=http.HTTP_400_BAD_REQUEST,
             )
         return Response(build_transcript(student=student, only_published=True))
+
+
+# --- Printed transcript + marks card (legacy academic_transcript.php /
+# academic_report.php). Published marks only: these go to the student.
+
+def _transcript_pdf_response(student, kind: str) -> HttpResponse:
+    from .transcript_pdf import render_marks_card_pdf, render_transcript_pdf
+
+    if kind == "marks-card":
+        pdf, stem = render_marks_card_pdf(student), "marks-card"
+    else:
+        pdf, stem = render_transcript_pdf(student), "academic-transcript"
+    resp = HttpResponse(pdf, content_type="application/pdf")
+    name = (student.registration_number or student.application_form_id
+            or student.pk)
+    resp["Content-Disposition"] = f'inline; filename="{stem}-{name}.pdf"'
+    return resp
+
+
+class StudentTranscriptPdfView(APIView):
+    """GET /transcript/student/{pk}/pdf/ and /transcript/student/{pk}/
+    marks-card/ — same visibility rule as the JSON transcript."""
+
+    permission_classes = [IsAuthenticated]
+    kind = "transcript"
+
+    def get(self, request, pk):
+        from apps.admissions.models import Student
+        try:
+            student = Student.objects.select_related(
+                "institute", "campus", "program", "academic_year",
+            ).get(pk=pk)
+        except Student.DoesNotExist as e:
+            raise Http404 from e
+        u = request.user
+        is_self = (student.user_account_id == u.id)
+        if not (u.is_superuser or is_self
+                or has_perm(u, "academics.transcript.view_any")):
+            raise Http404
+        return _transcript_pdf_response(student, self.kind)
+
+
+class StudentMarksCardPdfView(StudentTranscriptPdfView):
+    kind = "marks-card"
+
+
+class MyTranscriptPdfView(APIView):
+    permission_classes = [IsAuthenticated]
+    kind = "transcript"
+
+    def get(self, request):
+        student = getattr(request.user, "student", None)
+        if student is None:
+            return Response(
+                {"detail": "No student record linked to this user."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+        return _transcript_pdf_response(student, self.kind)
+
+
+class MyMarksCardPdfView(MyTranscriptPdfView):
+    kind = "marks-card"
 
 
 # === G.5 — Certificates + Alumni ====================================

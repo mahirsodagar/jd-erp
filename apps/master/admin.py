@@ -82,6 +82,11 @@ class UniversityAdmin(admin.ModelAdmin):
 class InstituteAdmin(admin.ModelAdmin):
     list_display = ("name", "code", "gstin", "is_active")
     search_fields = ("name", "code", "gstin")
+    # Institutes are only ever disabled — see the model docstring.
+    actions = None
+
+    def has_delete_permission(self, request, obj=None):
+        return False
     fieldsets = (
         (None, {"fields": ("name", "code", "logo", "email_domain", "is_active")}),
         ("Letterhead (printed on fee receipts + undertakings)", {

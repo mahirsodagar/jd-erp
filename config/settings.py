@@ -675,7 +675,12 @@ MSG91_EMAIL_TEMPLATES = {
     "fees.application_fee_receipt.email":  "application_fee_receipt",
 
     # Academics — to students
-    "academics.assignment_assigned.email": "assignment_assigned",
+    # Vars VAR1 name, VAR2 subject, VAR3 title, VAR4 deadline, VAR5 mode
+    # (apps/academics/assignment_notify.py).
+    "academics.assignment_assigned.email": "assignmentassigned",
+    # Student submitted → faculty (vars Faculty_Name, Student_Name,
+    # Subject_Name, Assignment_Title).
+    "academics.assignment_submitted.email": "assignment_submitted",
 
     # Leaves — STUDENT leave status (employee leave stays on SMTP).
     "leaves.application_status_student.email": "leave_application_status_student",
@@ -687,6 +692,10 @@ MSG91_EMAIL_TEMPLATES = {
 
     # Student portal credential + reset (student-facing).
     "student.portal_credentials.email": "student_portal_credentials",
+    # Admin-issued temporary password — STAFF accounts only (the view
+    # skips student/parent accounts). Vars name, username, password,
+    # login_url.
+    "account.password_reset_by_admin.email": "password_reset_by_admin",
 
     # Lead / CRM — to leads (external prospects).
     # Vars: Student_Name, Course_Name, Application_Form_Link.
@@ -699,6 +708,10 @@ MSG91_EMAIL_TEMPLATES = {
     # Course_Name, Application_ID, Submission_Date). The campus/office copy
     # with the PDF stays on SMTP as admissions.form_submitted.email.
     "admissions.application_submitted.email": "application_submitted_3",
+    # Undertaking (fee schedule PDF attached via MSG91 attachments) —
+    # only for institutes in UNDERTAKING_MSG91_INSTITUTES; vars
+    # StudentName, CourseName. Sent from services_undertaking directly.
+    "admissions.undertaking.email": "undertaking_institute",
     # Lead moved to Inactive → "we'd love to stay in touch" (var First_Name).
     "lead.inactive.email":         "inactive_lead",
     # Lead moved to Non Responsive → follow-up (vars First_Name, Course_Name).
@@ -756,12 +769,15 @@ EMAIL_SENDER_DOMAIN_POLICY = {
     "lead.entrance_exam_link.email":       "jdinstitute.edu.in",
     # Student credentials / password reset → mail.jdinstitute.com.
     "student.portal_credentials.email":    "PORTAL",
+    "account.password_reset_by_admin.email": "PORTAL",
     # Student leave approved → mail.jdinstitute.com so it goes via MSG91.
     "student_leaves.accepted.email":       "PORTAL",
     "student_leaves.applied.email":        "PORTAL",
     # Inactive-lead nudge → mail.jdinstitute.com so it goes via MSG91.
     "lead.inactive.email":                 "PORTAL",
     "lead.non_responsive.email":           "PORTAL",
+    "academics.assignment_assigned.email": "PORTAL",
+    "academics.assignment_submitted.email": "PORTAL",
     "admissions.application_submitted.email": "PORTAL",
     # HR / leave / relieving workflows → jdinstitute.edu.in.
     "leaves.application_employee.email":          "HR",
@@ -855,6 +871,12 @@ APPLICATION_ACK_CAMPUS_INBOXES = {
 
 # Fee undertaking PDF (sent by staff from the enrollment) goes to the
 # student with the campus undertaking inbox in CC, keyed on `Campus.code`.
+# Institutes (Institute.code) whose undertaking goes via the MSG91
+# template above. The template is JDIFT-branded, so others stay on SMTP
+# until they get their own template. Empty list = everyone on SMTP.
+UNDERTAKING_MSG91_INSTITUTES = env.list(
+    "UNDERTAKING_MSG91_INSTITUTES", default=["JDIFT"],
+)
 UNDERTAKING_CAMPUS_INBOXES = {
     "BLR": env("UNDERTAKING_INBOX_BLR",
                default="undertaking.bangalore@jdinstitute.edu.in"),
@@ -895,7 +917,7 @@ SMTP_INTERNAL_TEMPLATE_KEYS = {
     "hr.relieving.letter.email",
     "tasks.assigned.email",
     "tasks.completed.email",
-    "account.password_reset_by_admin.email",
+    # account.password_reset_by_admin.email moved to MSG91 2026-11-06.
 }
 
 

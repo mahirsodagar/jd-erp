@@ -250,7 +250,18 @@ class AdminResetPasswordView(APIView):
             "delivery_error": "",
             "recipient": (target.email or "").strip(),
         }
-        if delivery["recipient"]:
+        # This mail (MSG91 `password_reset_by_admin`, "JD ERP password") is
+        # for STAFF only. Student / parent portal accounts get their login
+        # via "Send portal credentials" on the student record instead.
+        is_portal_account = (hasattr(target, "student")
+                             or hasattr(target, "parent_of_student"))
+        if is_portal_account:
+            delivery["delivery_error"] = (
+                "Password reset, but no email sent: this is a student/parent "
+                "portal account. Use 'Send portal credentials' on the "
+                "student record to email the login."
+            )
+        elif delivery["recipient"]:
             from apps.notifications.services import queue_notification
             from apps.notifications.models import NotificationDispatchLog
             base = getattr(

@@ -165,7 +165,7 @@ TEMPLATES = [
      "Please change your password after logging in.\n\n"
      "Sign in at: {login_url}\n\n"
      "If you didn't expect this, contact the admin team.\n\n"
-     "— JD Admissions"),
+     "— JD Admin"),
 
     # Student portal credentials (Student Detail → Reset & send creds).
     # Same routing pattern as the admin reset above. Variables:
@@ -239,6 +239,37 @@ TEMPLATES = [
      "  2. Pay your College Registration Fee to reserve the seat.\n\n"
      "Warm regards,\nAdmissions Team\n"
      "JD School of Design | JD Institute of Fashion Technology"),
+
+    # New assignment → each student. MSG91 template `assignmentassigned`
+    # (positional VAR1..VAR5); this body is the SMTP fallback.
+    ("academics.assignment_assigned.email", "EMAIL",
+     "New Assignment: {VAR3}",
+     "Dear {VAR1},\n\n"
+     "This is to inform you that a new assignment has been assigned to you.\n\n"
+     "Subject: {VAR2}\n\n"
+     "Assignment Details:\n"
+     "  Assignment Title    : {VAR3}\n"
+     "  Submission Deadline : {VAR4}\n"
+     "  Submission Mode     : {VAR5}\n\n"
+     "Instructions:\n"
+     "Please ensure that you complete and submit the assignment on or "
+     "before the specified deadline. Late submissions may not be accepted.\n\n"
+     "For any queries or assistance, please contact your respective faculty.\n\n"
+     "Thanks & Regards,\nJD Institute of Fashion Technology"),
+
+    # Student submitted an assignment → faculty. MSG91 template
+    # `assignment_submitted`; this body is the SMTP fallback.
+    ("academics.assignment_submitted.email", "EMAIL",
+     "Assignment submitted: {Assignment_Title} — {Student_Name}",
+     "Dear {Faculty_Name},\n\n"
+     "This is to inform you that the assigned assessment for "
+     "{Subject_Name} has been successfully submitted by the student.\n\n"
+     "  Student Name      : {Student_Name}\n"
+     "  Subject           : {Subject_Name}\n"
+     "  Assignment Title  : {Assignment_Title}\n"
+     "  Submission Status : Successfully Submitted\n\n"
+     "Thank you.\n\n"
+     "Regards,\n{Student_Name}\nJD Institute of Fashion Technology"),
 
     # Student leave submitted → batch mentor. MSG91 template
     # `student_leave_application_` (same 5 vars as accepted).

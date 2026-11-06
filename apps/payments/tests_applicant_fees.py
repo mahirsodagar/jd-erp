@@ -1,9 +1,9 @@
 """The "Pay fees" page after the application form (every institute).
 
 What matters: every applicant sees the whole fee structure; only the
-rows the route table names a gateway for get a pay button — the
-registration fee for all (Razorpay, Royalty), the course and other fee
-for JDSD only (SmartGateway, Trust). A course fee paid before enrolment
+rows the route table names a gateway for get a pay button — the JDIFT
+registration fee (Razorpay, Royalty); every JDSD row, registration
+included (SmartGateway, Trust). A course fee paid before enrolment
 is applied to the COURSE installments in order once the schedule is laid
 down; an other fee becomes an OtherFee row with its receipt. No network.
 """
@@ -32,8 +32,8 @@ from apps.payments.tests_razorpay import RZP_ON
 from apps.payments.tests_registration_fee import MAIL
 from apps.payments.tests_smartgateway import SG_ON, _order_body
 
-#: Both gateways on — Razorpay for the registration row, SmartGateway for
-#: the JDSD course/other rows.
+#: Both gateways on — Razorpay for the JDIFT registration row,
+#: SmartGateway for every JDSD row.
 BOTH_ON = {**SG_ON, **RZP_ON, "SMARTGATEWAY_ENABLED": True}
 
 
@@ -150,7 +150,7 @@ class ApplicantFeePageTests(RequiredFixture):
 
         reg = rows["REGISTRATION_FEE"]
         self.assertEqual((reg["status"], reg["gateway"], reg["amount"]),
-                         ("DUE", "razorpay", "30000.00"))
+                         ("DUE", "smartgateway", "30000.00"))
         course = rows["COURSE_FEE"]
         self.assertEqual((course["status"], course["gateway"], course["amount"]),
                          ("DUE", "smartgateway", "100000.00"))
@@ -164,7 +164,7 @@ class ApplicantFeePageTests(RequiredFixture):
         self.assertEqual(
             (self._request(student, REGISTRATION).gateway,
              self._request(student, REGISTRATION).account),
-            ("razorpay", "JDIFT_ROYALTY"),
+            ("smartgateway", "JDSD_TRUST"),
         )
         self.assertEqual(
             (self._request(student, COURSE).gateway, self._request(student, COURSE).account),
@@ -193,12 +193,21 @@ class ApplicantFeePageTests(RequiredFixture):
         self.assertEqual(row["reference"], "UPI123")
 
     @override_settings(SMARTGATEWAY_ENABLED=False)
-    def test_smartgateway_off_leaves_jdsd_course_row_without_a_button(self):
+    def test_smartgateway_off_leaves_every_jdsd_row_without_a_button(self):
+        """JDSD never falls back to Razorpay, registration included."""
+        data = self._submit(program=self.jdsd_program)
+        rows = _rows(data["fee_page"])
+        for kind in ("REGISTRATION_FEE", "COURSE_FEE", "OTHER_FEE_APPLICANT"):
+            self.assertEqual(rows[kind]["status"], "OFFLINE", kind)
+            self.assertEqual(rows[kind]["pay_url"], "", kind)
+        self.assertEqual(PaymentRequest.objects.count(), 0)
+
+    @override_settings(RAZORPAY_ENABLED=False)
+    def test_razorpay_off_does_not_touch_jdsd(self):
         data = self._submit(program=self.jdsd_program)
         rows = _rows(data["fee_page"])
         self.assertEqual(rows["REGISTRATION_FEE"]["status"], "DUE")
-        self.assertEqual(rows["COURSE_FEE"]["status"], "OFFLINE")
-        self.assertEqual(rows["COURSE_FEE"]["pay_url"], "")
+        self.assertEqual(rows["REGISTRATION_FEE"]["gateway"], "smartgateway")
 
     def test_template_with_a_program_year_still_counts(self):
         course = Course.objects.create(

@@ -92,6 +92,7 @@ def send_msg91_template(
     domain: str | None = None,
     timeout: int | None = None,
     dry_run: bool = False,
+    attachments: list[tuple[str, bytes, str]] | None = None,
 ) -> tuple[bool, str]:
     """POST a single-recipient transactional email through MSG91 v5.
 
@@ -100,6 +101,9 @@ def send_msg91_template(
 
     `variables` keys should match what the template author defined
     (typically VAR1, VAR2 ... — see the PHP wrappers for examples).
+
+    `attachments` = [(filename, bytes, mimetype)], sent inline as base64
+    data URIs in MSG91's top-level `attachments` array.
 
     `dry_run=True` skips the network call and returns the payload that
     would have been posted; useful for tests + initial wiring.
@@ -137,6 +141,16 @@ def send_msg91_template(
         "domain": domain,
         "template_id": template_name,
     }
+    if attachments:
+        import base64
+        payload["attachments"] = [
+            {
+                "fileName": name,
+                "file": (f"data:{mimetype};base64,"
+                         + base64.b64encode(content).decode("ascii")),
+            }
+            for name, content, mimetype in attachments
+        ]
 
     if dry_run or getattr(settings, "MSG91_DRY_RUN", False):
         return True, json.dumps(payload, indent=2)

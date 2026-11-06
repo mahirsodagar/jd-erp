@@ -169,12 +169,25 @@ class InstituteListCreateView(APIView):
 
 class InstituteDetailView(_MasterDetailMixin, APIView):
     """Overrides the mixin's read/write so `logo_url` can be built —
-    the serializer needs `request` in context to absolutise it."""
+    the serializer needs `request` in context to absolutise it.
+
+    No DELETE: an institute can only be disabled (PATCH is_active=false)
+    — see `Institute` for why. Overriding to 405 rather than inheriting
+    the mixin's deactivate-on-DELETE keeps "delete" out of the API
+    surface altogether.
+    """
 
     permission_classes = [IsAuthenticated, HasPerm]
     perm_base = "master.institute"
     model = Institute
     serializer = InstituteSerializer
+    http_method_names = ["get", "patch", "head", "options"]
+
+    def delete(self, request, pk):  # pragma: no cover - unreachable
+        return Response(
+            {"detail": "Institutes cannot be deleted; disable them instead."},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
 
     def get(self, request, pk):
         return Response(
