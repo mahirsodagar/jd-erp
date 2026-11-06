@@ -4,6 +4,7 @@ from django.contrib import admin
 from django.urls import include, path
 
 from apps.admissions.public_views import PublicApplicationView
+from apps.leads.website_webhook import WebsiteLeadWebhookView
 from apps.leads.exam_views import (
     PublicExamAttachmentDeleteView, PublicExamAttachmentView,
     PublicExamStartView, PublicExamSubmitView, PublicExamView,
@@ -54,6 +55,10 @@ urlpatterns = [
     # the X-Razorpay-Signature HMAC over the body.
     path("api/public/razorpay/webhook/",
          RazorpayWebhookView.as_view(), name="razorpay-webhook"),
+    # Website (WordPress Forminator) lead webhook — port of the legacy
+    # admin.jediiians.com/webhooks/webhook.php. Key via X-API-Key or ?key=.
+    path("api/public/website-lead/",
+         WebsiteLeadWebhookView.as_view(), name="website-lead-webhook"),
     path("api/", include("apps.accounts.urls")),
     path("api/", include("apps.roles.urls")),
     path("api/audit/", include("apps.audit.urls")),

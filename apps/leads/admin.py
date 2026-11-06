@@ -3,7 +3,30 @@ from django.contrib import admin
 from .models import (
     Counsellor, CounsellorRotation,
     Lead, LeadCommunication, LeadFollowup, LeadStatusHistory, LeadUtm,
+    WebsiteLeadEvent, WebsiteValueMap,
 )
+
+
+@admin.register(WebsiteValueMap)
+class WebsiteValueMapAdmin(admin.ModelAdmin):
+    list_display = ("kind", "website_value", "campus", "program", "source",
+                    "is_active", "updated_at")
+    list_filter = ("kind", "is_active")
+    search_fields = ("website_value",)
+    autocomplete_fields = ("program",)
+
+
+@admin.register(WebsiteLeadEvent)
+class WebsiteLeadEventAdmin(admin.ModelAdmin):
+    list_display = ("received_at", "form_title", "status", "lead", "remote_ip")
+    list_filter = ("status", "form_title")
+    search_fields = ("payload", "error")
+    readonly_fields = ("received_at", "remote_ip", "form_title", "payload",
+                       "status", "error", "warnings", "lead")
+    date_hierarchy = "received_at"
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(Counsellor)

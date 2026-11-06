@@ -30,6 +30,12 @@ class LeadIntakeThrottle(SimpleRateThrottle):
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
+class WebsiteWebhookThrottle(AnonRateThrottle):
+    """Throttle the website (Forminator) webhook per IP. Looser than
+    lead_intake because the whole website posts from one server."""
+    scope = "website_webhook"
+
+
 class PasswordChangeThrottle(UserRateThrottle):
     """Throttle password-change requests per authenticated user.
     Tighter than the default user rate to slow credential-replay /

@@ -329,6 +329,96 @@ class LeadUtm(models.Model):
     utm_content = models.CharField(max_length=200, blank=True)
 
 
+# --- Website (Forminator) webhook ---------------------------------------
+#
+# Port of legacy `admin/webhooks/webhook.php`. The public website posts
+# raw Forminator payloads (name_1, select_1, hidden_8 ...) that carry
+# free-text campus / course / form names. These two models translate
+# those strings into master rows and keep every raw payload so nothing
+# is lost when a mapping is missing.
+
+class WebsiteValueMap(models.Model):
+    """Admin-managed translation of a website string to a master row.
+
+    `website_value` is stored normalised (see website_webhook.normalise)
+    so "Fashion-Designing-Courses" and "Fashion Designing Courses" share
+    one row. The special value "*" is the fallback used when nothing
+    else matches, so a lead is still created instead of being dropped.
+    """
+
+    class Kind(models.TextChoices):
+        CAMPUS = "campus", "Campus"
+        PROGRAM = "program", "Program"
+        SOURCE = "source", "Lead source"
+
+    kind = models.CharField(max_length=10, choices=Kind.choices, db_index=True)
+    website_value = models.CharField(
+        max_length=200,
+        help_text='Normalised website text, or "*" for the fallback row.',
+    )
+    campus = models.ForeignKey(
+        "master.Campus", null=True, blank=True, on_delete=models.CASCADE,
+        related_name="+",
+    )
+    program = models.ForeignKey(
+        "master.Program", null=True, blank=True, on_delete=models.CASCADE,
+        related_name="+",
+    )
+    source = models.ForeignKey(
+        "master.LeadSource", null=True, blank=True, on_delete=models.CASCADE,
+        related_name="+",
+    )
+    is_active = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = (("kind", "website_value"),)
+        ordering = ("kind", "website_value")
+
+    def __str__(self):
+        return f"{self.kind}: {self.website_value!r}"
+
+    @property
+    def target(self):
+        return {
+            self.Kind.CAMPUS: self.campus,
+            self.Kind.PROGRAM: self.program,
+            self.Kind.SOURCE: self.source,
+        }[self.kind]
+
+
+class WebsiteLeadEvent(models.Model):
+    """One row per webhook call, stored BEFORE any mapping runs — the
+    replacement for the legacy log.txt. Lets admissions see dropped or
+    mis-mapped submissions and lets us replay them after fixing a map."""
+
+    class Status(models.TextChoices):
+        CREATED = "created", "Lead created"
+        DUPLICATE = "duplicate", "Lead created (duplicate)"
+        FAILED = "failed", "Failed"
+
+    received_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    remote_ip = models.GenericIPAddressField(null=True, blank=True)
+    form_title = models.CharField(max_length=200, blank=True, db_index=True)
+    payload = models.JSONField()
+    status = models.CharField(max_length=10, choices=Status.choices, db_index=True)
+    error = models.TextField(blank=True)
+    warnings = models.JSONField(
+        default=list, blank=True,
+        help_text="Values that fell back to a default (unmapped campus/course/source).",
+    )
+    lead = models.ForeignKey(
+        Lead, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="website_events",
+    )
+
+    class Meta:
+        ordering = ("-received_at",)
+
+    def __str__(self):
+        return f"{self.received_at:%Y-%m-%d %H:%M} {self.form_title} [{self.status}]"
+
+
 # Entrance Exam models live in a separate module for readability; re-export
 # them here so Django registers them under the `leads` app_label.
 from .exam_models import (  # noqa: E402,F401

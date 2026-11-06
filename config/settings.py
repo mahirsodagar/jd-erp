@@ -171,6 +171,9 @@ REST_FRAMEWORK = {
         "forgot_password": env("THROTTLE_FORGOT_PASSWORD", default="5/hour"),
         # Public lead intake — per (API key, IP).
         "lead_intake": env("THROTTLE_LEAD_INTAKE", default="120/hour"),
+        # Website Forminator webhook — per IP; one WordPress server posts
+        # every form, so this must cover a busy campaign day.
+        "website_webhook": env("THROTTLE_WEBSITE_WEBHOOK", default="2000/hour"),
     },
 }
 
