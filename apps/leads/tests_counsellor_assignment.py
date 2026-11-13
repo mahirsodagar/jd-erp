@@ -27,8 +27,8 @@ class CounsellorAssignmentTests(TestCase):
         cls.program.campuses.add(cls.campus)
         cls.source = LeadSource.objects.create(name="Website", slug="website")
 
-    def _counsellor(self, code, *, active=True):
-        emp = make_faculty(code=code, name=code, campus=self.campus,
+    def _counsellor(self, code, *, active=True, campus=None):
+        emp = make_faculty(code=code, name=code, campus=campus or self.campus,
                            institute=self.institute)
         user = User.objects.create_user(
             username=code.lower(), email=f"{code.lower()}@u.com", password="x",
@@ -50,14 +50,72 @@ class CounsellorAssignmentTests(TestCase):
         self._counsellor("C1", active=False)
         active = self._counsellor("C2")
         for _ in range(3):
-            self.assertEqual(assign_via_round_robin(), active)
+            self.assertEqual(assign_via_round_robin(self.campus), active)
 
     def test_round_robin_skips_inactive_employee(self):
         gone = self._counsellor("C1")
         gone.employee.set_status(Employee.Status.INACTIVE)
         active = self._counsellor("C2")
         self.assertFalse(can_take_leads(gone))
-        self.assertEqual(assign_via_round_robin(), active)
+        self.assertEqual(assign_via_round_robin(self.campus), active)
+
+    # --- Campus-wise assignment -------------------------------------
+
+    def _other_campus(self):
+        goa = Campus.objects.create(name="Goa", code="GOA")
+        self.program.campuses.add(goa)
+        return goa
+
+    def test_round_robin_only_rotates_within_the_leads_campus(self):
+        goa = self._other_campus()
+        blr1 = self._counsellor("C1")
+        blr2 = self._counsellor("C2")
+        goa_c = self._counsellor("C3", campus=goa)
+
+        picks = [self._lead(email=f"b{i}@e.com", phone=f"990011220{i}").assign_to
+                 for i in range(4)]
+        self.assertEqual(picks, [blr1, blr2, blr1, blr2])
+        self.assertNotIn(goa_c, picks)
+
+        goa_lead = self._lead(email="g@e.com", phone="9900112299", campus=goa)
+        self.assertEqual(goa_lead.assign_to, goa_c)
+
+    def test_each_campus_keeps_its_own_pointer(self):
+        goa = self._other_campus()
+        blr1 = self._counsellor("C1")
+        self._counsellor("C2")
+        goa1 = self._counsellor("C3", campus=goa)
+        self._counsellor("C4", campus=goa)
+
+        self.assertEqual(assign_via_round_robin(self.campus), blr1)
+        # Goa's rotation has not moved because Bengaluru's did.
+        self.assertEqual(assign_via_round_robin(goa), goa1)
+
+    def test_campus_with_no_counsellor_leaves_lead_unassigned(self):
+        goa = self._other_campus()
+        self._counsellor("C1")  # Bengaluru only
+        lead = self._lead(email="g@e.com", phone="9900112299", campus=goa)
+        self.assertIsNone(lead.assign_to)
+
+    def test_duplicate_keeps_root_owner_even_from_another_campus(self):
+        goa = self._other_campus()
+        owner = self._counsellor("C1")
+        self._counsellor("C2", campus=goa)
+        first = self._lead(email="a@e.com", phone="9900112233")
+        dup = self._lead(email="a@e.com", phone="9900112233", campus=goa)
+        self.assertEqual(dup.assign_to, owner)
+
+    def test_manual_assignment_must_match_the_leads_campus(self):
+        from rest_framework.exceptions import ValidationError
+        from apps.leads.serializers import validate_assign_to_is_counsellor
+
+        goa = self._other_campus()
+        goa_c = self._counsellor("C3", campus=goa)
+        self.assertEqual(validate_assign_to_is_counsellor(goa_c, goa), goa_c)
+        with self.assertRaises(ValidationError):
+            validate_assign_to_is_counsellor(goa_c, self.campus)
+        # No campus given → only the "is a counsellor" rule applies.
+        self.assertEqual(validate_assign_to_is_counsellor(goa_c), goa_c)
 
     def test_nobody_eligible_leaves_lead_unassigned(self):
         self._counsellor("C1", active=False)

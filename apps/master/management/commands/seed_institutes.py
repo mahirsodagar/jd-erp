@@ -24,15 +24,22 @@ from django.core.management.base import BaseCommand
 
 from apps.master.models import Institute
 
-#: Bundled alongside this app so a deploy has the artwork without anyone
-#: having to upload it first.
+#: Bundled alongside this app so a deploy has the artwork — and the
+#: student handbooks — without anyone having to upload them first.
 _ASSETS = Path(__file__).resolve().parents[2] / "seed_assets"
+
+#: Institute files seeded from `seed_assets`: (spec key, model field).
+#: Each follows the same rule as the letterhead text — attached only
+#: when the field is still empty, or always with --force.
+_FILES = (("logo", "logo"), ("handbook", "handbook_pdf"))
 
 INSTITUTES = [
     {
         "code": "JDIFT",
         "name": "JD Institute of Fashion Technology",
         "logo": "jdift-logo.png",
+        # 2026 JDI Student Handbook (diploma / PG / short-term courses).
+        "handbook": "jdift-student-handbook.pdf",
         # JDI prints the address under the logo, left-aligned.
         "letterhead_placement": Institute.LetterheadPlacement.LEFT,
         "letterhead_title": "Corporate Center",
@@ -47,6 +54,8 @@ INSTITUTES = [
         "code": "JDSD",
         "name": "JD School of Design",
         "logo": "jdsd-logo.png",
+        # 2026 JDSD Student Handbook (degree / master's programmes).
+        "handbook": "jdsd-student-handbook.pdf",
         # JDSD prints it opposite the logo, right-aligned.
         "letterhead_placement": Institute.LetterheadPlacement.RIGHT,
         "letterhead_title": "Corporate Center",
@@ -76,19 +85,20 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
             "--force", action="store_true",
-            help="Overwrite existing letterhead values and logos too. Use "
-                 "only to reset an institute back to the printed defaults.",
+            help="Overwrite existing letterhead values, logos and handbooks "
+                 "too. Use only to reset an institute back to the bundled "
+                 "defaults.",
         )
 
     def handle(self, *args, **opts):
         force = opts["force"]
         verbose = opts.get("verbosity", 1) > 0
-        created_n = filled_n = logo_n = 0
+        created_n = filled_n = file_n = 0
 
         for spec in INSTITUTES:
             spec = dict(spec)
             code = spec.pop("code")
-            logo_file = spec.pop("logo")
+            asset_files = {field: spec.pop(key) for key, field in _FILES}
             name = spec.pop("name")
 
             institute, created = Institute.objects.get_or_create(
@@ -113,18 +123,21 @@ class Command(BaseCommand):
                 institute.save(update_fields=changed)
                 filled_n += 1
 
-            if force or not institute.logo:
-                path = _ASSETS / logo_file
+            for field, filename in asset_files.items():
+                if not force and getattr(institute, field):
+                    continue
+                path = _ASSETS / filename
                 if path.is_file():
-                    institute.logo.save(
-                        logo_file, ContentFile(path.read_bytes()), save=True,
+                    getattr(institute, field).save(
+                        filename, ContentFile(path.read_bytes()), save=True,
                     )
-                    logo_n += 1
+                    file_n += 1
                 else:
-                    # Always worth saying: the document will silently
-                    # fall back to printing the institute name.
+                    # Always worth saying: without the logo the document
+                    # silently prints the institute name instead, and
+                    # without the handbook "Send handbook" is refused.
                     self.stdout.write(self.style.WARNING(
-                        f"{code}: logo asset missing at {path}",
+                        f"{code}: {field} asset missing at {path}",
                     ))
 
             if verbose:
@@ -137,5 +150,6 @@ class Command(BaseCommand):
         if verbose:
             self.stdout.write(self.style.SUCCESS(
                 f"{len(INSTITUTES)} institutes ({created_n} created), "
-                f"{filled_n} letterheads filled, {logo_n} logos attached."
+                f"{filled_n} letterheads filled, {file_n} files "
+                f"(logos/handbooks) attached."
             ))

@@ -300,6 +300,48 @@ def _employees_csv(qs):
     )
 
 
+class EmployeeOptionsView(APIView):
+    """Staff directory for dropdowns — mentor, HOD, reviewer, faculty.
+
+    The HR list (`/api/employees/`) needs `employees.employee.view`,
+    which the baseline Faculty role deliberately lacks, so every
+    "pick a mentor" dropdown came back empty for faculty logins. This
+    endpoint is open to any signed-in staff user and returns only what a
+    picker needs: id, code, name, designation, department, campus. No
+    contact details, no pay, no documents.
+
+    Active employees only unless `?all=1`. Optional `?campus=<id>`.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        u = request.user
+        # Students have a portal of their own; they never pick staff here.
+        if getattr(u, "student", None) is not None and not u.is_superuser:
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        qs = Employee.objects.select_related(
+            "designation", "department", "campus",
+        )
+        if request.query_params.get("all") != "1":
+            qs = qs.filter(status=Employee.Status.ACTIVE)
+        if v := request.query_params.get("campus"):
+            qs = qs.filter(campus_id=v)
+        qs = qs.order_by("first_name", "family_name", "emp_code")
+        return Response([
+            {
+                "id": e.id,
+                "emp_code": e.emp_code,
+                "full_name": e.full_name,
+                "designation": e.designation.name if e.designation_id else "",
+                "department": e.department.name if e.department_id else "",
+                "campus_id": e.campus_id,
+                "campus": e.campus.name if e.campus_id else "",
+            }
+            for e in qs
+        ])
+
+
 class EmployeeListCreateView(APIView):
     parser_classes = [JSONParser, FormParser, MultiPartParser]
     pagination_class = EmployeePagination

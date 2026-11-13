@@ -112,20 +112,34 @@ class InstituteSerializer(serializers.ModelSerializer):
     # CampusSerializer.image/image_url.
     logo_url = serializers.SerializerMethodField()
     signature_url = serializers.SerializerMethodField()
+    handbook_pdf_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Institute
         fields = ["id", "name", "code", "logo", "logo_url",
-                  "signature", "signature_url", "email_domain",
+                  "signature", "signature_url",
+                  "handbook_pdf", "handbook_pdf_url", "email_domain",
                   "letterhead_placement", "letterhead_title", "address",
                   "phone", "email", "gstin", "payee_name",
                   "is_active", "created_at", "updated_at"]
         read_only_fields = ["id", "logo_url", "signature_url",
-                            "created_at", "updated_at"]
+                            "handbook_pdf_url", "created_at", "updated_at"]
         extra_kwargs = {
             "logo": {"write_only": True, "required": False},
             "signature": {"write_only": True, "required": False},
+            "handbook_pdf": {"write_only": True, "required": False},
         }
+
+    def validate_handbook_pdf(self, f):
+        if f is None:
+            return f
+        is_pdf = (f.name or "").lower().endswith(".pdf")
+        head = f.read(5)
+        f.seek(0)
+        if not is_pdf or head != b"%PDF-":
+            raise serializers.ValidationError(
+                "The student handbook must be a PDF file.")
+        return f
 
     def _abs(self, field):
         if not field:
@@ -138,6 +152,9 @@ class InstituteSerializer(serializers.ModelSerializer):
 
     def get_signature_url(self, obj):
         return self._abs(obj.signature)
+
+    def get_handbook_pdf_url(self, obj):
+        return self._abs(obj.handbook_pdf)
 
 
 class StateSerializer(serializers.ModelSerializer):

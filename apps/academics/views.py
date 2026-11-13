@@ -32,7 +32,9 @@ from .models import (
     Certificate, Lesson, MarksEntry, ScheduleSlot,
 )
 from .permissions import ScheduleAccess, TimetableAccess, has_perm
-from .timetable_notify import notify_batch_published, notify_slot
+from .timetable_notify import (
+    notify_batch_published, notify_batch_removed, notify_slot,
+)
 from .serializers import (
     AlumniRecordSerializer, AlumniSelfUpdateSerializer,
     AssignmentSerializer, AssignmentSubmissionSerializer,
@@ -179,6 +181,87 @@ class ScheduleSlotDetailView(APIView):
         slot.save(update_fields=["status", "updated_at"])
         notify_slot(slot, verb="cancelled", actor=request.user)
         return Response(status=http.HTTP_204_NO_CONTENT)
+
+
+def _truthy(v) -> bool:
+    return str(v).lower() in ("1", "true", "yes", "on")
+
+
+class ScheduleSlotPurgeView(APIView):
+    """`DELETE` — permanently remove one slot (the plain DELETE above only
+    cancels it). Attendance rows cascade, so a slot whose register was
+    already taken is refused with 409 unless `?force=1`."""
+    permission_classes = [IsAuthenticated, TimetableAccess]
+
+    def delete(self, request, pk):
+        try:
+            slot = _scope(ScheduleSlot.objects.all(), request.user).get(pk=pk)
+        except ScheduleSlot.DoesNotExist as e:
+            raise Http404 from e
+        marked = Attendance.objects.filter(schedule_slot=slot).count()
+        if marked and not _truthy(request.query_params.get("force")):
+            return Response(
+                {"detail": f"Attendance has been marked for {marked} "
+                           "student(s) on this slot. Cancel it instead, or "
+                           "force-delete to erase the register too.",
+                 "attendance_count": marked},
+                status=http.HTTP_409_CONFLICT,
+            )
+        if slot.status == ScheduleSlot.Status.SCHEDULED:
+            notify_slot(slot, verb="removed", actor=request.user)
+        slot.delete()
+        return Response(status=http.HTTP_204_NO_CONTENT)
+
+
+class BulkDeleteScheduleView(APIView):
+    """`POST {batch, from, to, force?}` — permanently delete every slot
+    of one batch in a date range (undo of a weekly publish). Slots with
+    attendance are skipped unless `force` is true."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not has_perm(request.user, "academics.schedule.delete"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        from_date = parse_date(str(request.data.get("from") or ""))
+        to_date = parse_date(str(request.data.get("to") or ""))
+        batch_id = request.data.get("batch")
+        if not (batch_id and from_date and to_date):
+            return Response({"detail": "batch, from and to are required."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        if from_date > to_date:
+            return Response({"detail": "from must be on or before to."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        force = _truthy(request.data.get("force", False))
+
+        qs = _scope(ScheduleSlot.objects.all(), request.user).filter(
+            batch_id=batch_id, date__gte=from_date, date__lte=to_date,
+        )
+        if v := request.data.get("instructor"):
+            qs = qs.filter(instructor_id=v)
+        with_attendance = set(
+            Attendance.objects.filter(schedule_slot__in=qs)
+            .values_list("schedule_slot_id", flat=True)
+        )
+        skipped = 0
+        if not force and with_attendance:
+            skipped = len(with_attendance)
+            qs = qs.exclude(pk__in=with_attendance)
+
+        slots = list(qs.select_related("batch", "subject", "time_slot",
+                                       "instructor"))
+        live = [s for s in slots if s.status == ScheduleSlot.Status.SCHEDULED]
+        if live:
+            batch = live[0].batch
+            notify_batch_removed(
+                batch, instructors={s.instructor for s in live},
+                start_date=from_date, end_date=to_date,
+                removed=len(live), actor=request.user,
+            )
+        deleted = len(slots)
+        ScheduleSlot.objects.filter(pk__in=[s.pk for s in slots]).delete()
+        return Response({"deleted": deleted,
+                         "skipped_with_attendance": skipped})
 
 
 # --- Bulk weekly publish ----------------------------------------------
@@ -434,6 +517,7 @@ class AttendanceRosterView(APIView):
             "date": str(slot.date),
             "subject": slot.subject.name,
             "batch": slot.batch.name,
+            "slot_status": slot.status,
             "frozen": slot.attendance_frozen,
             "frozen_at": slot.attendance_frozen_at,
             "frozen_by": (slot.attendance_frozen_by.username
@@ -451,6 +535,15 @@ class AttendanceRosterView(APIView):
         if not _can_mark_attendance(request.user, slot):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
+
+        # A cancelled class never happened — nobody may mark it, not
+        # even an admin. Restore the slot (edit → Scheduled) first.
+        if slot.status == ScheduleSlot.Status.CANCELLED:
+            return Response(
+                {"detail": "This class was cancelled. Attendance cannot "
+                           "be marked for a cancelled slot."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
 
         if slot.attendance_frozen and not has_perm(
             request.user, "academics.attendance.edit_frozen"
@@ -497,18 +590,10 @@ class AttendanceRosterView(APIView):
             slot.notes = remarks.strip()
             slot.save(update_fields=["notes"])
 
-        notified = 0
-        if s.validated_data.get("notify_absent"):
-            # Messaging parents is a separate capability from recording
-            # the register. Fail loudly rather than saving and silently
-            # skipping the alerts.
-            if not has_perm(request.user, "academics.attendance.notify_absent"):
-                return Response(
-                    {"detail": "You cannot send absence alerts. Save "
-                               "without 'notify absent' ticked."},
-                    status=http.HTTP_403_FORBIDDEN,
-                )
-            notified = notify_absent_students(slot)
+        # Absent SMS/email/WhatsApp go out automatically once the register
+        # is saved (institute policy). The helper skips students who were
+        # already alerted for this slot, so re-saves don't double-text.
+        notified = notify_absent_students(slot)
 
         return Response({**result, "notified_absent": notified},
                         status=http.HTTP_200_OK)
@@ -693,6 +778,26 @@ class AssignmentListCreateView(APIView):
             qs = qs.filter(subject_id=v)
         if v := params.get("program"):
             qs = qs.filter(program_id=v)
+        if v := params.get("semester"):
+            qs = qs.filter(semester_id=v)
+        if v := params.get("academic_year"):
+            # Batch-bound rows: the batch's year. Program-wide rows
+            # (batch=null) have no year of their own, so they are kept
+            # whenever any batch of that program (and campus, if set)
+            # belongs to the year.
+            from django.db.models import Exists, OuterRef
+            from apps.master.models import Batch
+            yr_batches = Batch.objects.filter(
+                academic_year_id=v, program_id=OuterRef("program_id"))
+            qs = qs.filter(
+                Q(batch__academic_year_id=v)
+                | Q(batch__isnull=True, campus__isnull=True,
+                    program_id__in=Batch.objects.filter(
+                        academic_year_id=v).values("program_id"))
+                | (Q(batch__isnull=True, campus__isnull=False)
+                   & Exists(yr_batches.filter(
+                       campus_id=OuterRef("campus_id"))))
+            )
         if v := params.get("campus"):
             # Rows from before the campus field (null) reach every campus.
             qs = qs.filter(Q(campus_id=v) | Q(campus__isnull=True))
@@ -783,6 +888,81 @@ class AssignmentDetailView(APIView):
                             status=http.HTTP_403_FORBIDDEN)
         a.delete()
         return Response(status=http.HTTP_204_NO_CONTENT)
+
+
+class AssignmentCopyView(APIView):
+    """POST `{"batch": <id>, "due_date"?: iso}` — copy this assignment
+    to another batch of the same program (any campus).
+
+    Ported from legacy courseware "Mapping", where one item served
+    several batches: here the item is duplicated instead, so the
+    original keeps its batch and its submissions untouched. The copy
+    shares the same attachment / cover image files (no re-upload),
+    keeps title, description, marks, semester and published state, and
+    notifies the new batch when published. Needs
+    `academics.assignment.create`, like creating one from scratch."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        if not has_perm(request.user, "academics.assignment.create"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        try:
+            src = Assignment.objects.select_related("program").get(pk=pk)
+        except Assignment.DoesNotExist as e:
+            raise Http404 from e
+        try:
+            batch = (Batch.objects.select_related("program", "campus")
+                     .get(pk=request.data.get("batch")))
+        except (Batch.DoesNotExist, ValueError, TypeError):
+            return Response({"batch": "Batch not found."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        if not batch.is_active:
+            return Response({"batch": "Batch is inactive."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        if batch.pk == src.batch_id:
+            return Response({"batch": "Already assigned to this batch."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        if src.program_id and batch.program_id != src.program_id:
+            return Response(
+                {"batch": "Batch must belong to the same program."},
+                status=http.HTTP_400_BAD_REQUEST)
+        if Assignment.objects.filter(
+                batch=batch, subject_id=src.subject_id, title=src.title,
+        ).exists():
+            return Response(
+                {"batch": "This batch already has an assignment with "
+                          "the same title for this subject."},
+                status=http.HTTP_400_BAD_REQUEST)
+
+        due_date = src.due_date
+        if raw := request.data.get("due_date"):
+            from rest_framework.exceptions import ValidationError
+            from rest_framework.fields import DateTimeField
+            try:
+                due_date = DateTimeField().to_internal_value(raw)
+            except ValidationError:
+                return Response({"due_date": "Invalid date/time."},
+                                status=http.HTTP_400_BAD_REQUEST)
+
+        copy = Assignment.objects.create(
+            subject_id=src.subject_id,
+            program=batch.program, campus=batch.campus, batch=batch,
+            semester_id=src.semester_id,
+            title=src.title, description=src.description,
+            max_marks=src.max_marks, due_date=due_date,
+            # Same storage path: the file is shared, not duplicated.
+            attachment=src.attachment.name or None,
+            image=src.image.name or None,
+            is_published=src.is_published,
+            created_by=request.user,
+        )
+        if copy.is_published:
+            from .assignment_notify import schedule_assignment_assigned
+            schedule_assignment_assigned(copy)
+        return Response(
+            AssignmentSerializer(copy, context={"request": request}).data,
+            status=http.HTTP_201_CREATED)
 
 
 class AssignmentSubmissionsView(APIView):
@@ -949,6 +1129,8 @@ class MarksListCreateView(APIView):
         params = request.query_params
         if v := params.get("student"):
             qs = qs.filter(student_id=v)
+        if v := params.get("campus"):
+            qs = qs.filter(batch__campus_id=v)
         if v := params.get("program"):
             qs = qs.filter(batch__program_id=v)
         if v := params.get("subject"):

@@ -2,7 +2,8 @@ from django.urls import path
 
 from .views import (
     CoursewareAttachmentAddView, CoursewareAttachmentDeleteView,
-    CoursewareTopicDetailView, CoursewareTopicListCreateView,
+    CoursewareTopicCopyView, CoursewareTopicDetailView,
+    CoursewareTopicListCreateView,
 )
 
 urlpatterns = [
@@ -10,6 +11,8 @@ urlpatterns = [
          name="courseware-topic-list-create"),
     path("topics/<int:pk>/", CoursewareTopicDetailView.as_view(),
          name="courseware-topic-detail"),
+    path("topics/<int:pk>/copy/", CoursewareTopicCopyView.as_view(),
+         name="courseware-topic-copy"),
     path("topics/<int:pk>/attachments/", CoursewareAttachmentAddView.as_view(),
          name="courseware-attachment-add"),
     path("attachments/<int:pk>/", CoursewareAttachmentDeleteView.as_view(),

@@ -156,10 +156,9 @@ class BulkMarkAttendanceSerializer(serializers.Serializer):
     # timetable_pub.remarks, stored on ScheduleSlot.notes.
     remarks = serializers.CharField(required=False, allow_blank=True,
                                     max_length=400)
-    notify_absent = serializers.BooleanField(
-        required=False, default=False,
-        help_text="Queue notifications for absent students after marking.",
-    )
+    # `notify_absent` used to be an opt-in flag here; absence alerts now
+    # go out automatically on every save (older clients may still send
+    # the key — it is ignored).
 
 
 class FreezeSerializer(serializers.Serializer):

@@ -96,6 +96,17 @@ class Institute(models.Model):
                   "'JD Educational Trust'. Blank falls back to the "
                   "institute name.",
     )
+    # --- Student handbook -----------------------------------------------
+    # Each institute has its own handbook (JDIFT diploma rules vs JDSD
+    # degree rules differ on fees, attendance, late-fee interest, ID card
+    # replacement cost...). "Send handbook" on the student page attaches
+    # this file; with no file the send is refused rather than mailing a
+    # body that promises an attachment it doesn't carry.
+    handbook_pdf = models.FileField(
+        upload_to="institute/handbooks/", blank=True, null=True,
+        help_text="Student handbook PDF emailed to every student after "
+                  "enrolment via 'Send handbook'.",
+    )
 
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)

@@ -62,6 +62,7 @@ class UserSerializer(serializers.ModelSerializer):
     is_parent = serializers.SerializerMethodField()
     is_employee = serializers.SerializerMethodField()
     employee_id = serializers.SerializerMethodField()
+    is_relieving_approver = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -69,6 +70,7 @@ class UserSerializer(serializers.ModelSerializer):
             "id", "username", "email", "full_name",
             "is_active", "is_staff", "is_superuser",
             "is_student", "is_parent", "is_employee", "employee_id",
+            "is_relieving_approver",
             "campuses",
             "date_joined", "last_login",
             "roles", "permissions", "modules",
@@ -77,8 +79,22 @@ class UserSerializer(serializers.ModelSerializer):
             "id", "is_superuser", "date_joined", "last_login",
             "roles", "permissions", "modules",
             "campuses", "is_student", "is_parent", "is_employee",
-            "employee_id",
+            "employee_id", "is_relieving_approver",
         ]
+
+    def get_is_relieving_approver(self, obj):
+        """True when this employee sits on a Relieving Managers chain
+        (any institute, any level) or is the snapshotted approver on an
+        application. Gates the Relieving Dashboard menu entry — no
+        permission key, because deciding a level needs none."""
+        emp = getattr(obj, "employee", None)
+        if emp is None:
+            return False
+        from apps.relieving.models import RelievingApproval, RelievingManager
+        return (
+            RelievingManager.objects.filter(approver=emp).exists()
+            or RelievingApproval.objects.filter(approver=emp).exists()
+        )
 
     def get_roles(self, obj):
         return list(obj.roles.values_list("name", flat=True))

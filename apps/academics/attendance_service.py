@@ -153,18 +153,43 @@ def unfreeze_attendance(*, slot: ScheduleSlot, by_user) -> ScheduleSlot:
     return slot
 
 
+ABSENT_TEMPLATE_KEYS = (
+    "student_absent_email", "parent_absent_email", "student_absent_wa",
+    "attendance.student_absent_v2.sms", "attendance.parent_absent_v2.sms",
+)
+
+
 def notify_absent_students(slot: ScheduleSlot) -> int:
     """Queue notifications for absentees (PDF: 'SMS to absent student +
     parent'). Uses the F.5 dispatch system; nothing is actually sent on
-    PA free — rows are recorded for replay later."""
+    PA free — rows are recorded for replay later.
+
+    Runs automatically after every save of the register, so an
+    attendance row that was already alerted (a dispatch-log row exists
+    for it) is skipped — re-saving the same register, or correcting one
+    student, never re-texts everyone."""
+    from django.contrib.contenttypes.models import ContentType
+
+    from apps.notifications.models import NotificationDispatchLog
     from apps.notifications.services import queue_notification
 
     absent = Attendance.objects.filter(
         schedule_slot=slot, status=Attendance.Status.ABSENT,
     ).select_related("student")
 
+    att_ct = ContentType.objects.get_for_model(Attendance)
+    already = set(
+        NotificationDispatchLog.objects.filter(
+            content_type=att_ct,
+            object_id__in=[str(a.id) for a in absent],
+            template_key__in=ABSENT_TEMPLATE_KEYS,
+        ).values_list("object_id", flat=True)
+    )
+
     n = 0
     for a in absent:
+        if str(a.id) in already:
+            continue
         s = a.student
         ctx = {
             "name": s.student_name,

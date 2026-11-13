@@ -34,9 +34,20 @@ class CoursewareTopicListCreateView(APIView):
         qs = (CoursewareTopic.objects
               .select_related("subject", "batch")
               .prefetch_related("attachments"))
-        if v := request.query_params.get("subject"):
+        p = request.query_params
+        # Academic year / campus / program come through the batch;
+        # semester through the subject. Each is optional.
+        if v := p.get("academic_year"):
+            qs = qs.filter(batch__academic_year_id=v)
+        if v := p.get("campus"):
+            qs = qs.filter(batch__campus_id=v)
+        if v := p.get("program"):
+            qs = qs.filter(batch__program_id=v)
+        if v := p.get("semester"):
+            qs = qs.filter(subject__semester_id=v)
+        if v := p.get("subject"):
             qs = qs.filter(subject_id=v)
-        if v := request.query_params.get("batch"):
+        if v := p.get("batch"):
             qs = qs.filter(batch_id=v)
         return Response(CoursewareTopicSerializer(
             qs, many=True, context={"request": request},
@@ -118,6 +129,55 @@ class CoursewareTopicDetailView(APIView):
             raise Http404 from e
         topic.delete()
         return Response(status=http.HTTP_204_NO_CONTENT)
+
+
+class CoursewareTopicCopyView(APIView):
+    """POST `{"batch": <id>}` — copy this topic (name, description, cover
+    image, attachments, published state) to another active batch of
+    the same program, mapping that batch's students. Needs
+    `courseware.add`, the same key as publishing a topic."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        if not _can(request.user, "add"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        try:
+            topic = (CoursewareTopic.objects
+                     .select_related("batch").get(pk=pk))
+        except CoursewareTopic.DoesNotExist as e:
+            raise Http404 from e
+        try:
+            batch = Batch.objects.get(pk=request.data.get("batch"))
+        except (Batch.DoesNotExist, ValueError, TypeError):
+            return Response({"batch": "Batch not found."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        if not batch.is_active:
+            return Response({"batch": "Batch is inactive."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        if batch.pk == topic.batch_id:
+            return Response({"batch": "Already published to this batch."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        if batch.program_id != topic.batch.program_id:
+            return Response(
+                {"batch": "Batch must belong to the same program."},
+                status=http.HTTP_400_BAD_REQUEST)
+        if CoursewareTopic.objects.filter(
+                batch=batch, subject_id=topic.subject_id, name=topic.name,
+        ).exists():
+            return Response(
+                {"batch": "This batch already has a topic with the same "
+                          "name for this subject."},
+                status=http.HTTP_400_BAD_REQUEST)
+        copy = services.copy_topic_to_batch(
+            topic=topic, batch=batch, created_by=request.user)
+        copy = (CoursewareTopic.objects
+                .select_related("subject", "batch")
+                .prefetch_related("attachments").get(pk=copy.pk))
+        return Response(
+            CoursewareTopicSerializer(copy, context={"request": request}).data,
+            status=http.HTTP_201_CREATED,
+        )
 
 
 class CoursewareAttachmentAddView(APIView):

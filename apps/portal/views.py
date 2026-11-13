@@ -605,10 +605,13 @@ class LeaveMentorsView(APIView):
     Legacy student portal (`student/leaves.php`) filled both mentor
     dropdowns with every active faculty / HOD login as "Name (email)".
     Here that is every active employee whose portal account holds the
-    Faculty or HOD role. Should no one hold those roles yet (fresh
-    tenant), every active employee with a login is listed instead, so
-    the dropdown is never empty. `batch_mentor_email` is the student's
-    own batch mentor, for the form to pre-select.
+    Faculty or HOD role **at the student's campus** — the campus comes
+    from the current enrollment (the Student record's campus when there
+    is no enrollment), mirroring the campus-wise manager dropdown on
+    the employee leave form. No fallback: a campus with no Faculty/HOD
+    logins yields an empty list. `batch_mentor_email` is the student's
+    own batch mentor, for the form to pre-select; it is pinned into the
+    list even when that mentor sits at another campus.
     """
 
     permission_classes = [IsStudentOnly]
@@ -617,6 +620,11 @@ class LeaveMentorsView(APIView):
     def get(self, request):
         from django.db.models import Q
         from apps.employees.models import Employee
+
+        enrollment = request.portal_ctx.enrollment
+        batch = enrollment.batch if enrollment else None
+        campus_id = (enrollment.campus_id if enrollment
+                     else request.portal_ctx.student.campus_id)
 
         base = (Employee.objects
                 .filter(status=Employee.Status.ACTIVE,
@@ -627,8 +635,18 @@ class LeaveMentorsView(APIView):
         for n in self.ROLE_NAMES:
             match |= Q(user_account__roles__name__iexact=n)
         qs = base.filter(match).distinct()
-        if not qs.exists():
-            qs = base
+        if campus_id:
+            qs = qs.filter(campus_id=campus_id)
+        else:
+            qs = qs.none()
+
+        batch_mentor = (batch.mentor if batch and batch.mentor_id
+                        and batch.mentor.email_primary else None)
+        if (batch_mentor is not None
+                and batch_mentor.status == Employee.Status.ACTIVE
+                and not qs.filter(pk=batch_mentor.pk).exists()):
+            qs = (base.filter(Q(pk=batch_mentor.pk) | Q(pk__in=qs))
+                  .distinct())
         mentors = [
             {
                 "id": e.id,
@@ -639,11 +657,8 @@ class LeaveMentorsView(APIView):
             for e in qs.order_by("first_name", "family_name")
         ]
 
-        batch_mentor_email = ""
-        enrollment = request.portal_ctx.enrollment
-        batch = enrollment.batch if enrollment else None
-        if batch and batch.mentor_id and batch.mentor.email_primary:
-            batch_mentor_email = batch.mentor.email_primary
+        batch_mentor_email = (batch_mentor.email_primary
+                              if batch_mentor is not None else "")
         return Response({
             "mentors": mentors,
             "batch_mentor_email": batch_mentor_email,

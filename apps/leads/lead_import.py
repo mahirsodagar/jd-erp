@@ -140,15 +140,19 @@ def _valid_email(value: str) -> bool:
     return True
 
 
-def _counsellor_lookup() -> dict[str, object]:
-    """username / emp_code / email (all lower-cased) → User."""
-    out: dict[str, object] = {}
+def _counsellor_lookup() -> dict[str, tuple[object, int]]:
+    """username / emp_code / email (all lower-cased) → (User, campus id).
+
+    The campus is the employee's; a row naming a counsellor from another
+    campus than the row's own is rejected, since assignment is
+    campus-wise."""
+    out: dict[str, tuple[object, int]] = {}
     for c in eligible_counsellors():
         user = c.employee.user_account
         for key in (user.username, c.employee.emp_code,
                     c.employee.email_primary, user.email):
             if key:
-                out.setdefault(key.lower(), user)
+                out.setdefault(key.lower(), (user, c.employee.campus_id))
     return out
 
 
@@ -225,10 +229,16 @@ def plan(rows: list[dict]) -> list[RowResult]:
         r.assign_to = row.get("assign_to", "")
         assign_to = None
         if r.assign_to:
-            assign_to = counsellors.get(r.assign_to.lower())
-            if assign_to is None:
+            hit = counsellors.get(r.assign_to.lower())
+            if hit is None:
                 r.errors.append(
                     f'"{r.assign_to}" is not a counsellor who can take leads')
+            elif campus and hit[1] != campus.pk:
+                r.errors.append(
+                    f'"{r.assign_to}" is not a counsellor at {campus.name}; '
+                    'leads are assigned campus-wise')
+            else:
+                assign_to = hit[0]
 
         for fld, limit in (("city", 80), ("state", 80)):
             if len(row.get(fld, "")) > limit:

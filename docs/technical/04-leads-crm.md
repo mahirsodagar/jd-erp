@@ -24,7 +24,7 @@ than generic CRM defaults.
                      ├─ detect duplicates (email OR phone)
                      ├─ number the occurrence (Primary/Secondary/…)
                      ├─ merge alternate contacts onto the root lead
-                     └─ round-robin assign a counsellor (by program category)
+                     └─ round-robin assign a counsellor of the lead's campus
                            │
                            ▼
               Follow-ups with a mandatory OUTCOME
@@ -68,7 +68,7 @@ The central row. Field groups:
 | Model | Purpose |
 |---|---|
 | `Counsellor` | One row per `Employee` marked as a counsellor. `sort_order` sets the rotation order, `is_active` suspends them. Replaced the per-category pools |
-| `CounsellorRotation` | Single row holding the round-robin `pointer`; the row `select_for_update()` locks |
+| `CounsellorRotation` | One row per `campus` holding that campus's round-robin `pointer`; the row `select_for_update()` locks |
 | `LeadFollowup` | One interaction: `followup_type`, `notes`, `next_followup_date`, and the **mandatory** `outcome_category` + `outcome_disposition` |
 | `LeadStatusHistory` | Append-only status trail. Written by `change_status()` only — no manual API |
 | `LeadCommunication` | Record of what was sent (does not itself send). Written by the send-link helpers and the bulk-message endpoint |
@@ -83,7 +83,7 @@ The rules, in order:
 2. Find existing leads matching **email (case-insensitive) OR
    phone_normalized**, earliest first.
 3. **No match** → fresh lead, `occurrence_number = 1`, round-robin assignment
-   if `assign_to` was not supplied and the program has a category.
+   among the lead's campus counsellors if `assign_to` was not supplied.
 4. **Match** → the earliest matching lead is the *root* (walking up
    `duplicate_of` if the match is itself a duplicate). The new lead gets
    `is_repeated=True`, `duplicate_of=root`, and
@@ -98,21 +98,37 @@ The rules, in order:
    overwrites.
 7. A `LeadStatusHistory` row is written either way.
 
-## 4.4 Round-robin assignment (`services.assign_via_round_robin`)
+## 4.4 Round-robin assignment (`services.assign_via_round_robin(campus)`)
 
-- One flat list of counsellors — `Program.category` no longer routes leads.
-  `select_for_update()` on the single `CounsellorRotation` row makes concurrent
-  creates race-safe.
-- Eligible (`services.eligible_counsellors`): `counsellor.is_active` **and**
-  the employee is active and not soft-deleted **and** they have a
-  `user_account` that is `is_active` **and** `is_available`. The
-  `is_available` flag on `User` is how a counsellor is taken out of rotation
-  while on leave; the employee link is what keeps a lead from landing on a
-  login with nobody behind it.
+- **Campus-wise** (2026-11-12). One flat list of counsellors —
+  `Program.category` no longer routes leads — but a lead only ever rotates
+  through the counsellors of **its own campus**. A counsellor's campus is
+  `Employee.campus`; move the employee in HR to move the counsellor. One
+  `CounsellorRotation` row per campus (created on first use) holds that
+  campus's pointer; `select_for_update()` on it makes concurrent creates
+  race-safe. The legacy global row (pk=1, `campus` NULL) is unused.
+- Eligible (`services.eligible_counsellors(campus)`): `counsellor.is_active`
+  **and** the employee is active and not soft-deleted **and** they have a
+  `user_account` that is `is_active` **and** `is_available` **and** (when a
+  campus is given) `employee.campus` is that campus. The `is_available` flag
+  on `User` is how a counsellor is taken out of rotation while on leave; the
+  employee link is what keeps a lead from landing on a login with nobody
+  behind it.
 - Picks `eligible[pointer % len(eligible)]`, then advances the pointer. The
   list is recomputed each call, so pausing or adding a counsellor shifts where
   the next lead lands — fair over time, not a strict cycle.
-- Returns `None` (lead left unassigned) if nobody is eligible.
+- Returns `None` (lead left unassigned) if that campus has nobody eligible —
+  it never spills over to another campus. The Leads list shows these as
+  unassigned.
+- The same rule is enforced on every manual path:
+  `validate_assign_to_is_counsellor(user, campus)` rejects an owner from
+  another campus on create, intake, reassign and CSV import, and
+  `GET /api/leads/counsellors/options/?campus=<id>` is what the "Assign to"
+  pickers call so they only offer that campus's counsellors.
+- **Exception — duplicates.** A repeat enquiry goes back to the root lead's
+  counsellor even if the new enquiry names a different campus (the
+  conversation matters more than the campus rule), as long as that person can
+  still take leads at all.
 
 ## 4.5 Visibility and permissions
 

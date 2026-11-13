@@ -28,9 +28,9 @@ from apps.common.pdf_theme import (
     PAGE_W as _PAGE_W,
     SERIF,
     draw_letterhead_block,
-    draw_logo,
     draw_policy_page,
     fit as _fit,
+    logo_path,
     prints_right,
     rule as _rule,
     safe as _safe,
@@ -106,59 +106,54 @@ def amount_in_words(value) -> str:
 
 # --- Small drawing helpers ---------------------------------------------
 
+#: The bulleted rows are indented 7mm in from the margin, as on the
+#: template; the dash is typed, not drawn.
+_ROW_X = _MARGIN + 7.0
+_ROW_H = 6.0
+
+
 def _label_value(pdf: FPDF, label: str, value: str, *,
-                 line_h: float = 5.0, right: bool = False) -> None:
-    """`• Label : value` with the label bold, wrapping the value across
-    lines at the body width (addresses run long).
-
-    The bullet is drawn as a filled dot rather than typed: Helvetica's
-    built-in encoding is Latin-1 and has no U+2022.
-
-    `right` sets the row hard against the right margin — the name rows
-    and "Issued By" sit there on the right-placement stationery.
-    """
-    bullet_w = 6.0
+                 label_w: float = 34.0) -> None:
+    """`-  Label : value` with the label bold in a fixed-width column so
+    the values line up, and the value wrapping to the right margin
+    (addresses run long)."""
+    pdf.set_x(_ROW_X)
     pdf.set_font("Helvetica", "B", 9)
-    label_w = pdf.get_string_width(_safe(label)) + 1
+    pdf.cell(label_w, _ROW_H, _safe(f"-  {label} :"))
     pdf.set_font("Helvetica", "", 9)
-
-    if right:
-        # Bullet, label and value form one right-aligned unit ending at
-        # the margin. The value column gets a hair more than the string
-        # needs, or multi_cell wraps a name that in fact fits.
-        wrap_w = pdf.get_string_width(_safe(value)) + 2
-        start = max(_MARGIN, _PAGE_W - _MARGIN - bullet_w - label_w - wrap_w)
-        wrap_w = _PAGE_W - _MARGIN - start - bullet_w - label_w
-    else:
-        start = _MARGIN
-        wrap_w = _BODY_W - bullet_w - label_w
-
-    pdf.set_fill_color(0, 0, 0)
-    pdf.ellipse(start + 2, pdf.get_y() + line_h / 2 - 0.6, 1.2, 1.2, style="F")
-    pdf.set_x(start + bullet_w)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.cell(label_w, line_h, _safe(label))
-    pdf.set_font("Helvetica", "", 9)
-    pdf.multi_cell(wrap_w, line_h, _safe(value), new_x="LMARGIN", new_y="NEXT")
+    pdf.multi_cell(0, _ROW_H, _safe(value), new_x="LMARGIN", new_y="NEXT")
 
 
 # --- Header ------------------------------------------------------------
 
+_LOGO_W, _LOGO_H = 42.0, 22.0
+
+
 def _draw_letterhead(pdf: FPDF, institute) -> None:
-    """Logo top-left, with the billing block either underneath it or
-    opposite it, per the institute's stationery."""
+    """Logo top-left in a 42x22mm box, the billing block underneath it:
+    left-aligned on the JD Institute stationery, right-aligned (with a
+    wider gap before the title) on the JD School of Design one."""
     top = 12.0
-    logo_bottom = draw_logo(pdf, institute, x=_MARGIN, y=top, height=16)
-    if prints_right(institute):
-        text_bottom = draw_letterhead_block(
-            pdf, institute, x=_PAGE_W - _MARGIN - 90, y=top, align="R",
-        )
-    else:
-        text_bottom = draw_letterhead_block(
-            pdf, institute, x=_MARGIN, y=logo_bottom + 1, width=_BODY_W,
-            align="L",
-        )
-    pdf.set_y(max(logo_bottom, text_bottom) + 4)
+    logo_bottom = top + _LOGO_H
+    if path := logo_path(institute):
+        try:
+            pdf.image(path, x=_MARGIN, y=top, w=_LOGO_W, h=_LOGO_H,
+                      keep_aspect_ratio=True)
+        except Exception:  # noqa: BLE001 — a corrupt logo must not 500 the document
+            path = None
+    if not path:
+        # No artwork on file: the institute name stands in for the logo.
+        pdf.set_xy(_MARGIN, top)
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.multi_cell(_BODY_W, 6, _safe(getattr(institute, "name", "")))
+        logo_bottom = max(logo_bottom, pdf.get_y())
+
+    right = prints_right(institute)
+    text_bottom = draw_letterhead_block(
+        pdf, institute, x=_MARGIN, y=logo_bottom + 3, width=_BODY_W,
+        align="R" if right else "L", size=9, line_h=5.0, color=(0, 0, 0),
+    )
+    pdf.set_y(text_bottom + (10 if right else 4))
 
 
 # --- Payment table -----------------------------------------------------
@@ -176,9 +171,7 @@ def _tax_columns(receipt) -> list[tuple[str, Decimal]]:
         if basic:
             rate = (amount / basic * 100).quantize(Decimal("0.1"))
             rate_s = f"{int(rate)}" if rate == rate.to_integral_value() else f"{rate}"
-            # Two lines: the rate sits under the tax name so a 15mm
-            # column doesn't have to swallow "SGST (9%)" in one go.
-            label = f"{label}\n({rate_s}%)"
+            label = f"{label} ({rate_s}%)"
         out.append((label, amount))
     return out
 
@@ -200,60 +193,71 @@ def _mode_label(receipt) -> str:
     return receipt.get_payment_mode_display().split(" (")[0]
 
 
+#: Column widths from the templates (mm). With the tax split the ten
+#: columns fill the 180mm body; without it the seven-column table sits
+#: left at 144mm, as on the JD School of Design receipt.
+_BASE_W = [12.0, 17.0, 14.0, 28.0, 18.0, 22.0]
+_MONEY_W_TWO_TAXES = [17.0, 16.0, 16.0, 20.0]
+_NO_TAX_W = [12.0, 20.0, 23.0, 21.0, 22.0, 28.0, 18.0]
+
+
 def _draw_payment_table(pdf: FPDF, receipt) -> None:
     taxes = _tax_columns(receipt)
 
     ref_date = (receipt.received_date.strftime("%d-%m-%Y")
                 if receipt.received_date else "")
-    base = [
-        ("Sl. No", "1", "C"),
-        ("Particular", _particular(receipt), "L"),
-        ("Mode", _mode_label(receipt), "L"),
-        ("Ref. No.", receipt.instrument_ref, "L"),
-        ("Ref. Date", ref_date, "C"),
-        ("Bank &\nBranch", receipt.bank, "L"),
+    cols = [
+        ("Sl. No", "1"),
+        ("Particular", _particular(receipt)),
+        ("Mode", _mode_label(receipt)),
+        ("Ref. No.", receipt.instrument_ref),
+        ("Ref. Date", ref_date),
+        ("Bank & Branch", receipt.bank),
     ]
     if taxes:
-        # Tight layout: the split has to fit four money columns.
-        base_w = [10.0, 22.0, 15.0, 32.0, 19.0, 20.0]
-        money_n = len(taxes) + 2  # basic fee + taxes + fee paid
-        money_w = [(_BODY_W - sum(base_w)) / money_n] * money_n
-        money = ([("Basic\nFee", _plain(receipt.basic_fee), "R")]
-                 + [(label, _plain(amount), "R") for label, amount in taxes]
-                 + [("Fee\nPaid", _amount_str(receipt.amount), "R")])
+        cols += ([("Basic Fee", _plain(receipt.basic_fee))]
+                 + [(label, _plain(amount)) for label, amount in taxes]
+                 + [("Fee Paid", _amount_str(receipt.amount))])
+        if len(taxes) == 2:
+            money_w = _MONEY_W_TWO_TAXES
+        else:
+            n = len(taxes) + 2
+            money_w = [(_BODY_W - sum(_BASE_W)) / n] * n
+        widths = _BASE_W + money_w
     else:
-        # The single-column table does not stretch to the margin — on
-        # the paper receipt it sits left, at roughly 80% of the body.
-        base_w = [12.0, 20.0, 22.0, 30.0, 22.0, 26.0]
-        money_w = [18.0]
-        money = [("Fee Paid", _amount_str(receipt.amount), "R")]
+        cols.append(("Fee Paid", _amount_str(receipt.amount)))
+        widths = _NO_TAX_W
 
-    cols = base + money
-    widths = base_w + money_w
-
-    # Header — 9mm tall, labels centred vertically, wrapping at the "\n"
-    # the narrow columns need.
+    # Header row: each label wraps inside its column at 6mm per line,
+    # and the row is as tall as the tallest label.
+    x0, y0 = _MARGIN, pdf.get_y() + 2
     pdf.set_font("Helvetica", "B", 7)
-    pdf.set_fill_color(245, 245, 245)
-    head_h = 9.0
-    x0, y0 = pdf.get_x(), pdf.get_y()
-    x = x0
-    for (label, _v, _a), w in zip(cols, widths):
-        pdf.set_xy(x, y0)
-        pdf.cell(w, head_h, "", border=1, fill=True)
-        lines = label.split("\n")
-        y = y0 + (head_h - len(lines) * 3.2) / 2
-        for line in lines:
-            pdf.set_xy(x, y)
-            pdf.cell(w, 3.2, _fit(pdf, line, w), align="C")
-            y += 3.2
-        x += w
-    pdf.set_xy(x0, y0 + head_h)
+    line_counts = [
+        len(pdf.multi_cell(w, 6, _safe(label), dry_run=True, output="LINES"))
+        for (label, _v), w in zip(cols, widths)
+    ]
+    head_h = 6 * max(line_counts)
+    bottom = y0 + head_h
+    for (label, _v), w, n in zip(cols, widths, line_counts):
+        # Every box is drawn at the full header height; the label is
+        # centred vertically inside it.
+        pdf.rect(x0, y0, w, head_h)
+        pdf.set_xy(x0, y0 + (head_h - 6 * n) / 2)
+        pdf.multi_cell(w, 6, _safe(label), align="C",
+                       new_x="RIGHT", new_y="TOP", max_line_height=6)
+        x0 += w
 
-    pdf.set_font("Helvetica", "", 8)
-    for (_label, value, align), w in zip(cols, widths):
-        pdf.cell(w, 8, _fit(pdf, value, w), border=1, align=align)
-    pdf.ln(8)
+    # Value row: 10mm tall, values left-aligned. A long value (order ids
+    # run to 16 characters) wraps onto a second 5mm line inside the row.
+    x0, y1 = _MARGIN, bottom
+    pdf.set_font("Helvetica", "", 7)
+    row_bottom = y1 + 10
+    for (_label, value), w in zip(cols, widths):
+        pdf.set_xy(x0, y1)
+        pdf.multi_cell(w, 10, _safe(value), border=1, align="L",
+                       new_x="RIGHT", new_y="TOP", max_line_height=5)
+        x0 += w
+    pdf.set_y(row_bottom + 4)
 
 
 # --- Page 1 ------------------------------------------------------------
@@ -267,7 +271,7 @@ def _draw_receipt_page(pdf: FPDF, receipt) -> None:
 
     pdf.set_font(SERIF, "B", 12)
     pdf.cell(0, 8, "INVOICE", align="C", new_x="LMARGIN", new_y="NEXT")
-    _rule(pdf)
+    _rule(pdf, gap_before=0, gap_after=4)
 
     # Two different dates, as on the paper receipts: this line is when
     # the invoice was raised, while the table's "Ref. Date" is when the
@@ -281,15 +285,17 @@ def _draw_receipt_page(pdf: FPDF, receipt) -> None:
     else:
         date_s = ""
 
+    # Date on the left and Receipt No on the right of one line.
     pdf.set_font("Helvetica", "B", 9)
-    label_w = pdf.get_string_width("Date: ") + 1
-    pdf.cell(label_w, 5, "Date: ")
+    pdf.cell(12, 6, "Date:")
     pdf.set_font("Helvetica", "", 9)
-    pdf.cell(0, 5, _safe(date_s), new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(90, 6, _safe(date_s))
     pdf.set_font("Helvetica", "B", 9)
-    pdf.cell(0, 5, _safe(f"Receipt No: {receipt.receipt_no}"), align="R",
+    pdf.cell(28, 6, "Receipt No:")
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 6, _safe(receipt.receipt_no), align="R",
              new_x="LMARGIN", new_y="NEXT")
-    _rule(pdf)
+    _rule(pdf, gap_before=1, gap_after=5)
 
     year = enrollment.academic_year
     course = enrollment.course.name if enrollment.course_id else enrollment.program.name
@@ -304,32 +310,27 @@ def _draw_receipt_page(pdf: FPDF, receipt) -> None:
     if student.current_pincode:
         address = f"{address} -{student.current_pincode}".strip()
 
-    # On the right-placement stationery the two name rows and "Issued By"
-    # sit against the right margin while everything else stays left.
-    names_right = prints_right(institute)
     rows = [
-        ("Student ID : ", student.registration_number or student.application_form_id, False),
-        ("Academic Year : ", (year.full_name or year.code) if year else "", False),
-        ("Address : ", address, False),
-        ("Phone : ", student.student_mobile, False),
-        ("Course Name : ", course, False),
-        ("Student Name : ", student.student_name, names_right),
-        ("Father's Name : ", student.father_name, names_right),
+        ("Student ID", student.registration_number or student.application_form_id),
+        ("Academic Year", (year.full_name or year.code) if year else ""),
+        ("Address", address),
+        ("Phone", student.student_mobile),
+        ("Course Name", course),
+        ("Student Name", student.student_name),
+        ("Father's Name", student.father_name),
     ]
-    for label, value, right in rows:
-        if value:
-            _label_value(pdf, label, value, right=right)
+    label_w = 36.0 if prints_right(institute) else 34.0
+    for label, value in rows:
+        _label_value(pdf, label, value or "", label_w=label_w)
 
-    pdf.ln(3)
     _draw_payment_table(pdf, receipt)
-    pdf.ln(3)
 
-    _label_value(pdf, "Amount in words : ", amount_in_words(receipt.amount))
+    _label_value(pdf, "Amount in words", amount_in_words(receipt.amount),
+                 label_w=36)
     issued_by = ""
     if receipt.received_by_id:
         issued_by = receipt.received_by.full_name or receipt.received_by.username
-    if issued_by:
-        _label_value(pdf, "Issued By : ", issued_by, right=names_right)
+    _label_value(pdf, "Issued By", issued_by, label_w=25)
 
     if receipt.status == receipt.Status.CANCELLED:
         pdf.ln(3)
@@ -345,21 +346,19 @@ def _draw_receipt_page(pdf: FPDF, receipt) -> None:
         pdf.multi_cell(_BODY_W, 5, _safe(detail), new_x="LMARGIN", new_y="NEXT")
         pdf.set_text_color(0, 0, 0)
 
-    pdf.ln(4)
-    # The payee prints bold, the rest of the line regular — as printed.
-    pdf.set_font("Helvetica", "", 9)
-    lead = "Cheque/Demand Draft to be made in favor of "
-    pdf.cell(pdf.get_string_width(lead), 5, lead)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.cell(0, 5, _safe(institute.cheque_payee), new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("Helvetica", "", 9)
-    pdf.cell(0, 5, "All Invoices required to be produced by student whenever "
-                   "asked for by the institute authorities.",
-             new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.cell(0, 5, "FEES ONCE PAID ARE NOT REFUNDABLE/TRANSFERABLE UNDER ANY "
-                   "CIRCUMSTANCES", new_x="LMARGIN", new_y="NEXT")
-    _rule(pdf)
+    pdf.ln(2)
+    pdf.set_x(_MARGIN)
+    pdf.set_font("Helvetica", "", 8.5)
+    pdf.multi_cell(0, 5, _safe("Cheque/Demand Draft to be made in favor of "
+                               f"{institute.cheque_payee}"),
+                   new_x="LMARGIN", new_y="NEXT")
+    pdf.multi_cell(0, 5, "All Invoices required to be produced by student "
+                         "whenever asked for by the institute authorities.",
+                   new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "B", 8.5)
+    pdf.multi_cell(0, 5, "FEES ONCE PAID ARE NOT REFUNDABLE/TRANSFERABLE "
+                         "UNDER ANY CIRCUMSTANCES",
+                   new_x="LMARGIN", new_y="NEXT")
 
     if receipt.status == receipt.Status.CANCELLED:
         _draw_cancelled_watermark(pdf)

@@ -1,5 +1,9 @@
+import csv
+
 from django.db.models import Q
 from django.http import Http404, HttpResponse
+from django.utils import timezone
+from django.utils.dateparse import parse_date
 from rest_framework import status as http
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -121,6 +125,14 @@ class MyRelievingChainView(APIView):
 # --- List + submit -------------------------------------------------
 
 class RelievingListCreateView(APIView):
+    """GET is the **Relieving Dashboard** list (2026-11-12 page split):
+    the applications the caller is a snapshotted approver on — pending
+    at their level or already decided — and nothing from chains they
+    are not part of. `hr.relieving.view_all` widens it to everyone.
+    The caller's own applications are NOT here; `me/` serves those to
+    the My Relieving page, so a faculty member never sees anybody
+    else's application."""
+
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -132,8 +144,7 @@ class RelievingListCreateView(APIView):
             emp = _emp_of(u)
             if emp is None:
                 return Response([])
-            # Self + applications I'm an approver on
-            qs = qs.filter(Q(employee=emp) | Q(approvals__approver=emp)).distinct()
+            qs = qs.filter(approvals__approver=emp).distinct()
         params = request.query_params
         if v := params.get("status"):
             qs = qs.filter(status=v)
@@ -378,6 +389,91 @@ class MyRelievingView(APIView):
               .prefetch_related("approvals__approver")
               .order_by("-submitted_at"))
         return Response(RelievingApplicationSerializer(qs, many=True).data)
+
+
+# --- Relieving Report ----------------------------------------------
+
+class RelievingReportView(APIView):
+    """The **Relieving Report** page: every application, filterable,
+    with `?output=csv` giving the legacy JD_ERP "relieving_report.php"
+    table — one row per application, the four manager decisions spread
+    across columns. Needs `hr.relieving.report`, separate from the
+    dashboard's `view_all` so HR can hand out the report alone.
+
+    Filters: `status`, `application_type`, `institute` (id),
+    `start_date` / `end_date` (applied-on, inclusive)."""
+
+    permission_classes = [IsAuthenticated]
+
+    LEVELS = (1, 2, 3, 4)
+
+    def get(self, request):
+        u = request.user
+        if not (u.is_superuser or has_perm(u, "hr.relieving.report")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+
+        params = request.query_params
+        qs = (RelievingApplication.objects
+              .select_related("employee", "employee__institute")
+              .prefetch_related("approvals__approver")
+              .order_by("-submitted_at"))
+        if v := params.get("status"):
+            qs = qs.filter(status=v)
+        if v := params.get("application_type"):
+            qs = qs.filter(application_type=v)
+        if v := params.get("institute"):
+            qs = qs.filter(employee__institute_id=v)
+        if v := parse_date(params.get("start_date") or ""):
+            qs = qs.filter(submitted_at__date__gte=v)
+        if v := parse_date(params.get("end_date") or ""):
+            qs = qs.filter(submitted_at__date__lte=v)
+
+        if (params.get("output") or "").lower() == "csv":
+            return self._csv(qs)
+        rows = RelievingApplicationSerializer(qs[:5000], many=True).data
+        return Response({"count": len(rows), "rows": rows})
+
+    def _csv(self, qs):
+        def d(dt):
+            return timezone.localtime(dt).strftime("%d-%m-%Y") if dt else ""
+
+        resp = HttpResponse(content_type="text/csv; charset=utf-8")
+        resp["Content-Disposition"] = 'attachment; filename="Relieving Report.csv"'
+        resp.write("﻿")  # BOM so Excel reads UTF-8
+        w = csv.writer(resp)
+        w.writerow([
+            "Sl No.", "Category", "Institute", "Employee Code", "Employee Name",
+            "Last Working Date (Requested)", "Last Working Date (Approved)",
+            "Status", "Remarks",
+            *(h for lvl in self.LEVELS for h in (
+                f"Manager {lvl}", f"Manager {lvl} level",
+                f"Manager {lvl} status", f"Manager {lvl} remarks",
+                f"Manager {lvl} date",
+            )),
+            "Rejection Reason", "Applied On",
+        ])
+        for i, a in enumerate(qs.iterator(chunk_size=500), start=1):
+            by_level = {ap.level: ap for ap in a.approvals.all()}
+            row = [
+                i, a.get_application_type_display(),
+                getattr(a.employee.institute, "code", ""),
+                a.employee.emp_code, a.employee.full_name,
+                a.last_working_date_requested.strftime("%d-%m-%Y"),
+                (a.last_working_date_approved.strftime("%d-%m-%Y")
+                 if a.last_working_date_approved else ""),
+                a.get_status_display(), a.reason,
+            ]
+            for lvl in self.LEVELS:
+                ap = by_level.get(lvl)
+                row += ([
+                    ap.approver.full_name if ap.approver else "",
+                    ap.label, ap.get_status_display(), ap.remarks,
+                    d(ap.decided_at),
+                ] if ap else ["", "", "", "", ""])
+            row += [a.rejection_reason, d(a.submitted_at)]
+            w.writerow(row)
+        return resp
 
 
 # --- Letter PDFs ---------------------------------------------------

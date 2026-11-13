@@ -12,6 +12,7 @@ from .views import (
     EmployeeDocumentListCreateView,
     EmployeeIdCardView,
     EmployeeListCreateView,
+    EmployeeOptionsView,
     EmployeePortalAccountView,
     EmployeeQrView,
     HolidayDetailView,
@@ -28,6 +29,8 @@ urlpatterns = [
     path("holidays/", HolidayListCreateView.as_view(), name="holiday-list-create"),
     path("holidays/<int:pk>/", HolidayDetailView.as_view(), name="holiday-detail"),
 
+    # Dropdown directory — any staff login, no HR permission needed.
+    path("options/", EmployeeOptionsView.as_view(), name="employee-options"),
     path("", EmployeeListCreateView.as_view(), name="employee-list-create"),
     path("<int:pk>/", EmployeeDetailView.as_view(), name="employee-detail"),
     path("<int:pk>/activate/", EmployeeActivateView.as_view(), name="employee-activate"),

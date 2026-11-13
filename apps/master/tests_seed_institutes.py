@@ -71,3 +71,35 @@ class SeedInstitutesTests(TestCase):
         jdift = Institute.objects.get(code="JDIFT")
         self.assertEqual(jdift.name, "Renamed By Staff")
         self.assertEqual(jdift.gstin, "29AAEPD3991M2Z8")
+
+    def test_attaches_each_institutes_own_handbook(self):
+        call_command("seed_institutes", verbosity=0)
+
+        jdift = Institute.objects.get(code="JDIFT")
+        jdsd = Institute.objects.get(code="JDSD")
+        self.assertTrue(jdift.handbook_pdf)
+        self.assertTrue(jdsd.handbook_pdf)
+        self.assertIn("jdift-student-handbook", jdift.handbook_pdf.name)
+        self.assertIn("jdsd-student-handbook", jdsd.handbook_pdf.name)
+        with jdift.handbook_pdf.open("rb") as fh:
+            self.assertTrue(fh.read(5).startswith(b"%PDF"))
+
+    def test_rerun_keeps_an_uploaded_handbook(self):
+        """Academics upload a newer edition from the Institute form; a
+        later deploy re-running the seed must not roll it back."""
+        from django.core.files.base import ContentFile
+
+        call_command("seed_institutes", verbosity=0)
+        jdsd = Institute.objects.get(code="JDSD")
+        jdsd.handbook_pdf.save(
+            "handbook-2027.pdf", ContentFile(b"%PDF-1.4 newer"), save=True,
+        )
+
+        call_command("seed_institutes", verbosity=0)
+
+        jdsd.refresh_from_db()
+        self.assertIn("handbook-2027", jdsd.handbook_pdf.name)
+
+        call_command("seed_institutes", "--force", verbosity=0)
+        jdsd.refresh_from_db()
+        self.assertIn("jdsd-student-handbook", jdsd.handbook_pdf.name)

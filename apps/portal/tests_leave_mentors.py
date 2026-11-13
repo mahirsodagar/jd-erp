@@ -33,8 +33,13 @@ class LeaveMentorsTests(TestCase):
         faculty_role, _ = Role.objects.get_or_create(name="Faculty")
         hod_role, _ = Role.objects.get_or_create(name="HOD")
 
-        def staff(code, name, email, role=None, active=True):
-            e = make_faculty(code=code, name=name, campus=campus,
+        cls.campus = campus
+        cls.other_campus = Campus.objects.create(name="Other", code="OTH")
+        cls.faculty_role = faculty_role
+
+        def staff(code, name, email, role=None, active=True,
+                  at=campus):
+            e = make_faculty(code=code, name=name, campus=at,
                              institute=institute)
             u = User.objects.create_user(username=code, email=email,
                                          password="x")
@@ -52,6 +57,8 @@ class LeaveMentorsTests(TestCase):
         cls.hr = staff("R1", "Chitra", "chitra@jd.edu")           # no role
         cls.gone = staff("F2", "Dev", "dev@jd.edu", faculty_role,
                          active=False)
+        cls.elsewhere = staff("F3", "Esha", "esha@jd.edu", faculty_role,
+                              at=cls.other_campus)
         cls.batch = Batch.objects.create(
             name="BD-1", program=program, campus=campus,
             academic_year=year, mentor=cls.hod,
@@ -84,14 +91,35 @@ class LeaveMentorsTests(TestCase):
         )
         self.assertEqual(r.data["batch_mentor_email"], "bala@jd.edu")
 
-    def test_falls_back_to_every_active_login_when_no_roles_assigned(self):
+    def test_other_campus_faculty_is_left_out(self):
+        r = self.client.get(reverse("portal-leave-mentors"))
+        self.assertNotIn("esha@jd.edu", [m["email"] for m in r.data["mentors"]])
+
+    def test_empty_list_when_campus_has_no_faculty_or_hod(self):
         for role in Role.objects.filter(name__in=("Faculty", "HOD")):
             role.users.clear()
+        self.batch.mentor = None
+        self.batch.save(update_fields=["mentor"])
+        r = self.client.get(reverse("portal-leave-mentors"))
+        self.assertEqual(r.data["mentors"], [])
+        self.assertEqual(r.data["batch_mentor_email"], "")
+
+    def test_batch_mentor_from_other_campus_is_pinned_into_list(self):
+        self.batch.mentor = self.elsewhere
+        self.batch.save(update_fields=["mentor"])
         r = self.client.get(reverse("portal-leave-mentors"))
         self.assertEqual(
             sorted(m["email"] for m in r.data["mentors"]),
-            ["anita@jd.edu", "bala@jd.edu", "chitra@jd.edu"],
+            ["anita@jd.edu", "bala@jd.edu", "esha@jd.edu"],
         )
+        self.assertEqual(r.data["batch_mentor_email"], "esha@jd.edu")
+
+    def test_campus_follows_enrollment_not_student_record(self):
+        Enrollment.objects.filter(student=self.student).update(
+            campus=self.other_campus)
+        r = self.client.get(reverse("portal-leave-mentors"))
+        self.assertEqual([m["email"] for m in r.data["mentors"]],
+                         ["bala@jd.edu", "esha@jd.edu"])
 
     def test_staff_cannot_use_it(self):
         c = APIClient()

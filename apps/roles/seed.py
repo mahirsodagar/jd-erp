@@ -304,7 +304,7 @@ CATALOGUE = [
     ("academics", "academics.schedule.add", "Create a single slot (New Slot)"),
     ("academics", "academics.schedule.publish", "Publish a weekly timetable"),
     ("academics", "academics.schedule.edit", "Edit a scheduled slot"),
-    ("academics", "academics.schedule.delete", "Cancel a scheduled slot"),
+    ("academics", "academics.schedule.delete", "Cancel or permanently delete a scheduled slot / timetable"),
     ("academics", "academics.schedule.override_conflict", "Publish a slot despite a classroom clash"),
 
     # Module G.2 — Attendance
@@ -318,7 +318,7 @@ CATALOGUE = [
     ("academics", "academics.attendance.view_roster", "See a slot's attendance roster"),
     ("academics", "academics.attendance.mark", "Mark attendance for any slot"),
     ("academics", "academics.attendance.edit_frozen", "Edit attendance after it is frozen"),
-    ("academics", "academics.attendance.notify_absent", "Send absence alerts to students"),
+    ("academics", "academics.attendance.notify_absent", "(Legacy) Absence alerts now go out automatically after marking"),
     ("academics", "academics.attendance.freeze", "Freeze and unfreeze attendance"),
     ("academics", "academics.attendance.view_report", "See attendance reports"),
     ("academics", "academics.attendance.view_instructor_log", "See the per-instructor teaching log"),
@@ -551,7 +551,8 @@ CATALOGUE = [
     # there is no override / direct-accept shortcut (user rule
     # 2026-11-06: strict four-manager approval).
     ("hr", "hr.relieving.submit_for_others", "Submit relieving on behalf of others"),
-    ("hr", "hr.relieving.view_all", "View all relieving applications"),
+    ("hr", "hr.relieving.view_all", "View all relieving applications (Relieving Dashboard)"),
+    ("hr", "hr.relieving.report", "Open the Relieving Report (all applications, CSV)"),
     ("hr", "hr.relieving.finalize", "Send the experience letter; finalize a legacy APPROVED application"),
     ("hr", "hr.relieving.managers", "Manage the Relieving Managers master (L1–L4 per institute)"),
     # Module HR — Holiday Calendar. Viewing is open to every employee

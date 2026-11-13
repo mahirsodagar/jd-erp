@@ -272,6 +272,11 @@ RULES: dict[str, tuple[str, ...]] = {
     # `audit.course_end.review` covered both outcomes and is retired.
     "audit.course_end.approve": ("audit.course_end.review",),
     "audit.course_end.return": ("audit.course_end.review",),
+
+    # --- Module 8.3: HR > Relieving (2026-11-12 page split) ------------
+    # The combined page's CSV was available to whoever saw every
+    # application; the new Relieving Report page carries its own key.
+    "hr.relieving.report": ("hr.relieving.view_all",),
 }
 
 

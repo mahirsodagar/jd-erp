@@ -67,13 +67,14 @@ class CounsellorSerializer(serializers.ModelSerializer):
         return employee
 
 
-def validate_assign_to_is_counsellor(user):
-    """Leads may only be held by a counsellor.
+def validate_assign_to_is_counsellor(user, campus=None):
+    """Leads may only be held by a counsellor — of the lead's campus.
 
-    The pickers already list counsellors only; this is the matching
-    check at the API boundary so a hand-rolled request can't park a lead
-    on somebody who is not on the list. Existing owners are untouched —
-    this fires only when an assignment is being set.
+    The pickers already list that campus's counsellors only; this is the
+    matching check at the API boundary so a hand-rolled request can't
+    park a lead on somebody who is not on the list, or on another
+    campus's counsellor. Existing owners are untouched — this fires only
+    when an assignment is being set.
     """
     if user is None:
         return user
@@ -83,6 +84,13 @@ def validate_assign_to_is_counsellor(user):
         raise serializers.ValidationError(
             "This user is not a counsellor who can take leads. Add them on "
             "the Counsellors page first."
+        )
+    if campus is not None and not (
+        eligible_counsellors(campus).filter(employee__user_account=user).exists()
+    ):
+        raise serializers.ValidationError(
+            f"This counsellor is not at the {campus} campus. Leads are "
+            "assigned to counsellors of the lead's own campus."
         )
     return user
 
@@ -135,8 +143,18 @@ class LeadCreateSerializer(_LeadBaseSerializer):
             "father_email": {"required": True, "allow_blank": False},
         }
 
-    def validate_assign_to(self, value):
-        return validate_assign_to_is_counsellor(value)
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        # Checked here rather than in validate_assign_to so the campus
+        # is already resolved: the owner must be a counsellor of it.
+        if attrs.get("assign_to"):
+            try:
+                validate_assign_to_is_counsellor(
+                    attrs["assign_to"], attrs.get("campus"),
+                )
+            except serializers.ValidationError as e:
+                raise serializers.ValidationError({"assign_to": e.detail}) from e
+        return attrs
 
 
 class LeadUpdateSerializer(_LeadBaseSerializer):
@@ -330,7 +348,9 @@ class LeadIntakeSerializer(_LeadBaseSerializer):
                 label="assign_to",
             )
             try:
-                attrs["assign_to"] = validate_assign_to_is_counsellor(owner)
+                attrs["assign_to"] = validate_assign_to_is_counsellor(
+                    owner, attrs["campus"],
+                )
             except serializers.ValidationError as e:
                 raise serializers.ValidationError({"assign_to": e.detail}) from e
         else:
@@ -356,10 +376,16 @@ class StatusChangeSerializer(serializers.Serializer):
 
 
 class ReassignSerializer(serializers.Serializer):
+    """Pass the lead as `context["lead"]` so the new owner is checked
+    against the lead's campus."""
+
     assign_to = serializers.PrimaryKeyRelatedField(queryset=User.objects.all())
 
     def validate_assign_to(self, value):
-        return validate_assign_to_is_counsellor(value)
+        lead = self.context.get("lead")
+        return validate_assign_to_is_counsellor(
+            value, getattr(lead, "campus", None),
+        )
 
 
 class StatusHistorySerializer(serializers.ModelSerializer):

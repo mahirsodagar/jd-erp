@@ -276,8 +276,8 @@ class LeadReassignView(APIView):
     required_perm = "leads.lead.reassign"
 
     def post(self, request, pk):
-        lead = Lead.objects.get(pk=pk)
-        s = ReassignSerializer(data=request.data)
+        lead = Lead.objects.select_related("campus").get(pk=pk)
+        s = ReassignSerializer(data=request.data, context={"lead": lead})
         s.is_valid(raise_exception=True)
         lead.assign_to = s.validated_data["assign_to"]
         lead.save(update_fields=["assign_to", "updated_at"])
@@ -531,11 +531,19 @@ class CounsellorOptionsView(APIView):
     Lead form needs the list but has no business administering it. Only
     people who can actually hold a lead are returned, so the dropdown
     never offers somebody the backend would reject.
+
+    `?campus=<id>` narrows it to that campus's counsellors — the lead
+    forms pass the lead's campus, since assignment is campus-wise and
+    anyone else would be refused on save.
     """
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        campus = request.query_params.get("campus") or None
+        if campus is not None and not str(campus).isdigit():
+            return Response({"detail": "campus must be an id."},
+                            status=http.HTTP_400_BAD_REQUEST)
         return Response([
             {
                 "id": c.employee.user_account_id,
@@ -544,8 +552,10 @@ class CounsellorOptionsView(APIView):
                               or c.employee.full_name),
                 "username": c.employee.user_account.username,
                 "emp_code": c.employee.emp_code,
+                "campus": c.employee.campus_id,
+                "campus_name": c.employee.campus.name,
             }
-            for c in eligible_counsellors()
+            for c in eligible_counsellors(campus)
         ])
 
 

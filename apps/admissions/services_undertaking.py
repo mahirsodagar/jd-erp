@@ -48,13 +48,11 @@ from django.core.mail import EmailMessage
 from django.db.models import Sum
 from django.utils import timezone
 from fpdf import FPDF
-from PIL import Image
 
 from apps.common.pdf_theme import (
     BODY_W,
     BRAND_MAGENTA,
     MARGIN,
-    PAGE_W,
     draw_letterhead_block,
     draw_logo,
     draw_policy_page,
@@ -71,9 +69,19 @@ from .models import Enrollment
 #: shorter — the paper form has five and staff expect the blanks.
 _MIN_BALANCE_ROWS = 5
 
-#: Label column width; the value column takes the rest of the body.
-_LABEL_W = 78.0
-_ROW_H = 7.0
+#: The grid runs 8mm from the page edge, wider than the 15mm text margin:
+#: a 72mm label column and a 120mm value column, 9mm per row.
+_GRID_X = 8.0
+_LABEL_W = 72.0
+_VALUE_W = 120.0
+_ROW_H = 9.0
+
+#: Masthead boxes: logo top-left, magenta banner top-right, both 48x30mm.
+_HEAD_Y = 8.0
+_HEAD_W, _HEAD_H = 48.0, 30.0
+_BANNER_X = 153.0
+#: Body starts here regardless of what the masthead holds.
+_BODY_TOP = 42.0
 
 #: Masthead logo per institute code. The copies bundled with the code
 #: (identical to media/institute/logos/) — media/ isn't deployed, so an
@@ -219,46 +227,43 @@ def fee_overview(enrollment: Enrollment) -> dict:
 # --- PDF rendering -----------------------------------------------------
 
 def _row(pdf: FPDF, label: str, value: str) -> None:
-    pdf.set_x(MARGIN)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.cell(_LABEL_W, _ROW_H, f" {_safe(label)}", border=1)
-    pdf.cell(BODY_W - _LABEL_W, _ROW_H, f" {_safe(value)}", border=1,
-             new_x="LMARGIN", new_y="NEXT")
+    """One grid line: label cell, value cell. A long value wraps and the
+    row grows with it; the label cell is redrawn to the same height so
+    the two borders stay level."""
+    pdf.set_x(_GRID_X)
+    pdf.set_font("Helvetica", "", 8)
+    y0 = pdf.get_y()
+    pdf.multi_cell(_LABEL_W, _ROW_H, _safe(label), border=1,
+                   new_x="RIGHT", new_y="TOP")
+    pdf.multi_cell(_VALUE_W, _ROW_H, _safe(value), border=1,
+                   new_x="LMARGIN", new_y="NEXT")
+    row_h = pdf.get_y() - y0
+    if row_h > _ROW_H + 0.01:
+        pdf.rect(_GRID_X, y0, _LABEL_W, row_h)
 
 
 def _draw_header(pdf: FPDF, institute) -> None:
-    """Logo left, magenta UNDERTAKING banner right — the printed form's
-    masthead."""
-    top = 12.0
-    band_w, band_h = 70.0, 26.0
-
-    # The institute's own logo file, fitted to the banner's height and
-    # kept clear of it; anything else falls back to the uploaded logo.
+    """Logo top-left, magenta UNDERTAKING banner top-right — the printed
+    form's masthead, each in a 48x30mm box."""
+    # The institute's own logo file bundled with the code; anything else
+    # falls back to the uploaded logo or the institute name.
     logo = _HEADER_LOGOS.get(getattr(institute, "code", ""))
     if logo is not None and logo.is_file():
-        # Size from the image's own ratio (not keep_aspect_ratio, which
-        # centres it in the box) so it sits flush with the left margin.
-        with Image.open(logo) as im:
-            ratio = im.width / im.height
-        max_w = PAGE_W - 2 * MARGIN - band_w - 8
-        h = min(band_h, max_w / ratio)
-        pdf.image(str(logo), x=MARGIN, y=top + (band_h - h) / 2,
-                  w=h * ratio, h=h)
-        logo_bottom = top + band_h
+        pdf.image(str(logo), x=_GRID_X, y=_HEAD_Y, w=_HEAD_W, h=_HEAD_H,
+                  keep_aspect_ratio=True)
     else:
-        logo_bottom = draw_logo(pdf, institute, x=MARGIN, y=top, height=22,
-                                fallback_width=95)
+        draw_logo(pdf, institute, x=_GRID_X, y=_HEAD_Y, height=_HEAD_H - 8,
+                  fallback_width=_BANNER_X - _GRID_X - 8)
 
-    band_x = PAGE_W - MARGIN - band_w
     pdf.set_fill_color(*BRAND_MAGENTA)
-    pdf.rect(band_x, top, band_w, band_h, style="F")
+    pdf.rect(_BANNER_X, _HEAD_Y, _HEAD_W, _HEAD_H, style="F")
     pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Helvetica", "B", 18)
-    pdf.set_xy(band_x, top + band_h / 2 - 5)
-    pdf.cell(band_w, 10, "UNDERTAKING", align="C")
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_xy(_BANNER_X, _HEAD_Y + 12)
+    pdf.cell(_HEAD_W, 6, "UNDERTAKING", align="C")
     pdf.set_text_color(0, 0, 0)
 
-    pdf.set_y(max(logo_bottom, top + band_h) + 8)
+    pdf.set_y(_BODY_TOP)
 
 
 def _duration(program, course) -> str:
@@ -289,24 +294,19 @@ def render_undertaking_pdf(
 
     pdf = FPDF(orientation="P", unit="mm", format="A4")
     pdf.set_margins(MARGIN, 12, MARGIN)
-    pdf.set_auto_page_break(auto=True, margin=12)
+    pdf.set_auto_page_break(auto=True, margin=14)
     pdf.add_page()
 
     _draw_header(pdf, institute)
 
-    pdf.set_font("Helvetica", "B", 9)
-    date_w = pdf.get_string_width("Date: ") + 1
-    pdf.cell(date_w, 5, "Date: ")
-    pdf.set_font("Helvetica", "", 9)
-    pdf.cell(0, 5, timezone.localtime().strftime("%d-%m-%y %H:%M:%S"),
+    pdf.set_font("Helvetica", "", 8)
+    pdf.cell(0, 6, "Date: " + timezone.localtime().strftime("%d-%m-%y %H:%M:%S"),
              new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(3)
 
     _row(pdf, "COURSE TITLE", course.name if course else program.name)
     _row(pdf, "DURATION", _duration(program, course))
     _row(pdf, "NAME OF THE STUDENT", student.student_name)
     _row(pdf, "CONTACT NUMBER", student.student_mobile)
-    _row(pdf, "APPLICATION FEE PAID ON", fees["application_fee_line"])
     # "TUTION" is the label on the printed form; kept verbatim so the
     # generated document matches the one staff already hand out.
     _row(pdf, "TUTION FEE APPLICABLE", _amount(fees["tuition_fee"]))
@@ -321,24 +321,21 @@ def render_undertaking_pdf(
     if fees["concession"] > 0:
         _row(pdf, "CONCESSION", _amount(fees["concession"]))
 
+    _row(pdf, "Application Form", fees["application_fee_line"])
     _row(pdf, "REMARKS:", remarks)
-
-    # Full-width acknowledgement row — verbatim from the printed form.
-    pdf.set_x(MARGIN)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.cell(BODY_W, _ROW_H,
-             " I hereby follow the above-mentioned payment schedule and "
-             "falling which, I am liable for penalty charges.",
-             border=1, new_x="LMARGIN", new_y="NEXT")
-
+    # Acknowledgement line — verbatim from the printed form — in the
+    # value column with an empty label cell beside it.
+    _row(pdf, "", "I hereby follow the above-mentioned payment schedule "
+                  "and falling which, I am liable for penalty charges.")
     _row(pdf, "SUBMITTED BY", submitted_by)
 
     # Letterhead sits at the foot of this document, not the head — at
     # the left or right margin per the institute's stationery.
-    pdf.ln(4)
+    pdf.ln(3)
     draw_letterhead_block(
         pdf, institute, x=MARGIN, y=pdf.get_y(), width=BODY_W,
-        align="R" if prints_right(institute) else "L", size=9,
+        align="R" if prints_right(institute) else "L",
+        size=8, line_h=5.0, color=(0, 0, 0),
     )
 
     draw_policy_page(

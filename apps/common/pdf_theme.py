@@ -29,7 +29,7 @@ BODY_W = PAGE_W - 2 * MARGIN  # 180mm
 
 #: The magenta used for the UNDERTAKING banner, sampled from the printed
 #: stationery.
-BRAND_MAGENTA = (196, 18, 90)
+BRAND_MAGENTA = (194, 24, 91)
 
 _UNICODE_FALLBACKS = {
     "–": "-",   # en dash
@@ -138,11 +138,13 @@ def letterhead_lines(institute) -> list[str]:
 
 def draw_letterhead_block(pdf: FPDF, institute, *, x: float, y: float,
                           width: float = 90.0, align: str = "R",
-                          size: float = 8.5) -> float:
+                          size: float = 8.5, line_h: float | None = None,
+                          color: tuple[int, int, int] = (60, 60, 60)) -> float:
     """Draw the address block at (x, y). Returns the y below it."""
     pdf.set_font("Helvetica", "", size)
-    pdf.set_text_color(60, 60, 60)
-    line_h = size * 0.53
+    pdf.set_text_color(*color)
+    if line_h is None:
+        line_h = size * 0.53
     for line in letterhead_lines(institute):
         pdf.set_xy(x, y)
         pdf.cell(width, line_h, safe(line), align=align)
@@ -177,19 +179,21 @@ def bullet(pdf: FPDF, x: float, line_h: float, size: float = 1.2) -> None:
     pdf.ellipse(x, pdf.get_y() + line_h / 2 - size / 2, size, size, style="F")
 
 
-def _policy_bullet(pdf: FPDF, lead: str, rest: str, *, indent: float,
-                   line_h: float = 4.5) -> None:
-    """`• Lead: rest` with the dot at `indent` and the text 4mm in from it."""
-    bullet(pdf, MARGIN + indent, line_h)
-    text_x = MARGIN + indent + 4.0
-    pdf.set_x(text_x)
-    lead_w = 0.0
-    if lead:
-        pdf.set_font("Helvetica", "B", 8.5)
-        lead_w = pdf.get_string_width(safe(lead)) + 1
-        pdf.cell(lead_w, line_h, safe(lead))
-    pdf.set_font("Helvetica", "", 8.5)
-    pdf.multi_cell(PAGE_W - MARGIN - text_x - lead_w, line_h, safe(rest),
+#: Policy page type: body size, line height, and the bullet indents
+#: (first and second level) in from the margin.
+_POLICY_SIZE = 8.2
+_POLICY_LINE_H = 4.6
+_POLICY_INDENT = 8.0
+_POLICY_INDENT2 = 22.0
+
+
+def _policy_bullet(pdf: FPDF, lead: str, rest: str, *, indent: float) -> None:
+    """`-  Lead: rest` as one plain run of text, indented `indent` mm in
+    from the margin and wrapping to the right margin."""
+    text = f"{lead} {rest}".strip() if lead else rest
+    pdf.set_x(MARGIN + indent)
+    pdf.set_font("Helvetica", "", _POLICY_SIZE)
+    pdf.multi_cell(BODY_W - indent, _POLICY_LINE_H, "-  " + safe(text),
                    new_x="LMARGIN", new_y="NEXT")
 
 
@@ -212,48 +216,40 @@ def draw_policy_page(pdf: FPDF, blocks: list[tuple], *,
     for block in blocks:
         kind, args = block[0], block[1:]
         if kind == "h1":
-            pdf.set_font(SERIF, "B", 13)
+            pdf.set_font(SERIF, "B", 12)
             pdf.cell(0, 8, safe(args[0]), align="C", new_x="LMARGIN", new_y="NEXT")
         elif kind == "sub":
-            pdf.set_font("Helvetica", "", 8)
-            pdf.set_text_color(110, 110, 110)
-            pdf.cell(0, 4.5, safe(args[0]), align="C", new_x="LMARGIN", new_y="NEXT")
-            pdf.set_text_color(0, 0, 0)
+            pdf.set_font(SERIF, "B", 9)
+            pdf.cell(0, 6, safe(args[0]), align="C", new_x="LMARGIN", new_y="NEXT")
         elif kind == "h2":
             pdf.ln(2)
-            pdf.set_font(SERIF, "B", 10.5)
-            pdf.cell(0, 6, safe(args[0]), new_x="LMARGIN", new_y="NEXT")
+            pdf.set_x(MARGIN)
+            pdf.set_font(SERIF, "B", 9.5)
+            pdf.multi_cell(0, 5, safe(args[0]), new_x="LMARGIN", new_y="NEXT")
         elif kind == "h3":
-            pdf.set_font(SERIF, "B", 9)
-            pdf.cell(0, 5, safe(args[0]), new_x="LMARGIN", new_y="NEXT")
+            pdf.set_x(MARGIN)
+            pdf.set_font(SERIF, "B", 8.5)
+            pdf.multi_cell(0, 5, safe(args[0]), new_x="LMARGIN", new_y="NEXT")
         elif kind == "p":
-            pdf.set_font("Helvetica", "", 8.5)
-            pdf.multi_cell(BODY_W, 4.5, safe(args[0]),
+            pdf.set_x(MARGIN)
+            pdf.set_font("Helvetica", "", _POLICY_SIZE)
+            pdf.multi_cell(BODY_W, _POLICY_LINE_H, safe(args[0]),
                            new_x="LMARGIN", new_y="NEXT")
         elif kind == "note":
-            # Shaded callout with a darker bar down its left edge, as on
-            # the printed BSc/MSc policies.
+            # `Note:` bold, the rest regular on the same line.
             lead, rest = args
-            pdf.ln(1)
-            y = pdf.get_y()
-            pdf.set_fill_color(242, 242, 242)
-            pdf.rect(MARGIN, y, BODY_W, 6, style="F")
-            pdf.set_fill_color(200, 200, 200)
-            pdf.rect(MARGIN, y, 1.0, 6, style="F")
-            pdf.set_xy(MARGIN + 3, y + 0.75)
-            pdf.set_font("Helvetica", "B", 8)
-            lead_w = pdf.get_string_width(safe(lead)) + 1
-            pdf.cell(lead_w, 4.5, safe(lead))
-            pdf.set_font("Helvetica", "", 8)
-            pdf.cell(BODY_W - 3 - lead_w, 4.5, safe(rest),
-                     new_x="LMARGIN", new_y="NEXT")
-            pdf.set_y(y + 6)
-            pdf.ln(1)
+            pdf.set_x(MARGIN)
+            pdf.set_font("Helvetica", "B", _POLICY_SIZE)
+            lead_w = pdf.get_string_width(safe(lead)) + 1.5
+            pdf.cell(lead_w, 5, safe(lead))
+            pdf.set_font("Helvetica", "", _POLICY_SIZE)
+            pdf.multi_cell(BODY_W - lead_w, 5, safe(rest),
+                           new_x="LMARGIN", new_y="NEXT")
         elif kind == "li":
             lead, rest = args
-            _policy_bullet(pdf, lead, rest, indent=6.0)
+            _policy_bullet(pdf, lead, rest, indent=_POLICY_INDENT)
         elif kind == "li2":
-            _policy_bullet(pdf, "", args[0], indent=14.0)
+            _policy_bullet(pdf, "", args[0], indent=_POLICY_INDENT2)
 
     if not signatures:
         rule(pdf, gap_before=3.0)

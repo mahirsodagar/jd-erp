@@ -164,3 +164,29 @@ class MarksSheetTests(TestCase):
         })
         bob = next(x for x in r.data["rows"] if x["student_id"] == self.bob.id)
         self.assertEqual((bob["ia_marks"], bob["ea_marks"]), ("12.5", "70.0"))
+
+
+class MarksListCampusFilterTests(MarksSheetTests):
+    """`GET /api/academics/marks/?campus=` keeps only entries whose batch
+    runs at that campus (Marks page campus filter, 2026-11-12)."""
+
+    def test_campus_filter_narrows_to_that_campus_batches(self):
+        goa = Campus.objects.create(name="Goa", code="GOA")
+        goa_batch = Batch.objects.create(
+            name="BD-G", program=self.program, campus=goa,
+            academic_year=self.year,
+        )
+        self._save([{"student": self.ann.id, "ia_marks": D(10), "ea_marks": D(40)}])
+        MarksEntry.objects.create(
+            student=self.bob, subject=self.core, batch=goa_batch,
+            semester=self.sem, ia_marks=D(5), ia_max=D(20),
+            ea_marks=D(50), ea_max=D(80),
+        )
+
+        c = APIClient()
+        c.force_authenticate(self.admin)
+        self.assertEqual(len(c.get("/api/academics/marks/").data), 2)
+        main = c.get("/api/academics/marks/", {"campus": self.campus.id}).data
+        self.assertEqual([m["batch"] for m in main], [self.batch.id])
+        goa_rows = c.get("/api/academics/marks/", {"campus": goa.id}).data
+        self.assertEqual([m["batch"] for m in goa_rows], [goa_batch.id])

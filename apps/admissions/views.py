@@ -683,9 +683,9 @@ class StudentSendPortalCredentialsView(APIView):
 
 
 class StudentSendHandbookView(APIView):
-    """Emails the institute's student handbook to the student's personal
-    inbox. Plain-text body for now — attach the actual PDF later by
-    storing it on the Institute master."""
+    """Emails the institute's student handbook PDF (Master -> Institutes
+    -> `handbook_pdf`) to the student's personal inbox. Refused with a
+    400 when the institute has no handbook uploaded."""
 
     permission_classes = [IsAuthenticated, StudentAccessPolicy]
 
@@ -704,6 +704,14 @@ class StudentSendHandbookView(APIView):
         if not Enrollment.objects.filter(student=student).exists():
             return Response(
                 {"detail": "Enroll the student into a batch first."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+
+        if not getattr(student.institute, "handbook_pdf", None):
+            return Response(
+                {"detail": "No student handbook uploaded for "
+                           f"{student.institute}. Upload the PDF under "
+                           "Master -> Institutes first."},
                 status=http.HTTP_400_BAD_REQUEST,
             )
 

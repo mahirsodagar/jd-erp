@@ -33,6 +33,34 @@ def publish_topic(*, subject, batch, name: str, description: str,
 
 
 @transaction.atomic
+def copy_topic_to_batch(*, topic: CoursewareTopic, batch,
+                        created_by) -> CoursewareTopic:
+    """Duplicate `topic` for another batch (legacy courseware let one
+    `courseware_master` row be mapped to several batches; here the row
+    is copied so each batch owns its own topic). Attachments and the
+    cover image point at the same stored files — nothing is re-uploaded
+    — and every active student of `batch` is mapped, as on publish."""
+    copy = CoursewareTopic.objects.create(
+        subject=topic.subject, batch=batch, name=topic.name,
+        description=topic.description,
+        image=topic.image.name or None,
+        is_published=topic.is_published, created_by=created_by,
+    )
+    CoursewareAttachment.objects.bulk_create([
+        CoursewareAttachment(topic=copy, name=att.name, file=att.file.name,
+                             uploaded_by=created_by)
+        for att in topic.attachments.all()
+    ])
+    student_ids = (Enrollment.objects
+                   .filter(batch=batch, status=Enrollment.Status.ACTIVE)
+                   .values_list("student_id", flat=True).distinct())
+    CoursewareMapping.objects.bulk_create([
+        CoursewareMapping(topic=copy, student_id=sid) for sid in student_ids
+    ], ignore_conflicts=True)
+    return copy
+
+
+@transaction.atomic
 def remap_topic_to_batch(topic: CoursewareTopic) -> int:
     """Re-create mappings (for late-enrolled students). Returns count added."""
     student_ids = set(Enrollment.objects

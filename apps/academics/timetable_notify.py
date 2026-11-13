@@ -23,7 +23,7 @@ def _fmt_time(t):
 
 
 def notify_slot(slot, *, verb: str, actor) -> None:
-    """`verb` is 'scheduled', 'updated' or 'cancelled'."""
+    """`verb` is 'scheduled', 'updated', 'cancelled' or 'removed'."""
     when = f"{slot.date.strftime('%d-%m-%Y')}"
     ts = slot.time_slot
     if ts is not None:
@@ -49,20 +49,39 @@ def notify_batch_published(batch, *, instructors, start_date, end_date,
                            created: int, actor) -> None:
     """One summary line per person after a bulk publish, instead of a
     line per generated slot."""
-    if not created:
+    _notify_batch_summary(
+        batch, instructors=instructors, start_date=start_date,
+        end_date=end_date, count=created, actor=actor,
+        title="Timetable published",
+    )
+
+
+def notify_batch_removed(batch, *, instructors, start_date, end_date,
+                         removed: int, actor) -> None:
+    """Counterpart of `notify_batch_published` for a bulk delete."""
+    _notify_batch_summary(
+        batch, instructors=instructors, start_date=start_date,
+        end_date=end_date, count=removed, actor=actor,
+        title="Timetable removed",
+    )
+
+
+def _notify_batch_summary(batch, *, instructors, start_date, end_date,
+                          count: int, actor, title: str) -> None:
+    if not count:
         return
     span = f"{start_date.strftime('%d-%m-%Y')} to {end_date.strftime('%d-%m-%Y')}"
-    body = f"{created} class(es) for {batch.name}, {span}."
+    body = f"{count} class(es) for {batch.name}, {span}."
     notify(
         [getattr(i, "user_account", None) for i in instructors],
         kind=InAppNotification.Kind.TIMETABLE,
-        title="Timetable published", body=body, link="/schedule/me",
+        title=title, body=body, link="/schedule/me",
         exclude_user=actor,
     )
     notify(
         [enr.student.user_account
          for enr in roster_for_batch(batch).select_related("student__user_account")],
         kind=InAppNotification.Kind.TIMETABLE,
-        title="Timetable published", body=body, link="/portal/timetable",
+        title=title, body=body, link="/portal/timetable",
         exclude_user=actor,
     )

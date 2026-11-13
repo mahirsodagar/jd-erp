@@ -5,12 +5,16 @@ from .views import (
     RelievingDecideView, RelievingDetailView, RelievingFinalizeView,
     RelievingLetterPdfView, RelievingListCreateView,
     RelievingManagersForInstituteView, RelievingManagersView,
-    RelievingWithdrawView, SendExperienceLetterView,
+    RelievingReportView, RelievingWithdrawView, SendExperienceLetterView,
 )
 
 urlpatterns = [
+    # Dashboard list (approver-of / view_all) + submit
     path("", RelievingListCreateView.as_view(), name="relieving-list-create"),
+    # My Relieving page: own applications only
     path("me/", MyRelievingView.as_view(), name="relieving-me"),
+    # Relieving Report page (hr.relieving.report), ?output=csv
+    path("report/", RelievingReportView.as_view(), name="relieving-report"),
     # Relieving Managers master (L1–L4 per institute)
     path("managers/", RelievingManagersView.as_view(), name="relieving-managers"),
     path("managers/mine/", MyRelievingChainView.as_view(),

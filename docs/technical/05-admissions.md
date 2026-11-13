@@ -202,10 +202,17 @@ new one.
 
 ## 5.8 Handbook (`services_handbook.py`)
 
-Plain-text email, sent directly through `apps.notifications.email.send_email`
-(not through the queue — so **it produces no `NotificationDispatchLog` row**).
-There is a documented extension point: add a `handbook_pdf` FileField to
-`Institute` and pass it via `attachments=[(name, content, "application/pdf")]`.
+Plain-text email with the institute's Student Handbook PDF attached, sent
+directly through `apps.notifications.email.send_email` (not through the queue —
+so **it produces no `NotificationDispatchLog` row**).
+
+The PDF is `Institute.handbook_pdf` (Master → Institutes). The 2026 editions
+for JDIFT and JDSD are bundled in `apps/master/seed_assets/` and attached by
+`manage.py seed_institutes` when the field is blank (`--force` re-attaches the
+bundled copy over an uploaded one). A later edition is uploaded from the
+Institute form — no deploy needed. With no PDF on file the endpoint returns 400
+instead of mailing a body that promises an attachment it doesn't carry. The
+attachment is named `<CODE>_Student_Handbook.pdf`.
 
 ## 5.9 Change impact
 

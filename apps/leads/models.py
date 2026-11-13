@@ -168,9 +168,13 @@ class Counsellor(models.Model):
     Replaces the per-category counsellor pools: there is now one flat
     list. Every counsellor is an Employee, and the Employee must have a
     portal `user_account` — `Lead.assign_to` points at a User, so an
-    employee with no login cannot hold a lead. New leads rotate through
-    the active counsellors, and the lead-assignment pickers show only
-    the people listed here.
+    employee with no login cannot hold a lead.
+
+    Assignment is campus-wise (2026-11-12): a lead rotates through the
+    active counsellors whose `Employee.campus` is the lead's campus, and
+    the lead-assignment pickers offer only that campus's counsellors. A
+    counsellor's campus is the employee record's campus — move the
+    employee in HR to move the counsellor.
     """
 
     employee = models.OneToOneField(
@@ -204,16 +208,22 @@ class Counsellor(models.Model):
 
 
 class CounsellorRotation(models.Model):
-    """Single-row table holding the round-robin pointer.
+    """One round-robin pointer per campus.
 
-    The pool model carried its pointer on the pool row; with one flat
-    list there is no such row, so this stands in as the thing
-    `select_for_update` locks — that lock is what stops two concurrent
-    lead creates handing the same counsellor both leads.
+    The pool model carried its pointer on the pool row; the flat list
+    has no such row, so this stands in as the thing `select_for_update`
+    locks — that lock is what stops two concurrent lead creates handing
+    the same counsellor both leads. Rows are created on first use per
+    campus. The legacy global row (pk=1, campus NULL) from the flat-list
+    migration is left in place but no longer consulted.
     """
 
     SINGLETON_PK = 1
 
+    campus = models.OneToOneField(
+        "master.Campus", on_delete=models.CASCADE,
+        related_name="counsellor_rotation", null=True, blank=True,
+    )
     pointer = models.PositiveIntegerField(
         default=0,
         help_text="Round-robin offset; advanced after each assignment.",
@@ -221,7 +231,7 @@ class CounsellorRotation(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"Counsellor rotation @ {self.pointer}"
+        return f"Counsellor rotation [{self.campus_id}] @ {self.pointer}"
 
 
 class LeadFollowup(models.Model):

@@ -20,17 +20,29 @@ from .models import Lead, LeadStatusHistory
 
 # --- Round-robin counsellor assignment (F.3) --------------------------
 
-def eligible_counsellors():
+def _campus_id(campus) -> int | None:
+    """Accept a Campus instance or a pk."""
+    if campus is None:
+        return None
+    return getattr(campus, "pk", campus)
+
+
+def eligible_counsellors(campus=None):
     """Counsellors that can currently receive a lead, in rotation order.
 
     A counsellor drops out if they are paused, their employee record is
     inactive or soft-deleted, they have no portal account, or that
     account is deactivated / marked unavailable.
+
+    With `campus` (instance or pk) only that campus's counsellors are
+    returned — a counsellor's campus is `Employee.campus`. Leads are
+    assigned campus-wise, so every assignment path passes the lead's
+    campus; the bare call is for admin listings.
     """
     from apps.employees.models import Employee
     from .models import Counsellor
 
-    return (
+    qs = (
         Counsellor.objects
         .filter(
             is_active=True,
@@ -40,42 +52,54 @@ def eligible_counsellors():
             employee__user_account__is_active=True,
             employee__user_account__is_available=True,
         )
-        .select_related("employee", "employee__user_account")
+        .select_related("employee", "employee__user_account",
+                        "employee__campus")
         .order_by("sort_order", "id")
+    )
+    campus_id = _campus_id(campus)
+    if campus_id is not None:
+        qs = qs.filter(employee__campus_id=campus_id)
+    return qs
+
+
+def can_take_leads(user, campus=None) -> bool:
+    """True when `user` is an eligible counsellor right now — for that
+    campus, when one is given."""
+    if user is None:
+        return False
+    return (
+        eligible_counsellors(campus)
+        .filter(employee__user_account=user)
+        .exists()
     )
 
 
-def can_take_leads(user) -> bool:
-    """True when `user` is an eligible counsellor right now."""
-    if user is None:
-        return False
-    return eligible_counsellors().filter(employee__user_account=user).exists()
+def assign_via_round_robin(campus):
+    """Pick the next eligible counsellor at `campus`. Returns a User or
+    None when that campus has nobody who can take a lead — the lead is
+    then created unassigned rather than sent to another campus.
 
-
-def assign_via_round_robin():
-    """Pick the next eligible counsellor. Returns a User or None.
-
-    Race-safe via select_for_update on the single rotation row. The
+    Race-safe via select_for_update on the campus's rotation row. The
     pointer is an offset into a list that is recomputed each call, so
     pausing or adding a counsellor shifts where the next lead lands —
     fair over time, but not a strict cycle.
     """
     from .models import CounsellorRotation
 
+    campus_id = _campus_id(campus)
+    if campus_id is None:
+        return None
+
     with transaction.atomic():
+        # get_or_create first so the lock below always has a row to take.
+        CounsellorRotation.objects.get_or_create(campus_id=campus_id)
         rotation = (
             CounsellorRotation.objects
             .select_for_update()
-            .filter(pk=CounsellorRotation.SINGLETON_PK)
-            .first()
+            .get(campus_id=campus_id)
         )
-        if rotation is None:
-            # Seeded by migration; recreated here if it ever goes missing.
-            rotation = CounsellorRotation.objects.create(
-                pk=CounsellorRotation.SINGLETON_PK,
-            )
 
-        counsellors = list(eligible_counsellors())
+        counsellors = list(eligible_counsellors(campus_id))
         if not counsellors:
             return None
 
@@ -134,11 +158,11 @@ def create_lead(*, data: dict, created_by=None, utm: dict | None = None) -> Lead
     # Find existing leads that match
     existing = find_duplicates(email=email, phone_normalized=phone_norm)
 
-    # No match → fresh lead. Auto-assign via round-robin if no
-    # `assign_to` was supplied (matches the PDF's Phase 2 SLA).
+    # No match → fresh lead. Auto-assign via the lead's campus
+    # round-robin if no `assign_to` was supplied (PDF Phase 2 SLA).
     if not existing:
         if not data.get("assign_to"):
-            rr = assign_via_round_robin()
+            rr = assign_via_round_robin(data.get("campus"))
             if rr is not None:
                 data["assign_to"] = rr
 
@@ -176,14 +200,20 @@ def create_lead(*, data: dict, created_by=None, utm: dict | None = None) -> Lead
     next_seq = family_count + 1
 
     # Auto-assign to the original counsellor (overrides any incoming
-    # assign_to) so one person keeps the whole conversation — unless they
-    # can no longer take leads (paused on the Counsellors page, left, or
-    # lost their portal account). Then an explicit assign_to wins, and
-    # failing that the lead goes round the rotation like a fresh one.
+    # assign_to) so one person keeps the whole conversation — even when
+    # the repeat enquiry names a different campus; the conversation
+    # matters more than the campus rule here. Unless they can no longer
+    # take leads at all (paused on the Counsellors page, left, or lost
+    # their portal account). Then an explicit assign_to wins, and
+    # failing that the lead goes round its campus rotation like a fresh
+    # one.
     owner = root.assign_to
     if owner is not None and not can_take_leads(owner):
         owner = None
-    data["assign_to"] = owner or data.get("assign_to") or assign_via_round_robin()
+    data["assign_to"] = (
+        owner or data.get("assign_to")
+        or assign_via_round_robin(data.get("campus"))
+    )
 
     lead = Lead.objects.create(
         created_by=created_by,
