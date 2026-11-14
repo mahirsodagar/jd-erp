@@ -64,8 +64,8 @@ class Institute(models.Model):
         help_text=(
             "Which of the two printed stationery layouts this institute "
             "uses. LEFT puts the address block under the logo and the "
-            "undertaking footer at the left margin. RIGHT sets the "
-            "address opposite the logo, the undertaking footer at the "
+            "Fee Payment Schedule footer at the left margin. RIGHT sets the "
+            "address opposite the logo, the Fee Payment Schedule footer at the "
             "right margin, and — matching the printed JD School of "
             "Design receipt — right-aligns the student/father name rows "
             "and 'Issued By'."
@@ -74,7 +74,7 @@ class Institute(models.Model):
     signature = models.ImageField(
         upload_to="institute/signatures/", blank=True, null=True,
         help_text="Authorised signatory's signature. Printed in that box "
-                  "on the undertaking; receipts are always left unsigned.",
+                  "on the Fee Payment Schedule; receipts are always left unsigned.",
     )
     letterhead_title = models.CharField(
         max_length=80, blank=True,

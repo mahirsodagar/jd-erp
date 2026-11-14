@@ -79,6 +79,100 @@ class AdminDailyReport(models.Model):
         return f"{self.user_id} on {self.rep_date}"
 
 
+# --- 2b. Month-wise freeze: access requests -------------------------
+
+class DailyReportAccess(models.Model):
+    """A request to edit a frozen month of one's own daily report.
+
+    Daily reports (faculty + admin) lock month-wise once the month is
+    over (see `freeze.py`). To edit a locked month the employee raises
+    one of these; their reporting manager approves it; an admin holding
+    `audit.daily_report.unlock` then grants access until a date. Only a
+    GRANTED, unexpired row unlocks the month.
+
+    `manager_email` is a snapshot of `Employee.reporting_manager_1`'s
+    primary email at request time, matched the same way leave does
+    (`apps.leaves.permissions.manager_email_q`).
+    """
+
+    class ReportType(models.TextChoices):
+        FACULTY = "FACULTY", "Faculty daily report"
+        ADMIN = "ADMIN", "Admin daily report"
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Awaiting manager"
+        MANAGER_APPROVED = "MANAGER_APPROVED", "Manager approved — awaiting admin"
+        REJECTED = "REJECTED", "Rejected"
+        GRANTED = "GRANTED", "Access granted"
+        REVOKED = "REVOKED", "Revoked"
+
+    OPEN_STATUSES = (Status.PENDING, Status.MANAGER_APPROVED, Status.GRANTED)
+
+    report_type = models.CharField(max_length=8, choices=ReportType.choices)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="daily_report_access_requests",
+    )
+    employee = models.ForeignKey(
+        "employees.Employee", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="daily_report_access_requests",
+    )
+    year = models.PositiveSmallIntegerField()
+    month = models.PositiveSmallIntegerField()  # 1..12
+    reason = models.TextField()
+
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PENDING,
+        db_index=True,
+    )
+
+    # Step 1 — reporting manager
+    manager_email = models.EmailField(blank=True, db_index=True)
+    manager_decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+    )
+    manager_decided_at = models.DateTimeField(null=True, blank=True)
+    manager_remarks = models.TextField(blank=True)
+
+    # Step 2 — admin grant
+    granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+    )
+    granted_at = models.DateTimeField(null=True, blank=True)
+    access_until = models.DateField(
+        null=True, blank=True,
+        help_text="Last day (inclusive) the month stays editable.",
+    )
+    grant_remarks = models.TextField(blank=True)
+
+    revoked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+    )
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["user", "report_type", "year", "month"]),
+            models.Index(fields=["status", "created_at"]),
+        ]
+
+    def __str__(self):
+        return (f"{self.get_report_type_display()} {self.year}-{self.month:02d} "
+                f"for user {self.user_id} [{self.status}]")
+
+    @property
+    def month_label(self) -> str:
+        from datetime import date as _d
+        return _d(self.year, self.month, 1).strftime("%B %Y")
+
+
 # --- 3. Course-end report -------------------------------------------
 
 class CourseEndReport(models.Model):

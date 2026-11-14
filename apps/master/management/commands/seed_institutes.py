@@ -80,7 +80,7 @@ class Command(BaseCommand):
     """
 
     help = ("Seed institutes and the letterhead printed on receipts and "
-            "undertakings. Idempotent; will not clobber edited values.")
+            "Fee Payment Schedules. Idempotent; will not clobber edited values.")
 
     def add_arguments(self, parser):
         parser.add_argument(

@@ -343,6 +343,9 @@ INTENTIONALLY_NOT_BACKFILLED: dict[str, str] = {
     "audit.faculty_daily.delete_any": "was superuser-only",
     "audit.admin_daily.edit_any": "was superuser-only",
     "audit.admin_daily.delete_any": "was superuser-only",
+    # Fee Receipts Export (2026-11-14) is a brand-new report; no old key
+    # implied accounting exports, so it is granted per role.
+    "audit.fee_export": "new report; no pre-split equivalent",
     # Course-end and batch-mentor reports had no edit / delete endpoint
     # at all, for anyone — these keys back brand-new functionality.
     "audit.course_end.edit_any": "no edit endpoint existed",

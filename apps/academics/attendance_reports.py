@@ -5,7 +5,7 @@ drill-down views (per-slot roster reuses the existing roster endpoint;
 per-module date-grid lives here).
 
 Percentage convention matches the rest of the app: "present-like" =
-PRESENT + LATE + ON_DUTY, taken over the rows that were actually marked.
+PRESENT + LATE, taken over the rows that were actually marked.
 """
 
 from datetime import date
@@ -17,7 +17,7 @@ from apps.master.models import Batch
 
 from .models import Attendance, ScheduleSlot
 
-PRESENT_LIKE = ("PRESENT", "LATE", "ON_DUTY")
+PRESENT_LIKE = ("PRESENT", "LATE")
 SHORTAGE_THRESHOLD = 75.0
 
 

@@ -89,7 +89,7 @@ class InstituteAdmin(admin.ModelAdmin):
         return False
     fieldsets = (
         (None, {"fields": ("name", "code", "logo", "email_domain", "is_active")}),
-        ("Letterhead (printed on fee receipts + undertakings)", {
+        ("Letterhead (printed on fee receipts + Fee Payment Schedules)", {
             "fields": ("letterhead_placement", "signature",
                        "letterhead_title", "address", "phone", "email",
                        "gstin", "payee_name"),

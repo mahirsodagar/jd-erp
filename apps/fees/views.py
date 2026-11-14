@@ -422,6 +422,53 @@ class FeeReceiptPdfView(APIView):
         return resp
 
 
+class FeeReceiptSendView(APIView):
+    """Re-send the receipt PDF to the student (campus inbox in CC).
+
+    The receipt is mailed automatically when it is recorded; this is the
+    manual "Send receipt" button for when the student never got it, the
+    email address was corrected afterwards, or they simply ask for a copy.
+    Same module gate as viewing the receipt — no extra permission key.
+    """
+
+    permission_classes = [IsAuthenticated, FeeAccessPolicy]
+
+    def post(self, request, pk):
+        try:
+            r = FeeReceipt.objects.select_related(
+                "enrollment", "enrollment__student", "enrollment__campus",
+                "enrollment__batch", "enrollment__program",
+                "enrollment__student__institute", "installment", "other_fee",
+                "received_by",
+            ).get(pk=pk)
+        except FeeReceipt.DoesNotExist as e:
+            raise Http404 from e
+        self.check_object_permissions(request, r)
+        if r.status == FeeReceipt.Status.CANCELLED:
+            return Response({"detail": "Cancelled receipts cannot be sent."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        if not (r.enrollment.student.student_email or "").strip():
+            return Response(
+                {"detail": "The student has no email address on record. "
+                           "Add one on the student profile and try again."},
+                status=http.HTTP_400_BAD_REQUEST)
+
+        log = send_receipt_email(r)
+        if log is None:
+            return Response({"detail": "The receipt could not be sent."},
+                            status=http.HTTP_502_BAD_GATEWAY)
+        payload = {
+            "receipt_no": r.receipt_no,
+            "recipient": log.recipient,
+            "cc": log.cc,
+            "status": log.status,
+            "error": log.error or "",
+        }
+        if log.status == log.Status.FAILED:
+            return Response(payload, status=http.HTTP_502_BAD_GATEWAY)
+        return Response(payload)
+
+
 # --- Concessions -------------------------------------------------------
 
 class ConcessionListCreateView(APIView):

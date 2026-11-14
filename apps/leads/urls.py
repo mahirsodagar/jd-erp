@@ -14,6 +14,7 @@ from .exam_views import (
     ExamQuestionListCreateView,
     ExamReportView,
     ExamResponseReviewView,
+    ExamSendLinksView,
     LeadExamAttemptsView,
 )
 from .reports import (
@@ -85,6 +86,9 @@ urlpatterns = [
          name="exam-attempts"),
     path("exams/<int:pk>/report/", ExamReportView.as_view(),
          name="exam-report"),
+    # Bulk email to the SELECTED attempts only (explicit attempt_ids).
+    path("exams/<int:pk>/send-links/", ExamSendLinksView.as_view(),
+         name="exam-send-links"),
     path("exam-questions/<int:pk>/", ExamQuestionDetailView.as_view(),
          name="exam-question-detail"),
     path("exam-attempts/<int:pk>/", ExamAttemptDetailView.as_view(),

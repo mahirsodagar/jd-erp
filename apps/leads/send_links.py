@@ -195,8 +195,8 @@ def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict
                 "Application_Form_Link": long_url,
                 "name": lead.name, "url": long_url,
                 "institute": institute_label,
-                # Drives the From domain (Diploma → jdinstitute.edu.in,
-                # Degree/Bachelors → jdindia.com). See notifications.sender.
+                # Drives the From domain via EMAIL_DOMAIN_DIPLOMA / _DEGREE (both
+                # jdindia.com since 2026-11-13). See notifications.sender.
                 "degree_type": (
                     lead.program.degree_type if lead.program_id else ""
                 ),
@@ -479,8 +479,8 @@ def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
                 "Payment_Link": url,
                 "name": lead.name, "url": url,
                 "institute": institute_label,
-                # Drives the From domain (Diploma → jdinstitute.edu.in,
-                # Degree/Bachelors → jdindia.com). See notifications.sender.
+                # Drives the From domain via EMAIL_DOMAIN_DIPLOMA / _DEGREE (both
+                # jdindia.com since 2026-11-13). See notifications.sender.
                 "degree_type": (
                     lead.program.degree_type if lead.program_id else ""
                 ),
@@ -638,8 +638,8 @@ def send_entrance_exam_link(*, attempt, actor=None) -> dict:
             "url": url,
             "duration": str(exam.duration_min),
             "window": window_note,
-            # Drives the From domain (Diploma → jdinstitute.edu.in,
-            # Degree/Bachelors → jdindia.com). See notifications.sender.
+            # Drives the From domain via EMAIL_DOMAIN_DIPLOMA / _DEGREE (both
+            # jdindia.com since 2026-11-13). See notifications.sender.
             "degree_type": (
                 lead.program.degree_type if lead.program_id else ""
             ),

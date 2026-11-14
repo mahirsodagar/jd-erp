@@ -34,7 +34,6 @@ from .services import (
 )
 from .services_handbook import send_handbook_email
 from .services_idcard import render_id_card
-from .services_portal_email import send_portal_credentials_email
 from .services_undertaking import render_undertaking_pdf, send_undertaking
 
 
@@ -581,7 +580,7 @@ class EnrollmentUndertakingPdfView(_UndertakingMixin, APIView):
         )
         resp = HttpResponse(pdf, content_type="application/pdf")
         name = enrollment.student.application_form_id or enrollment.id
-        resp["Content-Disposition"] = f'inline; filename="undertaking-{name}.pdf"'
+        resp["Content-Disposition"] = f'inline; filename="fee-payment-schedule-{name}.pdf"'
         return resp
 
 
@@ -630,14 +629,13 @@ class StudentSendPortalCredentialsView(APIView):
     On each call we:
       1. Provision the portal user if missing (set `Student.user_account`).
       2. Generate a personalised institute email from the Institute's
-         `email_domain` master.
-      3. Rotate the user's password so the email reflects current state.
-      4. Email the (institute_email, password) pair to the student's
-         personal email.
+         `email_domain` master — this is also the username.
+      3. Rotate the password and store the plain text on
+         `Student.portal_password`.
 
-    Returns the username, email, and the just-issued temporary password
-    so the calling counsellor can show it on screen too (matching the
-    PHP "show once" pattern).
+    Nothing is emailed. Returns the username, email and password so the
+    counsellor can read them off the screen; they stay visible on the
+    student page afterwards.
 
     Gated on the student having at least one Enrollment — per the
     revised admission flow.
@@ -669,17 +667,9 @@ class StudentSendPortalCredentialsView(APIView):
             return Response({"detail": str(e)},
                             status=http.HTTP_400_BAD_REQUEST)
 
-        # Best-effort delivery: don't block the staff response on SMTP.
-        email_ok, email_err = send_portal_credentials_email(
-            student=student, creds=creds,
-        )
-
-        return Response({
-            **creds,
-            "delivered": email_ok,
-            "delivery_error": "" if email_ok else email_err,
-            "recipient": student.student_email or "",
-        })
+        # No email: the credentials are shown on the student page (and
+        # kept there — `Student.portal_password`) for staff to share.
+        return Response(creds)
 
 
 class StudentSendHandbookView(APIView):

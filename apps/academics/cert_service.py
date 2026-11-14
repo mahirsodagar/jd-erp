@@ -8,6 +8,8 @@ Per-type rules:
 - TRANSFER   : enrollment in {DROPPED, ALUMNI}.
 - CHARACTER  : any enrollment.
 - NO_DUES    : fee balance is zero.
+- NOC        : has an enrollment and fee balance is zero (the institute
+               has no objection to the student's stated purpose).
 
 Override via `academics.certificate.override_eligibility`.
 """
@@ -85,7 +87,8 @@ def check_eligibility(*, student, enrollment, cert_type: str) -> dict:
         if not enrollment:
             reasons.append("Character cert requires an enrollment.")
 
-    elif cert_type == Certificate.Type.NO_DUES:
+    elif cert_type in (Certificate.Type.NO_DUES, Certificate.Type.NOC):
+        label = "No-dues" if cert_type == Certificate.Type.NO_DUES else "NOC"
         # Use the fees balance service.
         try:
             from apps.fees.services.balance import enrollment_balance
@@ -93,7 +96,7 @@ def check_eligibility(*, student, enrollment, cert_type: str) -> dict:
             reasons.append("Fees module unavailable.")
         else:
             if not enrollment:
-                reasons.append("No-dues requires an enrollment.")
+                reasons.append(f"{label} requires an enrollment.")
             else:
                 bal = enrollment_balance(enrollment)
                 if Decimal(bal["balance"]) > Decimal("0"):
@@ -111,6 +114,7 @@ _TYPE_SHORT = {
     Certificate.Type.TRANSFER: "TRAN",
     Certificate.Type.CHARACTER: "CHAR",
     Certificate.Type.NO_DUES: "NODU",
+    Certificate.Type.NOC: "NOC",
 }
 
 
@@ -240,6 +244,7 @@ def _title_for(cert_type: str) -> str:
         Certificate.Type.TRANSFER: "Transfer Certificate",
         Certificate.Type.CHARACTER: "Character Certificate",
         Certificate.Type.NO_DUES: "No Dues Certificate",
+        Certificate.Type.NOC: "No Objection Certificate",
     }[cert_type]
 
 
@@ -316,6 +321,18 @@ def render_certificate_pdf(certificate: Certificate) -> bytes:
             f"at {campus_name} campus, batch {batch} ({ay}).",
             "There are no outstanding dues with the institute.",
         ]
+
+    elif certificate.type == Certificate.Type.NOC:
+        body_lines = [
+            f"This is to certify that {name} is a student",
+            f"of {program} at our {campus_name} campus,",
+            f"batch {batch} ({ay}), and has no outstanding dues.",
+            "The institute has no objection to the student",
+        ]
+        if certificate.purpose:
+            body_lines.append(f"proceeding with: {certificate.purpose}.")
+        else:
+            body_lines.append("proceeding with the purpose stated in their request.")
 
     pdf.set_font("Helvetica", "", 13)
     pdf.ln(6)

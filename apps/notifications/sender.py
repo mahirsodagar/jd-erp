@@ -6,12 +6,17 @@ type*. From the institute's spec:
 
     fee link / fee receipt / admission form link / admission form filled
     / installment undertaking / installment-pending reminder
-        → Diploma courses        : jdinstitute.edu.in
+        → Diploma courses        : jdindia.com  (was jdinstitute.edu.in)
         → Degree / Bachelors     : jdindia.com
     reset student password / portal credentials
         → mail.jdinstitute.com
     leave / relieving / experience (HR + staff workflows)
-        → jdinstitute.edu.in
+        → jdindia.com  (was jdinstitute.edu.in)
+
+Since 2026-11-13 jdinstitute.edu.in is retired as a sending domain:
+every SMTP-routed trigger goes out from jdindia.com over Zoho. The
+diploma / HR / degree knobs still exist (EMAIL_DOMAIN_*) so the split
+can be revived per environment, but all default to jdindia.com.
 
 `resolve_sender(template_key, degree_type=...)` maps a trigger to the
 domain + From-address it should send from. It is provider-agnostic: the
@@ -21,10 +26,8 @@ dispatcher passes the result to MSG91 (`from`/`domain`) or to SMTP
 SAFETY: a domain is only made "live" when it has an entry in
 `settings.EMAIL_SENDER_BY_DOMAIN`. Domains absent from that map resolve
 to a `None` From-address, and the dispatcher falls back to the provider
-default (the current single-domain behaviour). This lets the routing
-*policy* land now while the new sender domains (jdinstitute.edu.in,
-jdindia.com) are still being verified on MSG91 — flip them on by adding
-the verified From-address to that map, no code change.
+default. jdindia.com does not need an entry there: it has a dedicated
+SMTP connection (`settings.EMAIL_SMTP_BY_DOMAIN`) whose own From wins.
 """
 
 from __future__ import annotations
@@ -99,8 +102,8 @@ def transport_for(domain: str) -> tuple[str, dict | None]:
 
         jdindia.com          → SMTP, dedicated Zoho connection
         mail.jdinstitute.com → MSG91 (templated transactional API)
-        jdinstitute.edu.in   → SMTP, project default (Gmail/Workspace)
-        <anything else>      → SMTP, project default
+        <anything else>      → SMTP, project default (EMAIL_HOST_*,
+                               which should be the same Zoho mailbox)
 
     Returns ``(kind, smtp_config)`` where ``kind`` is "msg91" or "smtp".
     For "smtp", ``smtp_config`` is a dedicated connection dict, or None to

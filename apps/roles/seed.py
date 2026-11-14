@@ -129,6 +129,7 @@ CATALOGUE = [
     ("employees", "employees.employee.change_status", "Activate or deactivate an employee"),
     ("employees", "employees.employee.delete", "Soft-delete an employee"),
     ("employees", "employees.employee.provision_portal", "Create an employee's portal login"),
+    ("employees", "employees.employee.id_card", "Download an employee's ID card"),
 
     ("employees", "employees.document.view", "See an employee's documents"),
     ("employees", "employees.document.add", "Upload a document for an employee"),
@@ -212,7 +213,7 @@ CATALOGUE = [
     ("admissions", "admissions.enrollment.view", "See a student's enrolments"),
     ("admissions", "admissions.enrollment.add", "Enrol a student into a batch"),
     ("admissions", "admissions.enrollment.edit", "Edit an enrolment"),
-    ("admissions", "admissions.enrollment.send_undertaking", "Email the fee undertaking PDF to a student"),
+    ("admissions", "admissions.enrollment.send_undertaking", "Email the Fee Payment Schedule PDF to a student"),
 
     # Module E.2 — Fees
     *_crud("master", "master.feetemplate", "fee templates"),
@@ -413,6 +414,11 @@ CATALOGUE = [
     ("audit", "audit.admin_daily.view_all", "See every admin daily report"),
     ("audit", "audit.admin_daily.edit_any", "Edit anyone's admin daily report"),
     ("audit", "audit.admin_daily.delete_any", "Delete anyone's admin daily report"),
+    # Both daily reports freeze month-wise once the month is over. An
+    # employee asks to unlock a month, their reporting manager approves,
+    # and this key lets an admin grant (and revoke) the access window.
+    ("audit", "audit.daily_report.unlock",
+     "Grant edit access to a frozen daily-report month (after manager approval)"),
     # Audit > Periodic Reports (Course-End + Batch-Mentor).
     #
     # Neither report could be edited or deleted by anyone, including
@@ -421,12 +427,12 @@ CATALOGUE = [
     #
     # Approving and returning-for-rework are split: sending a report
     # back to its author is a different act from signing it off.
-    ("audit", "audit.course_end.view_all", "See every course-end report"),
-    ("audit", "audit.course_end.submit", "Submit a course-end report"),
-    ("audit", "audit.course_end.approve", "Approve a course-end report"),
-    ("audit", "audit.course_end.return", "Return a course-end report for rework"),
-    ("audit", "audit.course_end.edit_any", "Edit anyone's course-end report"),
-    ("audit", "audit.course_end.delete_any", "Delete anyone's course-end report"),
+    ("audit", "audit.course_end.view_all", "See every module end report"),
+    ("audit", "audit.course_end.submit", "Submit a module end report"),
+    ("audit", "audit.course_end.approve", "Approve a module end report"),
+    ("audit", "audit.course_end.return", "Return a module end report for rework"),
+    ("audit", "audit.course_end.edit_any", "Edit anyone's module end report"),
+    ("audit", "audit.course_end.delete_any", "Delete anyone's module end report"),
 
     ("audit", "audit.batch_mentor.view_all", "See every batch-mentor report"),
     ("audit", "audit.batch_mentor.submit_for_others", "Submit a batch-mentor report for a batch I don't mentor"),
@@ -476,6 +482,9 @@ CATALOGUE = [
     ("audit", "audit.compliance.resolve", "Resolve a compliance flag"),
     ("audit", "audit.compliance.edit_any", "Edit anyone's flag or star"),
     ("audit", "audit.compliance.delete_any", "Delete anyone's flag or star"),
+    # Audit > Fee Receipts Export (2026-11-14): every fee receipt as a
+    # Tally receipt-voucher row, student / program / campus-wise.
+    ("audit", "audit.fee_export", "Download fee receipts as Tally receipt vouchers"),
     # Audit > Dashboards — one key used to open all five. The
     # per-instructor feedback summary and the live-faculty tracker are
     # views of a named colleague's activity, so they carry their own

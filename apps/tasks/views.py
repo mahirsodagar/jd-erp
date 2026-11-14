@@ -52,7 +52,7 @@ class TaskListCreateView(APIView):
 
         # ?all=1 forces the unscoped report view (still gated by perms in
         # _scope_for — non-perm users just get their normal scope).
-        return Response(TaskSerializer(qs, many=True).data)
+        return Response(TaskSerializer(qs, many=True, context={"request": request}).data)
 
     def post(self, request):
         s = TaskCreateSerializer(data=request.data)
@@ -66,7 +66,7 @@ class TaskListCreateView(APIView):
         except Exception:
             pass
         return Response(
-            TaskSerializer(task).data, status=http.HTTP_201_CREATED,
+            TaskSerializer(task, context={"request": request}).data, status=http.HTTP_201_CREATED,
         )
 
 
@@ -80,7 +80,7 @@ class TaskDetailView(APIView):
             raise Http404 from e
 
     def get(self, request, pk):
-        return Response(TaskSerializer(self._obj(pk, request.user)).data)
+        return Response(TaskSerializer(self._obj(pk, request.user), context={"request": request}).data)
 
     def patch(self, request, pk):
         """PHP allowed the creator to edit name/description/end_date
@@ -126,7 +126,7 @@ class TaskDetailView(APIView):
         if task.assignee_id != old_assignee_id:
             task.refresh_from_db()
             notify_task_assigned(task=task)
-        return Response(TaskSerializer(task).data)
+        return Response(TaskSerializer(task, context={"request": request}).data)
 
     def delete(self, request, pk):
         """Only the creator deletes their own task.
@@ -180,4 +180,4 @@ class TaskCompleteView(APIView):
             notify_task_completed(task=task)
         except Exception:
             pass
-        return Response(TaskSerializer(task).data)
+        return Response(TaskSerializer(task, context={"request": request}).data)

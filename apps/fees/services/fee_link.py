@@ -132,8 +132,8 @@ def send_fee_link(*, enrollment, actor=None) -> dict:
             "amount": _money(balance),
             "due_date": target.due_date.strftime("%d %b %Y") if target.due_date else "—",
             "url": url,
-            # Drives the From domain (Diploma → jdinstitute.edu.in,
-            # Degree/Bachelors → jdindia.com). See notifications.sender.
+            # Drives the From domain via EMAIL_DOMAIN_DIPLOMA / _DEGREE (both
+            # jdindia.com since 2026-11-13). See notifications.sender.
             "degree_type": program.degree_type,
         },
         related=enrollment,

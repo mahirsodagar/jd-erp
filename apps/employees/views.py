@@ -23,6 +23,7 @@ from .permissions import (
     has_perm,
     is_self,
 )
+from .services_idcard import render_id_card
 from .serializers import (
     DepartmentSerializer,
     DesignationSerializer,
@@ -38,7 +39,6 @@ from .serializers import (
 )
 from .services import (
     generate_emp_code, make_thumbnail, provision_portal_user, regenerate_qr,
-    render_id_card,
 )
 
 User = get_user_model()
@@ -594,17 +594,26 @@ class EmployeeDeactivateView(_StatusBase):
 # --- Files: ID card + QR -----------------------------------------------
 
 class EmployeeIdCardView(APIView):
+    """GET /api/employees/{pk}/id-card.pdf — the staff ID card (front +
+    back) in the institute's design. Needs `employees.employee.id_card`
+    on top of the usual employee scope."""
+
     permission_classes = [IsAuthenticated, EmployeeAccessPolicy]
 
     def get(self, request, pk):
+        if not has_perm(request.user, "employees.employee.id_card"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
         try:
-            emp = Employee.objects.get(pk=pk)
+            emp = Employee.objects.select_related(
+                "institute", "designation", "department",
+            ).get(pk=pk)
         except Employee.DoesNotExist as e:
             raise Http404 from e
         self.check_object_permissions(request, emp)
-        png = render_id_card(emp)
-        resp = HttpResponse(png, content_type="image/png")
-        resp["Content-Disposition"] = f'inline; filename="id-card-{emp.emp_code}.png"'
+        pdf = render_id_card(emp)
+        resp = HttpResponse(pdf, content_type="application/pdf")
+        resp["Content-Disposition"] = f'inline; filename="id-card-{emp.emp_code}.pdf"'
         return resp
 
 

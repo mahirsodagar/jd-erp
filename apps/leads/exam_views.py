@@ -24,8 +24,8 @@ from .exam_serializers import (
     EntranceExamAttachmentSerializer, EntranceExamAttemptSerializer,
     EntranceExamQuestionPublicSerializer, EntranceExamQuestionSerializer,
     EntranceExamResponseSerializer, EntranceExamSerializer,
-    MapExamSerializer, ReviewResponseSerializer, SubmitAttemptSerializer,
-    UploadAttachmentSerializer,
+    MapExamSerializer, ReviewResponseSerializer, SendExamLinksSerializer,
+    SubmitAttemptSerializer, UploadAttachmentSerializer,
 )
 from .exam_service import (
     can_attempt_now, exam_report, map_exam_to_leads, recompute_total_marks,
@@ -371,6 +371,83 @@ class ExamAttemptSendLinkView(APIView):
             return Response({"detail": str(e)},
                             status=http.HTTP_400_BAD_REQUEST)
         return Response(result)
+
+
+class ExamSendLinksView(APIView):
+    """Email the exam link to the SELECTED mapped candidates only.
+
+    Body: ``{"attempt_ids": [..]}`` — every id must be an attempt of this
+    exam. Nothing is implicit: an empty list is rejected rather than
+    treated as "everyone", so a counsellor can never mass-mail by
+    accident. Each attempt is sent independently and reported back
+    per-row, so one bad address does not stop the others.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            exam = EntranceExam.objects.get(pk=pk)
+        except EntranceExam.DoesNotExist as e:
+            raise Http404 from e
+        if not (_is_exam_owner(request.user, exam)
+                or has_perm(request.user, "leads.exam.publish")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+
+        s = SendExamLinksSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        wanted = list(dict.fromkeys(s.validated_data["attempt_ids"]))
+
+        attempts = {
+            a.id: a
+            for a in EntranceExamAttempt.objects.select_related(
+                "exam", "lead", "lead__program",
+            ).filter(exam=exam, id__in=wanted)
+        }
+        missing = [i for i in wanted if i not in attempts]
+        if missing:
+            return Response(
+                {"detail": f"Attempts not on this exam: {missing}."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+
+        from .send_links import send_entrance_exam_link
+
+        results = []
+        for aid in wanted:
+            attempt = attempts[aid]
+            row = {
+                "attempt_id": aid,
+                "lead_id": attempt.lead_id,
+                "lead_name": attempt.lead.name,
+                "lead_email": attempt.lead.email,
+            }
+            try:
+                r = send_entrance_exam_link(attempt=attempt, actor=request.user)
+                row.update({
+                    "email_sent": r["email_sent"],
+                    "email_error": r["email_error"],
+                    "email_log_id": r["email_log_id"],
+                })
+            except ValueError as e:
+                row.update({
+                    "email_sent": False, "email_error": str(e),
+                    "email_log_id": None,
+                })
+            results.append(row)
+
+        # A row with no error and email_sent=False is QUEUED (dispatcher
+        # picks it up), not failed — mirror _email_result's semantics.
+        sent = sum(1 for r in results if r["email_sent"])
+        failed = sum(1 for r in results if r["email_error"])
+        return Response({
+            "requested": len(results),
+            "sent": sent,
+            "queued": len(results) - sent - failed,
+            "failed": failed,
+            "results": results,
+        })
 
 
 class ExamResponseReviewView(APIView):

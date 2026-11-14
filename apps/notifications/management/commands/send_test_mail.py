@@ -1,20 +1,26 @@
-"""Send a test email through ALL three institute sending domains and
-report the per-domain result — built for running from a console
-(e.g. the PythonAnywhere bash console) to diagnose outbound mail.
+"""Send a test email through every institute sending transport and
+report the per-transport result — built for running from a console
+(e.g. the VPS shell) to diagnose outbound mail.
 
     python manage.py send_test_mail you@example.com
 
-Each domain uses its real production transport (same code path the app
-uses), so a PASS here means that channel genuinely delivers:
+Each transport uses its real production code path, so a PASS here means
+that channel genuinely delivers:
 
     jdindia.com           -> dedicated Zoho SMTP   (SMTP_JDINDIA_*)
     mail.jdinstitute.com  -> MSG91 v5 email API     (MSG91_AUTHKEY)
-    jdinstitute.edu.in    -> default Workspace SMTP (EMAIL_HOST_*)
+    default backend       -> project SMTP           (EMAIL_HOST_*, should
+                             be the same Zoho mailbox; used by triggers
+                             with no sender-domain policy)
+
+jdinstitute.edu.in (Google Workspace) is no longer a sending domain.
 
 Flags:
-    --only jdindia|msg91|edu   send through just one domain
-    --msg91-template NAME      MSG91 template_id to use (default:
-                               student_portal_credentials)
+    --only jdindia|msg91|default   send through just one transport
+                                   (``edu`` is accepted as a legacy
+                                   alias for ``default``)
+    --msg91-template NAME          MSG91 template_id to use (default:
+                                   student_portal_credentials)
 """
 
 from __future__ import annotations
@@ -24,7 +30,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 
 class Command(BaseCommand):
-    help = "Send a test email through all three sending domains and report results."
+    help = "Send a test email through every sending transport and report results."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -33,8 +39,8 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--only",
-            choices=["jdindia", "msg91", "edu"],
-            help="Send through a single domain instead of all three.",
+            choices=["jdindia", "msg91", "default", "edu"],
+            help="Send through a single transport instead of all three.",
         )
         parser.add_argument(
             "--msg91-template",
@@ -48,21 +54,23 @@ class Command(BaseCommand):
             raise CommandError(f"'{recipient}' does not look like an email address.")
 
         only = opts.get("only")
+        if only == "edu":
+            only = "default"
         results: list[tuple[str, str, bool, str]] = []
 
         if only in (None, "jdindia"):
             results.append(self._send_jdindia(recipient))
         if only in (None, "msg91"):
             results.append(self._send_msg91(recipient, opts["msg91_template"]))
-        if only in (None, "edu"):
-            results.append(self._send_edu(recipient))
+        if only in (None, "default"):
+            results.append(self._send_default(recipient))
 
         self._report(recipient, results)
 
-    # --- per-domain transports (mirror apps.notifications routing) -------
+    # --- per-transport senders (mirror apps.notifications routing) -------
 
     def _send_jdindia(self, recipient):
-        """Degree/Bachelors mail — dedicated Zoho SMTP connection."""
+        """Staff / HR / admission mail — dedicated Zoho SMTP connection."""
         from apps.notifications.email import send_email
 
         domain, transport = "jdindia.com", "Zoho SMTP"
@@ -92,11 +100,13 @@ class Command(BaseCommand):
         )
         return (domain, transport, ok, detail)
 
-    def _send_edu(self, recipient):
-        """Staff / HR / Diploma mail — default Workspace SMTP backend."""
+    def _send_default(self, recipient):
+        """Triggers with no sender-domain policy — project default backend."""
         from apps.notifications.email import send_email
 
-        domain, transport = "jdinstitute.edu.in", "Workspace SMTP"
+        host_user = getattr(settings, "EMAIL_HOST_USER", "") or ""
+        domain = host_user.split("@", 1)[1] if "@" in host_user else "(default)"
+        transport = f"default SMTP {getattr(settings, 'EMAIL_HOST', '')}"
         backend = getattr(settings, "EMAIL_BACKEND", "")
         if "console" in backend:
             return (domain, transport, False,
@@ -105,9 +115,8 @@ class Command(BaseCommand):
                     "smtp.EmailBackend in .env")
         ok, detail = send_email(
             recipient=recipient,
-            subject="[JD ERP test] jdinstitute.edu.in (Workspace SMTP)",
-            body="Delivery test via the jdinstitute.edu.in Workspace SMTP transport.",
-            from_email=getattr(settings, "EMAIL_HOST_USER", "") or "",
+            subject=f"[JD ERP test] {domain} (default SMTP backend)",
+            body="Delivery test via the project default SMTP backend (EMAIL_HOST_*).",
         )
         return (domain, transport, ok, detail)
 
@@ -124,7 +133,7 @@ class Command(BaseCommand):
             self.stdout.write(f"[{tag}] {domain:22s} ({transport})")
             self.stdout.write(f"        {detail}")
         self.stdout.write("=" * 72)
-        summary = f"{passed}/{len(results)} domain(s) delivered."
+        summary = f"{passed}/{len(results)} transport(s) delivered."
         self.stdout.write(
             self.style.SUCCESS(summary) if passed == len(results)
             else self.style.WARNING(summary)

@@ -136,8 +136,6 @@ _ATT_COLORS = {
     Attendance.Status.PRESENT: "#28a745",
     Attendance.Status.ABSENT: "#dc3545",
     Attendance.Status.LATE: "#fff200",
-    Attendance.Status.ON_DUTY: "#17a2b8",
-    Attendance.Status.EXCUSED: "#6c757d",
 }
 
 
@@ -183,8 +181,7 @@ class AttendanceReportView(APIView):
                 "subject_id": sub.id,
                 "subject_code": sub.code,
                 "subject_name": sub.name,
-                "present": 0, "absent": 0, "late": 0,
-                "on_duty": 0, "excused": 0, "total": 0,
+                "present": 0, "absent": 0, "late": 0, "total": 0,
                 "absent_dates": [], "late_dates": [],
             })
             d["total"] += 1
@@ -197,10 +194,6 @@ class AttendanceReportView(APIView):
             elif a.status == Attendance.Status.LATE:
                 d["late"] += 1
                 d["late_dates"].append(ds)
-            elif a.status == Attendance.Status.ON_DUTY:
-                d["on_duty"] += 1
-            elif a.status == Attendance.Status.EXCUSED:
-                d["excused"] += 1
         for d in agg.values():
             d["percentage"] = round(
                 d["present"] / d["total"] * 100 if d["total"] else 0, 1,
@@ -829,9 +822,18 @@ class FeedbackLinkView(APIView):
 
 
 class FeedbackOptionsView(APIView):
-    """Instructor + subject options the student can rate, derived from their
-    own published timetable. Avoids exposing the full employees/subjects
-    catalogue to portal users."""
+    """Instructor + module (subject) options the student can rate.
+
+    Three sources, unioned, so the lists are populated even before the
+    batch's timetable is published (which used to leave both dropdowns
+    empty):
+      1. The batch's timetable slots — scheduled AND completed (a
+         student rates classes that already happened).
+      2. Curriculum mapping (who teaches what) for the enrollment's
+         program / semester.
+      3. Active subjects of the enrollment's program / semester.
+    Still scoped to the student's own program, never the full catalogue.
+    """
 
     permission_classes = [IsStudentOnly]
 
@@ -839,25 +841,52 @@ class FeedbackOptionsView(APIView):
         e = request.portal_ctx.enrollment
         if e is None:
             return Response({"instructors": [], "subjects": []})
-        slots = (ScheduleSlot.objects
-                 .filter(batch=e.batch,
-                         status=ScheduleSlot.Status.SCHEDULED)
-                 .select_related("instructor", "subject"))
+
         instructors_by_id = {}
         subjects_by_id = {}
-        for s in slots:
-            if s.instructor_id and s.instructor_id not in instructors_by_id:
-                instructors_by_id[s.instructor_id] = {
-                    "id": s.instructor_id,
-                    "name": s.instructor.full_name,
-                    "emp_code": getattr(s.instructor, "emp_code", "") or "",
+
+        def add_instructor(emp):
+            if emp is not None and emp.pk not in instructors_by_id:
+                instructors_by_id[emp.pk] = {
+                    "id": emp.pk,
+                    "name": emp.full_name,
+                    "emp_code": getattr(emp, "emp_code", "") or "",
                 }
-            if s.subject_id and s.subject_id not in subjects_by_id:
-                subjects_by_id[s.subject_id] = {
-                    "id": s.subject_id,
-                    "code": s.subject.code,
-                    "name": s.subject.name,
+
+        def add_subject(sub):
+            if sub is not None and sub.pk not in subjects_by_id:
+                subjects_by_id[sub.pk] = {
+                    "id": sub.pk, "code": sub.code, "name": sub.name,
                 }
+
+        # 1. Timetable slots (anything not cancelled).
+        if e.batch_id:
+            slots = (ScheduleSlot.objects
+                     .filter(batch_id=e.batch_id)
+                     .exclude(status=ScheduleSlot.Status.CANCELLED)
+                     .select_related("instructor", "subject"))
+            for s in slots:
+                add_instructor(s.instructor)
+                add_subject(s.subject)
+
+        # 2 + 3. Program / semester curriculum.
+        if e.program_id:
+            from apps.master.models import CurriculumMapping
+            maps = (CurriculumMapping.objects
+                    .filter(program_id=e.program_id, is_active=True)
+                    .select_related("instructor", "subject"))
+            subs = Subject.objects.filter(
+                program_id=e.program_id, is_active=True,
+            )
+            if e.semester_id:
+                maps = maps.filter(semester_id=e.semester_id)
+                subs = subs.filter(semester_id=e.semester_id)
+            for m in maps:
+                add_instructor(m.instructor)
+                add_subject(m.subject)
+            for sub in subs:
+                add_subject(sub)
+
         return Response({
             "instructors": sorted(
                 instructors_by_id.values(), key=lambda x: x["name"],

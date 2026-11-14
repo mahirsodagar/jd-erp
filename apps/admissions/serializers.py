@@ -59,6 +59,7 @@ class StudentDetailSerializer(serializers.ModelSerializer):
     )
     photo_url = serializers.SerializerMethodField()
     portal_username = serializers.SerializerMethodField()
+    portal_password = serializers.SerializerMethodField()
     is_dropout = serializers.SerializerMethodField()
     # Registration fee paid (or due) online at application time. Null
     # when the step doesn't apply to this student.
@@ -88,7 +89,7 @@ class StudentDetailSerializer(serializers.ModelSerializer):
             "father_occupation", "mother_occupation",
             "photo", "photo_url",
             "user_account", "parent_user_account", "lead_origin",
-            "portal_username",
+            "portal_username", "portal_password",
             "application_fee_paid_at", "application_fee_amount",
             "application_fee_mode", "application_fee_ref",
             "application_fee_recorded_by_name",
@@ -98,7 +99,8 @@ class StudentDetailSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id", "application_form_id",
             "user_account", "parent_user_account", "lead_origin",
-            "portal_username", "is_dropout", "registration_payment",
+            "portal_username", "portal_password", "is_dropout",
+            "registration_payment",
             "applicant_fees",
             "created_by", "created_on", "updated_by", "updated_on",
             "campus_name", "program_name", "course_name",
@@ -170,6 +172,13 @@ class StudentDetailSerializer(serializers.ModelSerializer):
         if not self._can_view_credentials(obj):
             return ""
         return getattr(obj.user_account, "username", "") if obj.user_account_id else ""
+
+    def get_portal_password(self, obj):
+        # Plain-text copy kept on the row; same staff-only gate as the
+        # username.
+        if not obj.user_account_id or not self._can_view_credentials(obj):
+            return ""
+        return obj.portal_password or ""
 
     def _can_view_credentials(self, obj) -> bool:
         request = self.context.get("request")

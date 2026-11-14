@@ -864,20 +864,11 @@ def _institute_local_part(student: Student) -> str:
     return local or "student"
 
 
-def _ensure_unique_username(seed: str, *, exclude_pk: int | None = None) -> str:
-    """Like `_unique_username` but also leaves an existing username alone
-    if it belongs to the user we're about to update (no churn on reset)."""
-    base = re.sub(r"[^a-z0-9._]+", "", (seed or "student").lower())[:64] or "student"
-    candidate = base
-    n = 1
-    while True:
-        qs = User.objects.filter(username__iexact=candidate)
-        if exclude_pk is not None:
-            qs = qs.exclude(pk=exclude_pk)
-        if not qs.exists():
-            return candidate
-        n += 1
-        candidate = f"{base}{n}"
+def _username_is_free(username: str, *, exclude_pk: int | None = None) -> bool:
+    qs = User.objects.filter(username__iexact=username)
+    if exclude_pk is not None:
+        qs = qs.exclude(pk=exclude_pk)
+    return not qs.exists()
 
 
 @transaction.atomic
@@ -885,14 +876,20 @@ def provision_student_portal_credentials(*, student: Student) -> dict:
     """Create (or rotate) the student's portal user, set the institute
     email, and return `{ username, email, temporary_password }`.
 
+    The username IS the institute email (e.g. `john.doe@jdift.in`) —
+    the institute email is unique across students, so it is a safe
+    username too. The plain-text password is also stored on
+    `student.portal_password` so staff can read it back later.
+
     Idempotent:
       - First call → creates the User, populates `student.institute_email`,
-        generates a temp password.
-      - Subsequent calls → reuse the existing `user_account` and rotate
-        the password. `institute_email` is left alone unless empty.
+        generates a password.
+      - Subsequent calls → reuse the existing `user_account`, rotate the
+        password and re-align the username with the institute email.
+        `institute_email` is left alone unless empty.
 
-    The returned dict is plain so the view can hand it to the email
-    template *and* return it to staff once.
+    Nothing is emailed here (or by the view) — staff reads the
+    credentials off the student page and shares them directly.
     """
     institute = student.institute
     if institute is None:
@@ -915,8 +912,16 @@ def provision_student_portal_credentials(*, student: Student) -> dict:
         student.institute_email = email
 
     temp_password = secrets.token_urlsafe(10)
+    username = student.institute_email.lower()
     if student.user_account_id is None:
-        username = _ensure_unique_username(student.institute_email)
+        # Another (non-student) user could in theory hold the address as
+        # a username — only then do we suffix.
+        if not _username_is_free(username):
+            n = 2
+            local, _, dom = username.partition("@")
+            while not _username_is_free(f"{local}{n}@{dom}"):
+                n += 1
+            username = f"{local}{n}@{dom}"
         user = User.objects.create_user(
             username=username,
             email=student.institute_email,
@@ -929,15 +934,22 @@ def provision_student_portal_credentials(*, student: Student) -> dict:
     else:
         user = student.user_account
         user.set_password(temp_password)
-        # Keep the user's primary email + display name aligned with the
-        # latest institute email and student name.
+        # Keep the user's username, primary email + display name aligned
+        # with the latest institute email and student name. Legacy users
+        # (created before "username = institute email") get migrated to
+        # the email on their first reset.
+        if _username_is_free(username, exclude_pk=user.pk):
+            user.username = username
         user.email = student.institute_email
         user.full_name = student.student_name
-        user.save(update_fields=["password", "email", "full_name"])
+        user.save(update_fields=["password", "username", "email", "full_name"])
 
-    # The plaintext is returned to staff once (and emailed) but never
-    # stored — to re-share, staff reset it again.
-    student.save(update_fields=["institute_email", "user_account"])
+    # Plain-text copy kept on the student row so staff can read it back
+    # from the student page without resetting again.
+    student.portal_password = temp_password
+    student.save(update_fields=[
+        "institute_email", "user_account", "portal_password",
+    ])
 
     return {
         "username": user.username,

@@ -113,8 +113,9 @@ class Attendance(models.Model):
         PRESENT = "PRESENT", "Present"
         ABSENT = "ABSENT", "Absent"
         LATE = "LATE", "Late"
-        ON_DUTY = "ON_DUTY", "On Duty"
-        EXCUSED = "EXCUSED", "Excused"
+        # ON_DUTY / EXCUSED removed 2026-11-14 on request: only the three
+        # statuses above exist. Migration 0017 remapped old rows
+        # (ON_DUTY → PRESENT, EXCUSED → ABSENT) so percentages are unchanged.
 
     schedule_slot = models.ForeignKey(
         ScheduleSlot, on_delete=models.CASCADE, related_name="attendance_entries",
@@ -350,7 +351,7 @@ class MarksEntry(models.Model):
 # === G.5 — Certificates + Alumni ====================================
 
 class Certificate(models.Model):
-    """Issued document for a student. Six types covered."""
+    """Issued document for a student. Seven types covered."""
 
     class Type(models.TextChoices):
         COMPLETION = "COMPLETION", "Course Completion"
@@ -359,6 +360,7 @@ class Certificate(models.Model):
         TRANSFER = "TRANSFER", "Transfer"
         CHARACTER = "CHARACTER", "Character"
         NO_DUES = "NO_DUES", "No Dues"
+        NOC = "NOC", "No Objection Certificate"
 
     class Status(models.TextChoices):
         REQUESTED = "REQUESTED", "Requested"

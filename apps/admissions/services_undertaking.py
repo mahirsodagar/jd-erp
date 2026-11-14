@@ -258,9 +258,13 @@ def _draw_header(pdf: FPDF, institute) -> None:
     pdf.set_fill_color(*BRAND_MAGENTA)
     pdf.rect(_BANNER_X, _HEAD_Y, _HEAD_W, _HEAD_H, style="F")
     pdf.set_text_color(255, 255, 255)
+    # Titled "Fee Payment Schedule" since 2026-11-14 (was "UNDERTAKING");
+    # two lines so it fits the 48 mm banner at the same weight.
     pdf.set_font("Helvetica", "B", 11)
-    pdf.set_xy(_BANNER_X, _HEAD_Y + 12)
-    pdf.cell(_HEAD_W, 6, "UNDERTAKING", align="C")
+    pdf.set_xy(_BANNER_X, _HEAD_Y + 9)
+    pdf.cell(_HEAD_W, 6, "FEE PAYMENT", align="C")
+    pdf.set_xy(_BANNER_X, _HEAD_Y + 15)
+    pdf.cell(_HEAD_W, 6, "SCHEDULE", align="C")
     pdf.set_text_color(0, 0, 0)
 
     pdf.set_y(_BODY_TOP)
@@ -400,12 +404,12 @@ def send_undertaking(
                 cc_list.append(addr)
 
     subject = (
-        f"Undertaking - {student.student_name} "
+        f"Fee Payment Schedule - {student.student_name} "
         f"({(enrollment.course.name if enrollment.course else enrollment.program.name)})"
     )
     body = (
         f"Dear {student.student_name},\n\n"
-        f"Please find your fee undertaking attached. Reach out to your "
+        f"Please find your Fee Payment Schedule attached. Reach out to your "
         f"counsellor if anything needs to be corrected.\n\n"
         f"Application ID: {student.application_form_id}\n"
         f"Program: {enrollment.program.name}\n"
@@ -413,7 +417,7 @@ def send_undertaking(
     )
 
     filename = (
-        f"undertaking-{student.application_form_id or enrollment.id}.pdf"
+        f"fee-payment-schedule-{student.application_form_id or enrollment.id}.pdf"
     )
     course_name = (enrollment.course.name if enrollment.course
                    else enrollment.program.name)

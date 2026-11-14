@@ -100,9 +100,9 @@ def _send_email(tmpl, recipient, cc, subject, body, context) -> tuple[bool, str]
     """Deliver one email, choosing the transport from the resolved From
     domain (institute domain↔service table — see sender.transport_for):
 
-        jdindia.com          → dedicated Zoho SMTP
+        jdindia.com          → dedicated Zoho SMTP (all staff/HR/admission)
         mail.jdinstitute.com → MSG91 templated API
-        jdinstitute.edu.in   → default SMTP (Gmail/Workspace)
+        <anything else>      → default SMTP (EMAIL_HOST_*, also Zoho)
 
     A trigger with no domain policy keeps the legacy behaviour: MSG91 if
     it's in the MSG91 template registry, else default SMTP.
@@ -144,8 +144,8 @@ def _send_email(tmpl, recipient, cc, subject, body, context) -> tuple[bool, str]
 
     if kind == "msg91" and msg91_name:
         # Only override MSG91's From when the resolved domain IS the
-        # verified MSG91 sender domain — a course domain (jdindia.com /
-        # jdinstitute.edu.in) is not a valid MSG91 sender, so a downgraded
+        # verified MSG91 sender domain — the SMTP domain (jdindia.com)
+        # is not a valid MSG91 sender, so a downgraded
         # trigger sends from the configured MSG91 default instead.
         use_override = (
             sender.is_live

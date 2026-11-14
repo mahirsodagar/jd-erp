@@ -37,7 +37,7 @@ urlpatterns = [
     path("<int:pk>/deactivate/", EmployeeDeactivateView.as_view(), name="employee-deactivate"),
     path("<int:pk>/documents/", EmployeeDocumentListCreateView.as_view(), name="employee-documents"),
     path("<int:pk>/documents/<int:doc_id>/", EmployeeDocumentDetailView.as_view(), name="employee-document-detail"),
-    path("<int:pk>/id-card.png", EmployeeIdCardView.as_view(), name="employee-id-card"),
+    path("<int:pk>/id-card.pdf", EmployeeIdCardView.as_view(), name="employee-id-card"),
     path("<int:pk>/qr.png", EmployeeQrView.as_view(), name="employee-qr"),
     path("<int:pk>/portal-account/", EmployeePortalAccountView.as_view(), name="employee-portal"),
 ]

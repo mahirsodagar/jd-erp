@@ -180,3 +180,37 @@ class SmtpEgressDowngradeTests(TestCase):
         self.assertTrue(ok)
         mock_smtp.assert_called_once()
         mock_msg91.assert_not_called()
+
+
+class DefaultDomainTests(TestCase):
+    """2026-11-13: jdinstitute.edu.in is retired as a sending domain.
+
+    With NO overrides, every SMTP-routed policy (COURSE diploma, COURSE
+    degree, HR, entrance-exam link) must resolve to jdindia.com so it
+    leaves over the Zoho connection. PORTAL stays on MSG91's domain.
+    """
+
+    def test_smtp_policies_resolve_to_jdindia(self):
+        from django.conf import settings
+
+        self.assertEqual(settings.EMAIL_DOMAIN_DIPLOMA, "jdindia.com")
+        self.assertEqual(settings.EMAIL_DOMAIN_DEGREE, "jdindia.com")
+        self.assertEqual(settings.EMAIL_DOMAIN_HR, "jdindia.com")
+        for key, degree_type in [
+            ("fees.receipt.email", "Diploma"),
+            ("fees.receipt.email", "B.Des"),
+            ("hr.relieving.letter.email", None),
+            ("leaves.application_employee.email", None),
+            ("lead.entrance_exam_link.email", "Diploma"),
+        ]:
+            s = resolve_sender(key, degree_type=degree_type)
+            self.assertEqual(s.domain, "jdindia.com", key)
+
+    def test_portal_policy_untouched(self):
+        s = resolve_sender("student.portal_credentials.email")
+        self.assertEqual(s.domain, "mail.jdinstitute.com")
+
+    def test_no_default_sender_on_old_domain(self):
+        from django.conf import settings
+
+        self.assertNotIn("jdinstitute.edu.in", settings.DEFAULT_FROM_EMAIL)

@@ -149,6 +149,13 @@ class Student(models.Model):
         blank=True,
         help_text="Optional institute-issued email.",
     )
+    # Plain-text copy of the portal password, kept so staff can read it
+    # back from the student page at any time (client decision, 2026-11-13).
+    # The User row still holds the hashed password used for login.
+    portal_password = models.CharField(
+        max_length=64, blank=True,
+        help_text="Current portal password (shown to staff as-is).",
+    )
 
     father_occupation = models.CharField(max_length=120, blank=True)
     mother_occupation = models.CharField(max_length=120, blank=True)

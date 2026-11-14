@@ -273,7 +273,7 @@ def batch_attendance_summary(*, batch, from_date=None, to_date=None) -> list[dic
             per_status[status_value] = qs.filter(
                 student=s, status=status_value,
             ).count()
-        present_like = per_status["PRESENT"] + per_status["LATE"] + per_status["ON_DUTY"]
+        present_like = per_status["PRESENT"] + per_status["LATE"]
         marked = sum(per_status.values())
         rows.append({
             "student_id": s.id,
@@ -313,7 +313,7 @@ def student_attendance_summary(*, student, from_date=None, to_date=None) -> dict
     per_status = {}
     for status_value, _ in Attendance.Status.choices:
         per_status[status_value] = qs.filter(status=status_value).count()
-    present_like = per_status["PRESENT"] + per_status["LATE"] + per_status["ON_DUTY"]
+    present_like = per_status["PRESENT"] + per_status["LATE"]
     marked = sum(per_status.values())
 
     # Per-session detail — one row per marked attendance entry, newest

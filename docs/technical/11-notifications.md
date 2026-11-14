@@ -101,19 +101,25 @@ Three transports coexist and the routing is **two orthogonal decisions**:
 
 | Sending domain | Transport |
 |---|---|
-| `jdindia.com` | **Dedicated SMTP** (its own mailbox/host), configured via `EMAIL_SMTP_BY_DOMAIN` — takes precedence over MSG91 |
+| `jdindia.com` | **Dedicated Zoho SMTP** (`crm@jdindia.com`), configured via `EMAIL_SMTP_BY_DOMAIN` — takes precedence over MSG91 |
 | `mail.jdinstitute.com` | **MSG91** templated transactional API |
-| `jdinstitute.edu.in` | Default SMTP (Gmail/Workspace) |
-| anything else | Default SMTP |
+| anything else | Default SMTP backend (`EMAIL_HOST_*`) — pointed at the same Zoho mailbox |
+
+> **2026-11-13:** `jdinstitute.edu.in` (Google Workspace) is **retired as a
+> sending domain**. `EMAIL_DOMAIN_DIPLOMA` and `EMAIL_DOMAIN_HR` now default to
+> `jdindia.com`, so every SMTP-routed trigger leaves from `crm@jdindia.com` over
+> Zoho. Addresses on `jdinstitute.edu.in` survive only as *recipient* inboxes
+> (`leave@`, `dkul.receipts@`, `acknowledgement.*@`, `undertaking.*@`).
+> MSG91 (`mail.jdinstitute.com`) is unchanged.
 
 ### Provider split (`MSG91_EMAIL_TEMPLATES`)
 
 - **MSG91 (`mail.jdinstitute.com`)** — transactional mail to **external**
   recipients: leads, students, parents.
-- **SMTP (`admin.a@jdinstitute.edu.in`)** — **internal** mail to faculty and
-  employees: HR workflows, employee leave decisions, task assignments, staff
-  password resets. Any template not in `MSG91_EMAIL_TEMPLATES` falls through to
-  SMTP.
+- **SMTP (`crm@jdindia.com` via Zoho)** — **internal** mail to faculty and
+  employees (HR workflows, employee leave decisions, task assignments) plus any
+  student/admission mail without an MSG91 template. Any template not in
+  `MSG91_EMAIL_TEMPLATES` falls through to SMTP.
 
 `SMTP_INTERNAL_TEMPLATE_KEYS` lists the templates that *intentionally* use
 SMTP, so the dispatcher can warn if someone adds one to the MSG91 registry by
@@ -139,21 +145,21 @@ Currently registered MSG91 templates:
 
 | Token | Resolves to |
 |---|---|
-| `COURSE` | `EMAIL_DOMAIN_DIPLOMA` (`jdinstitute.edu.in`) if the program is a diploma, else `EMAIL_DOMAIN_DEGREE` (`jdindia.com`) |
+| `COURSE` | `EMAIL_DOMAIN_DIPLOMA` if the program is a diploma, else `EMAIL_DOMAIN_DEGREE` — **both default to `jdindia.com`** |
 | `PORTAL` | `EMAIL_DOMAIN_PORTAL` (`mail.jdinstitute.com`) |
-| `HR` | `EMAIL_DOMAIN_HR` (`jdinstitute.edu.in`) |
+| `HR` | `EMAIL_DOMAIN_HR` (`jdindia.com`) |
 | anything else | treated as a literal domain |
 
-`COURSE` triggers: fee link, application link, fee receipt, application-fee
-receipt, admission-form-submitted, installment undertaking, installment-pending
-reminder. `PORTAL`: student credentials. `HR`: leave and relieving workflows.
+`COURSE` triggers: fee receipt, application-fee receipt,
+admission-form-submitted, installment undertaking, installment-pending
+reminder, staff-sent fee link. `PORTAL`: student credentials, lead links,
+student leave, assignments. `HR`: leave and relieving workflows, and the
+entrance-exam link (the one lead-facing trigger with no MSG91 template, pinned
+to a fixed SMTP domain rather than `COURSE`).
 
-**Literal-domain trigger:** `lead.entrance_exam_link.email` is pinned to
-`jdinstitute.edu.in`, so it always goes out over the default Workspace backend
-as `admin.a@jdinstitute.edu.in`. It is the one lead-facing trigger with no
-MSG91 template, so `COURSE` routing put degree candidates on the `jdindia.com`
-Zoho connection with no fallback available if that connection was down. Keep it
-off `COURSE` unless an MSG91 template is registered for it.
+The diploma / degree split is kept in code so it can be revived per
+environment by setting `EMAIL_DOMAIN_DIPLOMA`, but as of 2026-11-13 it is a
+no-op: both sides resolve to `jdindia.com`.
 
 Diploma detection is a **substring match** on `Program.degree_type`
 (`"diploma" in degree_type.lower()`). Callers pass it into the context as
@@ -163,9 +169,8 @@ Diploma detection is a **substring match** on `Program.degree_type`
 
 A domain only goes **live** when it has an entry in `EMAIL_SENDER_BY_DOMAIN`.
 Domains absent from that map resolve to an empty From-address and the
-dispatcher falls back to the provider default. That is how the routing policy
-could ship before `jdinstitute.edu.in` and `jdindia.com` were verified on
-MSG91 — activating a domain is an env-var change, not a code change.
+dispatcher falls back to the provider default. `jdindia.com` needs no entry:
+its dedicated SMTP config carries its own `from_email`, which wins.
 
 ### The no-SMTP-egress downgrade
 

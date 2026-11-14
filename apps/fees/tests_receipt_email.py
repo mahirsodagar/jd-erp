@@ -102,6 +102,41 @@ class ReceiptEmailTests(TestCase):
         self.assertEqual(m.attachments[0][0],
                          f"{FeeReceipt.objects.get().receipt_no}.pdf")
 
+    def _staff_client(self):
+        admin = User.objects.create_superuser(
+            username="acc", email="acc@e.com", password="x",
+        )
+        c = APIClient()
+        c.force_authenticate(admin)
+        return c
+
+    def test_send_button_resends_the_receipt(self):
+        enrollment = _fixture()
+        r = _receipt(enrollment, amount=Decimal("11800"))
+        resp = self._staff_client().post(f"/api/fees/receipts/{r.id}/send/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.data["status"], "SENT")
+        self.assertEqual(resp.data["recipient"], enrollment.student.student_email)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, [enrollment.student.student_email])
+        self.assertEqual(mail.outbox[0].attachments[0][0], f"{r.receipt_no}.pdf")
+
+    def test_send_refuses_cancelled_and_emailless(self):
+        enrollment = _fixture()
+        c = self._staff_client()
+        r = _receipt(enrollment)
+        r.status = FeeReceipt.Status.CANCELLED
+        r.save(update_fields=["status"])
+        self.assertEqual(c.post(f"/api/fees/receipts/{r.id}/send/").status_code, 400)
+
+        enrollment.student.student_email = ""
+        enrollment.student.save(update_fields=["student_email"])
+        r2 = _receipt(enrollment)
+        resp = c.post(f"/api/fees/receipts/{r2.id}/send/")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("no email", resp.data["detail"])
+        self.assertEqual(len(mail.outbox), 0)
+
     @override_settings(EMAIL_SMTP_OUTBOUND_ENABLED=False)
     def test_no_smtp_egress_logs_but_does_not_send(self):
         log = send_receipt_email(_receipt(_fixture()))

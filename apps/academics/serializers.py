@@ -467,6 +467,13 @@ class CertificateRequestSerializer(serializers.Serializer):
     remarks = serializers.CharField(required=False, allow_blank=True)
 
 
+class MyCertificateRequestSerializer(serializers.Serializer):
+    """Self-request: the student is taken from request.user."""
+    type = serializers.ChoiceField(choices=Certificate.Type.choices)
+    purpose = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    remarks = serializers.CharField(required=False, allow_blank=True)
+
+
 class CertificateIssueSerializer(serializers.Serializer):
     remarks = serializers.CharField(required=False, allow_blank=True)
     override_eligibility = serializers.BooleanField(default=False)

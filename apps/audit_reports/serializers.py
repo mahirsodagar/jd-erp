@@ -5,9 +5,78 @@ from apps.roles.models import Role
 
 from .models import (
     AdminDailyReport, AuditAnswer, AuditForm, AuditFormField, AuditSubmission,
-    BatchMentorReport, ComplianceFlag, CourseEndReport,
+    BatchMentorReport, ComplianceFlag, CourseEndReport, DailyReportAccess,
     FacultyDailyReport, FacultySelfAppraisal, StudentFeedback, ZeroHourReport,
 )
+
+
+# --- Month-wise freeze: access requests ------------------------------
+
+class DailyReportAccessSerializer(serializers.ModelSerializer):
+    user_name = serializers.SerializerMethodField()
+    emp_code = serializers.CharField(source="employee.emp_code", read_only=True, default="")
+    month_label = serializers.CharField(read_only=True)
+    manager_decided_by_name = serializers.SerializerMethodField()
+    granted_by_name = serializers.SerializerMethodField()
+    is_active = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DailyReportAccess
+        fields = [
+            "id", "report_type", "user", "user_name", "employee", "emp_code",
+            "year", "month", "month_label", "reason", "status",
+            "manager_email", "manager_decided_by", "manager_decided_by_name",
+            "manager_decided_at", "manager_remarks",
+            "granted_by", "granted_by_name", "granted_at", "access_until",
+            "grant_remarks", "revoked_at", "is_active",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = [f for f in fields
+                            if f not in ("report_type", "year", "month", "reason")]
+
+    @staticmethod
+    def _name(u):
+        if u is None:
+            return ""
+        return u.full_name or u.username
+
+    def get_user_name(self, obj):
+        emp = obj.employee
+        return emp.full_name if emp is not None else self._name(obj.user)
+
+    def get_manager_decided_by_name(self, obj):
+        return self._name(obj.manager_decided_by)
+
+    def get_granted_by_name(self, obj):
+        return self._name(obj.granted_by)
+
+    def get_is_active(self, obj):
+        """GRANTED and not yet past `access_until`."""
+        from django.utils import timezone
+        return (obj.status == DailyReportAccess.Status.GRANTED
+                and obj.access_until is not None
+                and obj.access_until >= timezone.localdate())
+
+    def validate_month(self, v):
+        if not 1 <= v <= 12:
+            raise serializers.ValidationError("month must be 1..12.")
+        return v
+
+    def validate_reason(self, v):
+        v = (v or "").strip()
+        if len(v) < 5:
+            raise serializers.ValidationError("Give a reason (at least 5 characters).")
+        return v
+
+
+class DailyReportAccessDecisionSerializer(serializers.Serializer):
+    approve = serializers.BooleanField()
+    remarks = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class DailyReportAccessGrantSerializer(serializers.Serializer):
+    access_until = serializers.DateField()
+    remarks = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 class FacultyDailyReportSerializer(serializers.ModelSerializer):

@@ -1,4 +1,5 @@
 from datetime import date as _date
+from decimal import Decimal
 
 from django.http import Http404
 from django.utils import timezone
@@ -13,12 +14,14 @@ from apps.master.models import Batch
 from apps.roles.models import Role
 
 from django.db import transaction
+from django.db.models import Q, Sum
 
 from apps.common.pagination import PaginatedAPIViewMixin, StandardPagination
 
+from . import freeze
 from .models import (
-    AdminDailyReport, AuditAnswer, AuditForm, AuditSubmission,
-    BatchMentorReport, ComplianceFlag, CourseEndReport,
+    AdminDailyReport, AuditAnswer, AuditForm, AuditFormField, AuditSubmission,
+    BatchMentorReport, ComplianceFlag, CourseEndReport, DailyReportAccess,
     FacultyDailyReport, FacultySelfAppraisal, StudentFeedback, ZeroHourReport,
 )
 from .permissions import has_perm
@@ -27,7 +30,9 @@ from .serializers import (
     AuditSubmissionSerializer,
     BatchMentorReportSerializer,
     ComplianceFlagSerializer, CourseEndReportSerializer,
-    CourseEndReviewSerializer, FacultyDailyReportSerializer,
+    CourseEndReviewSerializer, DailyReportAccessDecisionSerializer,
+    DailyReportAccessGrantSerializer, DailyReportAccessSerializer,
+    FacultyDailyReportSerializer,
     FacultySelfAppraisalSerializer, ResolveFlagSerializer,
     SelfAppraisalReviewSerializer, StudentFeedbackSerializer,
     SubmitAuditFormSerializer, ZeroHourReportSerializer,
@@ -133,6 +138,9 @@ class FacultyDailyReportListCreateView(APIView):
             return Response(
                 {"detail": "You can only submit your own daily report."},
                 status=http.HTTP_403_FORBIDDEN)
+        if blocked := freeze.write_blocked_reason(u, freeze.REPORT_FACULTY, data["date"]):
+            return Response({"detail": blocked, "code": "frozen"},
+                            status=http.HTTP_423_LOCKED)
         defaults = {f: data.get(f, "" if "description" in f else 0)
                     for f in _FD_DEFAULT_FIELDS}
         defaults["submitted_by"] = u
@@ -167,6 +175,10 @@ class FacultyDailyReportDetailView(APIView):
                             is_own=_fd_is_own(request.user, obj.faculty_id)):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
+        if blocked := freeze.write_blocked_reason(
+                request.user, freeze.REPORT_FACULTY, obj.date):
+            return Response({"detail": blocked, "code": "frozen"},
+                            status=http.HTTP_423_LOCKED)
         s = FacultyDailyReportSerializer(obj, data=request.data, partial=True)
         s.is_valid(raise_exception=True)
         s.save()
@@ -178,6 +190,10 @@ class FacultyDailyReportDetailView(APIView):
                               is_own=_fd_is_own(request.user, obj.faculty_id)):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
+        if blocked := freeze.write_blocked_reason(
+                request.user, freeze.REPORT_FACULTY, obj.date):
+            return Response({"detail": blocked, "code": "frozen"},
+                            status=http.HTTP_423_LOCKED)
         obj.delete()
         return Response(status=http.HTTP_204_NO_CONTENT)
 
@@ -383,6 +399,9 @@ class AdminDailyReportListCreateView(APIView):
         s = AdminDailyReportSerializer(data={**request.data, "user": u.id})
         s.is_valid(raise_exception=True)
         d = s.validated_data
+        if blocked := freeze.write_blocked_reason(u, freeze.REPORT_ADMIN, d["rep_date"]):
+            return Response({"detail": blocked, "code": "frozen"},
+                            status=http.HTTP_423_LOCKED)
         obj, created = AdminDailyReport.objects.update_or_create(
             user=u, rep_date=d["rep_date"],
             defaults={"slot1": d.get("slot1", ""), "slot2": d.get("slot2", "")},
@@ -406,6 +425,10 @@ class AdminDailyReportDetailView(APIView):
         if not _ad_can_edit(request.user, is_own=obj.user_id == request.user.id):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
+        if blocked := freeze.write_blocked_reason(
+                request.user, freeze.REPORT_ADMIN, obj.rep_date):
+            return Response({"detail": blocked, "code": "frozen"},
+                            status=http.HTTP_423_LOCKED)
         s = AdminDailyReportSerializer(obj, data=request.data, partial=True)
         s.is_valid(raise_exception=True)
         s.save()
@@ -416,8 +439,275 @@ class AdminDailyReportDetailView(APIView):
         if not _ad_can_delete(request.user, is_own=obj.user_id == request.user.id):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
+        if blocked := freeze.write_blocked_reason(
+                request.user, freeze.REPORT_ADMIN, obj.rep_date):
+            return Response({"detail": blocked, "code": "frozen"},
+                            status=http.HTTP_423_LOCKED)
         obj.delete()
         return Response(status=http.HTTP_204_NO_CONTENT)
+
+
+# === 2c. Month-wise freeze: access requests =========================
+#
+#   employee  → POST  freeze/requests/              (PENDING)
+#   manager   → POST  freeze/requests/<pk>/decide/  (MANAGER_APPROVED / REJECTED)
+#   admin     → POST  freeze/requests/<pk>/grant/   (GRANTED until a date)
+#   admin     → POST  freeze/requests/<pk>/revoke/
+#
+# The manager is the applicant's `reporting_manager_1`, snapshotted by
+# email and matched like leave approvals — no permission key needed to
+# decide. Granting / revoking needs `audit.daily_report.unlock`.
+
+UNLOCK_KEY = "audit.daily_report.unlock"
+
+
+def _can_unlock(user) -> bool:
+    return bool(user.is_superuser or has_perm(user, UNLOCK_KEY))
+
+
+def _unlock_admins():
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    return (User.objects.filter(is_active=True)
+            .filter(Q(is_superuser=True) | Q(roles__permissions__key=UNLOCK_KEY))
+            .distinct())
+
+
+def _notify_access(req: DailyReportAccess, *, event: str, actor) -> None:
+    """In-app bell for each hop of the request. Best-effort."""
+    from apps.notifications.inapp import notify, user_by_email
+    from apps.notifications.models import InAppNotification
+
+    who = req.employee.full_name if req.employee_id else (
+        req.user.full_name or req.user.username)
+    label = f"{req.get_report_type_display()} · {req.month_label}"
+    link_mine = "/daily-report" if req.report_type == freeze.REPORT_FACULTY else "/admin-daily"
+    if event == "requested":
+        notify([user_by_email(req.manager_email)],
+               kind=InAppNotification.Kind.OTHER,
+               title=f"Daily report access request from {who}",
+               body=f"{label}. Reason: {req.reason}",
+               link="/daily-report-access", exclude_user=actor)
+    elif event == "manager_approved":
+        notify(list(_unlock_admins()), kind=InAppNotification.Kind.OTHER,
+               title=f"Grant daily report access: {who}",
+               body=f"{label} — approved by the reporting manager.",
+               link="/daily-report-access", exclude_user=actor)
+        notify([req.user], kind=InAppNotification.Kind.OTHER,
+               title="Your access request was approved by your manager",
+               body=f"{label}. An admin will now grant the access window.",
+               link=link_mine, exclude_user=actor)
+    elif event == "rejected":
+        notify([req.user], kind=InAppNotification.Kind.OTHER,
+               title="Your daily report access request was rejected",
+               body=f"{label}. {req.manager_remarks}".strip(),
+               link=link_mine, exclude_user=actor)
+    elif event == "granted":
+        notify([req.user], kind=InAppNotification.Kind.OTHER,
+               title="Daily report month unlocked",
+               body=(f"{label} is editable until "
+                     f"{req.access_until.strftime('%d-%m-%Y')}."),
+               link=link_mine, exclude_user=actor)
+    elif event == "revoked":
+        notify([req.user], kind=InAppNotification.Kind.OTHER,
+               title="Daily report access revoked",
+               body=f"{label} is frozen again.", link=link_mine,
+               exclude_user=actor)
+
+
+def _parse_report_type(raw) -> str | None:
+    v = (raw or "").strip().upper()
+    return v if v in (freeze.REPORT_FACULTY, freeze.REPORT_ADMIN) else None
+
+
+def _parse_month(raw) -> tuple[int, int] | None:
+    """'YYYY-MM' → (year, month)."""
+    try:
+        y, m = (raw or "").split("-")[:2]
+        y, m = int(y), int(m)
+    except (TypeError, ValueError):
+        return None
+    return (y, m) if 1 <= m <= 12 and 2000 <= y <= 2100 else None
+
+
+class DailyReportFreezeStatusView(APIView):
+    """Is this month frozen for me, and do I hold access?
+    `?type=FACULTY|ADMIN&month=YYYY-MM`."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        rt = _parse_report_type(request.query_params.get("type"))
+        ym = _parse_month(request.query_params.get("month"))
+        if rt is None or ym is None:
+            return Response({"detail": "type (FACULTY|ADMIN) and month (YYYY-MM) required."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        st = freeze.status_for(request.user, rt, *ym)
+        st["access"] = (DailyReportAccessSerializer(st["access"]).data
+                        if st["access"] else None)
+        st["latest_request"] = (DailyReportAccessSerializer(st["latest_request"]).data
+                                if st["latest_request"] else None)
+        return Response(st)
+
+
+class DailyReportAccessListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """`?scope=mine` (default) | `team` (I am the snapshotted manager)
+        | `all` (unlock key). Filters: status, type."""
+        from apps.leaves.permissions import manager_email_q
+
+        u = request.user
+        scope = (request.query_params.get("scope") or "mine").lower()
+        qs = DailyReportAccess.objects.select_related(
+            "user", "employee", "manager_decided_by", "granted_by")
+        if scope == "all":
+            if not _can_unlock(u):
+                return Response({"detail": "Permission denied."},
+                                status=http.HTTP_403_FORBIDDEN)
+        elif scope == "team":
+            qs = qs.filter(manager_email_q(u))
+        else:
+            qs = qs.filter(user=u)
+        if v := request.query_params.get("status"):
+            qs = qs.filter(status=v)
+        if rt := _parse_report_type(request.query_params.get("type")):
+            qs = qs.filter(report_type=rt)
+        return Response(DailyReportAccessSerializer(qs[:500], many=True).data)
+
+    def post(self, request):
+        u = request.user
+        s = DailyReportAccessSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        d = s.validated_data
+        rt, year, month = d["report_type"], d["year"], d["month"]
+
+        # Only someone who can fill that report may ask to unlock it.
+        submit_key = ("dashboard.daily_report.submit" if rt == freeze.REPORT_FACULTY
+                      else "dashboard.admin_daily.submit")
+        if not (u.is_superuser or has_perm(u, submit_key)):
+            return Response({"detail": "You cannot fill this report, so there is "
+                                       "nothing to unlock."},
+                            status=http.HTTP_403_FORBIDDEN)
+        if not freeze.month_is_frozen(year, month):
+            return Response({"detail": f"{_date(year, month, 1).strftime('%B %Y')} "
+                                       "is not frozen; you can edit it directly."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        if freeze.open_access(u, rt, year, month) is not None:
+            return Response({"detail": "You already hold access to this month."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        if DailyReportAccess.objects.filter(
+                user=u, report_type=rt, year=year, month=month,
+                status__in=(DailyReportAccess.Status.PENDING,
+                            DailyReportAccess.Status.MANAGER_APPROVED)).exists():
+            return Response({"detail": "A request for this month is already in progress."},
+                            status=http.HTTP_400_BAD_REQUEST)
+
+        emp = _emp_of(u)
+        rm = getattr(emp, "reporting_manager_1", None) if emp else None
+        manager_email = (rm.email_primary if rm else "") or ""
+        if not manager_email:
+            return Response(
+                {"detail": "No reporting manager is set on your employee record, "
+                           "so the request cannot be routed. Ask HR to set one."},
+                status=http.HTTP_400_BAD_REQUEST)
+
+        req = DailyReportAccess.objects.create(
+            report_type=rt, user=u, employee=emp, year=year, month=month,
+            reason=d["reason"], manager_email=manager_email,
+        )
+        _notify_access(req, event="requested", actor=u)
+        return Response(DailyReportAccessSerializer(req).data,
+                        status=http.HTTP_201_CREATED)
+
+
+def _access_obj(pk) -> DailyReportAccess:
+    try:
+        return DailyReportAccess.objects.select_related(
+            "user", "employee", "manager_decided_by", "granted_by").get(pk=pk)
+    except DailyReportAccess.DoesNotExist as e:
+        raise Http404 from e
+
+
+class DailyReportAccessDecideView(APIView):
+    """Step 1 — the reporting manager approves or rejects."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.leaves.permissions import is_manager_for
+
+        u = request.user
+        req = _access_obj(pk)
+        if req.status != DailyReportAccess.Status.PENDING:
+            return Response({"detail": "This request is not awaiting the manager."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        if not (is_manager_for(u, req) or u.is_superuser):
+            return Response({"detail": "Only the applicant's reporting manager can decide."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = DailyReportAccessDecisionSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        approve = s.validated_data["approve"]
+        req.status = (DailyReportAccess.Status.MANAGER_APPROVED if approve
+                      else DailyReportAccess.Status.REJECTED)
+        req.manager_decided_by = u
+        req.manager_decided_at = timezone.now()
+        req.manager_remarks = s.validated_data.get("remarks", "")
+        req.save(update_fields=["status", "manager_decided_by", "manager_decided_at",
+                                "manager_remarks", "updated_at"])
+        _notify_access(req, event="manager_approved" if approve else "rejected", actor=u)
+        return Response(DailyReportAccessSerializer(req).data)
+
+
+class DailyReportAccessGrantView(APIView):
+    """Step 2 — an admin grants the unlock window. Manager approval first."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        u = request.user
+        if not _can_unlock(u):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        req = _access_obj(pk)
+        if req.status != DailyReportAccess.Status.MANAGER_APPROVED:
+            return Response(
+                {"detail": "Access can only be granted after the reporting "
+                           "manager has approved the request."},
+                status=http.HTTP_400_BAD_REQUEST)
+        s = DailyReportAccessGrantSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        until = s.validated_data["access_until"]
+        if until < freeze.today():
+            return Response({"access_until": ["Must be today or later."]},
+                            status=http.HTTP_400_BAD_REQUEST)
+        req.status = DailyReportAccess.Status.GRANTED
+        req.granted_by = u
+        req.granted_at = timezone.now()
+        req.access_until = until
+        req.grant_remarks = s.validated_data.get("remarks", "")
+        req.save(update_fields=["status", "granted_by", "granted_at", "access_until",
+                                "grant_remarks", "updated_at"])
+        _notify_access(req, event="granted", actor=u)
+        return Response(DailyReportAccessSerializer(req).data)
+
+
+class DailyReportAccessRevokeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        u = request.user
+        if not _can_unlock(u):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        req = _access_obj(pk)
+        if req.status != DailyReportAccess.Status.GRANTED:
+            return Response({"detail": "Only a granted access can be revoked."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        req.status = DailyReportAccess.Status.REVOKED
+        req.revoked_by = u
+        req.revoked_at = timezone.now()
+        req.save(update_fields=["status", "revoked_by", "revoked_at", "updated_at"])
+        _notify_access(req, event="revoked", actor=u)
+        return Response(DailyReportAccessSerializer(req).data)
 
 
 # === 3. Course End Report ===========================================
@@ -719,6 +1009,8 @@ class ZeroHourReportListCreateView(PaginatedAPIViewMixin, APIView):
                                  "next": None, "previous": None})
             qs = qs.filter(submitted_by=u)
         params = request.query_params
+        if v := params.get("campus"):
+            qs = qs.filter(batch__campus_id=v)
         if v := params.get("program"):
             qs = qs.filter(batch__program_id=v)
         if v := params.get("batch"):
@@ -1433,6 +1725,116 @@ class AuditSubmissionListView(APIView):
         return Response(AuditSubmissionSerializer(qs[:1000], many=True).data)
 
 
+class AuditFormDuplicateView(APIView):
+    """POST /api/audit-reports/forms/<pk>/duplicate/
+
+    Copies a form so it can be adjusted and shared again without being
+    rebuilt: title + " (Copy)", description, every field in order (type,
+    options, required, help text, config) and the target roles. The copy
+    starts as a DRAFT owned by the caller; responses are never copied
+    and the original is untouched. Same key as creating a form.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        if not _can_form(request.user, "add"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        try:
+            src = (AuditForm.objects
+                   .prefetch_related("fields", "roles").get(pk=pk))
+        except AuditForm.DoesNotExist as e:
+            raise Http404 from e
+
+        base = src.title.strip()
+        title = f"{base} (Copy)"
+        n = 2
+        while AuditForm.objects.filter(title=title).exists():
+            title = f"{base} (Copy {n})"
+            n += 1
+
+        with transaction.atomic():
+            copy = AuditForm.objects.create(
+                title=title[:200], description=src.description,
+                status=AuditForm.Status.DRAFT, created_by=request.user,
+            )
+            copy.roles.set(src.roles.all())
+            AuditFormField.objects.bulk_create([
+                AuditFormField(
+                    form=copy, label=f.label, field_type=f.field_type,
+                    options=list(f.options or []), required=f.required,
+                    help_text=f.help_text, config=dict(f.config or {}),
+                    sort_order=f.sort_order,
+                )
+                for f in src.fields.all()
+            ])
+        copy = AuditForm.objects.prefetch_related("fields", "roles").get(pk=copy.pk)
+        return Response(AuditFormSerializer(copy).data,
+                        status=http.HTTP_201_CREATED)
+
+
+class AuditFormResponsesCsvView(APIView):
+    """GET /api/audit-reports/forms/<pk>/responses.csv?from=&to=
+
+    Every response to one form as a CSV: one row per submission, one
+    column per question in the form's own order, so a form built today
+    is downloadable with no further work. Multi-choice answers join
+    with "; ". Same gate as the Filled Forms page
+    (`audit.submission.view_all`); the whole set is written, not the
+    on-screen page.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        from apps.common.csv_export import csv_response
+
+        if not _can_view_all_submissions(request.user):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        try:
+            form = AuditForm.objects.prefetch_related("fields").get(pk=pk)
+        except AuditForm.DoesNotExist as e:
+            raise Http404 from e
+
+        fields = list(form.fields.all())  # ordered by sort_order, id
+        qs = (AuditSubmission.objects.filter(form=form)
+              .select_related("submitted_by", "submitted_by__employee")
+              .prefetch_related("answers")
+              .order_by("created_at", "id"))
+        params = request.query_params
+        if v := params.get("from"):
+            if d := parse_date(v):
+                qs = qs.filter(created_at__date__gte=d)
+        if v := params.get("to"):
+            if d := parse_date(v):
+                qs = qs.filter(created_at__date__lte=d)
+
+        def cell(value):
+            if value is None:
+                return ""
+            if isinstance(value, (list, tuple)):
+                return "; ".join(str(x) for x in value if x not in (None, ""))
+            return str(value)
+
+        def rows():
+            for n, s in enumerate(qs, start=1):
+                by = s.submitted_by
+                emp = getattr(by, "employee", None) if by else None
+                answers = {a.field_id: a.value for a in s.answers.all()}
+                yield [
+                    n,
+                    (by.full_name or by.username) if by else "",
+                    emp.emp_code if emp else "",
+                    timezone.localtime(s.created_at).strftime("%d-%m-%Y %H:%M"),
+                    *[cell(answers.get(f.id)) for f in fields],
+                ]
+
+        header = ["Sr No", "Submitted by", "Emp code", "Submitted on",
+                  *[f.label for f in fields]]
+        safe = "".join(c if c.isalnum() or c in " -_" else "_" for c in form.title).strip()
+        return csv_response(f"{safe or 'Form'} - Responses.csv", header, rows())
+
+
 class AuditFormRoleListView(APIView):
     """Lightweight role list (id + name) for the form builder's role
     picker. Available to anyone who can manage audit forms, so they don't
@@ -1465,3 +1867,88 @@ class AuditSubmissionDetailView(APIView):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         return Response(AuditSubmissionSerializer(obj).data)
+
+
+# === Fee Receipts Export (Tally receipt vouchers) ===================
+# Audit > Fee Receipts Export. One key, `audit.fee_export`; the rows and
+# the CSV are built in `fee_export.py` so the download is the same file
+# whoever pulls it. Non-superusers with assigned campuses see only those.
+
+class FeeReceiptExportView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    PREVIEW_LIMIT = 2000
+
+    def get(self, request):
+        from . import fee_export
+
+        u = request.user
+        if not has_perm(u, "audit.fee_export"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+
+        mine = None if u.is_superuser else (_assigned_campus_ids(u) or None)
+        params = request.query_params
+        for key in ("start_date", "end_date"):
+            if (v := params.get(key)) and parse_date(v) is None:
+                return Response({"detail": f"{key} must be YYYY-MM-DD."},
+                                status=http.HTTP_400_BAD_REQUEST)
+
+        qs = fee_export.apply_filters(
+            fee_export.base_queryset(), params, campus_ids=mine,
+        )
+        if (params.get("output") or "").lower() == "csv":
+            return fee_export.csv_response(qs)
+
+        count = qs.count()
+        rows = fee_export.voucher_rows(qs[: self.PREVIEW_LIMIT])
+        return Response({
+            "count": count,
+            "truncated": count > len(rows),
+            "total_amount": str(
+                Decimal(qs.aggregate(t=Sum("amount"))["t"] or 0).quantize(Decimal("0.01"))
+            ),
+            "rows": rows,
+        })
+
+
+class FeeReceiptExportOptionsView(APIView):
+    """Campus / program / institute lists for the export filters. Audit
+    users rarely hold the master.* keys, so the page cannot use the
+    master endpoints."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        u = request.user
+        if not has_perm(u, "audit.fee_export"):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        from apps.master.models import Campus, Institute, Program
+
+        campuses = Campus.objects.filter(is_active=True).order_by("name")
+        mine = _assigned_campus_ids(u)
+        if not u.is_superuser and mine:
+            campuses = campuses.filter(id__in=mine)
+        return Response({
+            "campuses": [
+                {"id": c.id, "name": c.name, "code": c.code} for c in campuses
+            ],
+            # `campus_ids`: campuses the program is offered at — its own
+            # campus list plus any campus a batch of it runs at — so the
+            # page can narrow programs once a campus is picked.
+            "programs": [
+                {"id": p.id, "name": p.name, "code": p.code,
+                 "institute": p.institute_id,
+                 "campus_ids": sorted(
+                     set(p.campuses.values_list("id", flat=True))
+                     | set(p.batches.values_list("campus_id", flat=True))
+                 )}
+                for p in Program.objects.filter(is_active=True)
+                .prefetch_related("campuses", "batches")
+                .order_by("institute__code", "name")
+            ],
+            "institutes": [
+                {"id": i.id, "name": i.name, "code": i.code}
+                for i in Institute.objects.filter(is_active=True).order_by("code")
+            ],
+        })

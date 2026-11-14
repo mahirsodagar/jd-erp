@@ -2,9 +2,20 @@ from django.contrib import admin
 
 from .models import (
     AdminDailyReport, AuditAnswer, AuditForm, AuditFormField, AuditSubmission,
-    BatchMentorReport, ComplianceFlag, CourseEndReport,
+    BatchMentorReport, ComplianceFlag, CourseEndReport, DailyReportAccess,
     FacultyDailyReport, FacultySelfAppraisal, StudentFeedback, ZeroHourReport,
 )
+
+
+@admin.register(DailyReportAccess)
+class DailyReportAccessAdmin(admin.ModelAdmin):
+    list_display = ("user", "report_type", "year", "month", "status",
+                    "manager_email", "access_until", "created_at")
+    list_filter = ("report_type", "status")
+    search_fields = ("user__username", "user__full_name", "manager_email",
+                     "employee__emp_code")
+    autocomplete_fields = ("user", "employee")
+    readonly_fields = ("created_at", "updated_at")
 
 
 @admin.register(FacultyDailyReport)

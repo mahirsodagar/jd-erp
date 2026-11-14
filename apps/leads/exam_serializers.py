@@ -126,6 +126,14 @@ class EntranceExamAttemptSerializer(serializers.ModelSerializer):
                             "created_at", "updated_at"]
 
 
+class SendExamLinksSerializer(serializers.Serializer):
+    """Explicit list of attempts to email. Empty is an error on purpose —
+    "send to selected" must never silently mean "send to all"."""
+    attempt_ids = serializers.ListField(
+        child=serializers.IntegerField(), allow_empty=False,
+    )
+
+
 class MapExamSerializer(serializers.Serializer):
     lead_ids = serializers.ListField(
         child=serializers.IntegerField(), allow_empty=False,

@@ -63,6 +63,7 @@ class UserSerializer(serializers.ModelSerializer):
     is_employee = serializers.SerializerMethodField()
     employee_id = serializers.SerializerMethodField()
     is_relieving_approver = serializers.SerializerMethodField()
+    is_reporting_manager = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -70,7 +71,7 @@ class UserSerializer(serializers.ModelSerializer):
             "id", "username", "email", "full_name",
             "is_active", "is_staff", "is_superuser",
             "is_student", "is_parent", "is_employee", "employee_id",
-            "is_relieving_approver",
+            "is_relieving_approver", "is_reporting_manager",
             "campuses",
             "date_joined", "last_login",
             "roles", "permissions", "modules",
@@ -79,8 +80,20 @@ class UserSerializer(serializers.ModelSerializer):
             "id", "is_superuser", "date_joined", "last_login",
             "roles", "permissions", "modules",
             "campuses", "is_student", "is_parent", "is_employee",
-            "employee_id", "is_relieving_approver",
+            "employee_id", "is_relieving_approver", "is_reporting_manager",
         ]
+
+    def get_is_reporting_manager(self, obj):
+        """True when at least one employee reports to this user (L1), or
+        this user is the snapshotted manager on a daily-report access
+        request. Gates the Daily Report Access menu entry — deciding a
+        request as the manager needs no permission key."""
+        emp = getattr(obj, "employee", None)
+        from apps.audit_reports.models import DailyReportAccess
+        from apps.leaves.permissions import manager_email_q
+        if emp is not None and emp.direct_reports_l1.filter(is_deleted=False).exists():
+            return True
+        return DailyReportAccess.objects.filter(manager_email_q(obj)).exists()
 
     def get_is_relieving_approver(self, obj):
         """True when this employee sits on a Relieving Managers chain

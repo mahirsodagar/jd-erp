@@ -92,3 +92,91 @@ class SendEntranceExamLinkTests(TestCase):
         r = self.client.post(f"/api/leads/exam-attempts/{a.id}/send-link/")
         self.assertEqual(r.status_code, 200, r.content)
         self.assertIn(str(a.access_token), r.json()["url"])
+
+    # --- Bulk send to SELECTED attempts -------------------------------
+
+    def _own_exam(self):
+        self.exam.created_by = self.user
+        self.exam.save(update_fields=["created_by"])
+        self.client.force_authenticate(user=self.user)
+
+    def test_bulk_sends_only_selected(self):
+        self._own_exam()
+        a1 = self._attempt(email="one@example.com")
+        a2 = self._attempt(email="two@example.com")
+        self._attempt(email="three@example.com")  # mapped, NOT selected
+        r = self.client.post(
+            f"/api/leads/exams/{self.exam.id}/send-links/",
+            {"attempt_ids": [a1.id, a2.id]}, format="json",
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()
+        self.assertEqual(body["requested"], 2)
+        self.assertEqual({x["attempt_id"] for x in body["results"]},
+                         {a1.id, a2.id})
+        # Only the two selected leads got a timeline entry.
+        self.assertEqual(LeadCommunication.objects.count(), 2)
+        self.assertEqual(
+            set(LeadCommunication.objects.values_list("lead_id", flat=True)),
+            {a1.lead_id, a2.lead_id},
+        )
+
+    def test_bulk_empty_selection_is_rejected(self):
+        """Empty must never mean 'everyone'."""
+        self._own_exam()
+        self._attempt()
+        r = self.client.post(
+            f"/api/leads/exams/{self.exam.id}/send-links/",
+            {"attempt_ids": []}, format="json",
+        )
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(LeadCommunication.objects.count(), 0)
+
+    def test_bulk_rejects_attempts_of_other_exam(self):
+        self._own_exam()
+        other = EntranceExam.objects.create(
+            name="Other", duration_min=10,
+            status=EntranceExam.Status.PUBLISHED, created_by=self.user,
+        )
+        lead = Lead.objects.create(
+            name="X", phone="8888888888", email="x@example.com",
+            campus=self.campus, program=self.program, source=self.source,
+        )
+        now = timezone.now()
+        foreign = EntranceExamAttempt.objects.create(
+            exam=other, lead=lead, start_dt=now, end_dt=now + timedelta(days=1),
+        )
+        r = self.client.post(
+            f"/api/leads/exams/{self.exam.id}/send-links/",
+            {"attempt_ids": [foreign.id]}, format="json",
+        )
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(LeadCommunication.objects.count(), 0)
+
+    def test_bulk_reports_no_email_per_row(self):
+        self._own_exam()
+        ok = self._attempt(email="ok@example.com")
+        bad = self._attempt(email="")
+        r = self.client.post(
+            f"/api/leads/exams/{self.exam.id}/send-links/",
+            {"attempt_ids": [ok.id, bad.id]}, format="json",
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        rows = {x["attempt_id"]: x for x in r.json()["results"]}
+        self.assertFalse(rows[bad.id]["email_sent"])
+        self.assertIn("no email", rows[bad.id]["email_error"])
+        # The good row went through the dispatcher (whatever the template
+        # state in this environment) — it must not carry the no-email error.
+        self.assertNotIn("no email", rows[ok.id]["email_error"])
+        self.assertEqual(r.json()["requested"], 2)
+        # Only the lead with an address got a timeline entry.
+        self.assertEqual(LeadCommunication.objects.count(), 1)
+
+    def test_bulk_requires_permission(self):
+        a = self._attempt()
+        self.client.force_authenticate(user=self.user)
+        r = self.client.post(
+            f"/api/leads/exams/{self.exam.id}/send-links/",
+            {"attempt_ids": [a.id]}, format="json",
+        )
+        self.assertEqual(r.status_code, 403)

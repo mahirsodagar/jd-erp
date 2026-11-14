@@ -664,9 +664,11 @@ MSG91_DRY_RUN = env.bool("MSG91_DRY_RUN", default=False) or (
 #     recipients (leads, students, parents). Anything in this dict
 #     goes through the MSG91 v5 email API.
 #
-#   * SMTP (admin.a@jdinstitute.edu.in via Workspace) — INTERNAL
-#     mail to faculty / employees (HR workflows, leave notifications
-#     to employees, task assignments, staff password resets, etc.).
+#   * SMTP (crm@jdindia.com via Zoho) — INTERNAL mail to faculty /
+#     employees (HR workflows, leave notifications to employees, task
+#     assignments, etc.) and every non-MSG91 student/admission mail.
+#     jdinstitute.edu.in is RETIRED as a sending domain (2026-11-13);
+#     it survives only as recipient inboxes (leave@, dkul.receipts@ …).
 #     Any template NOT listed below falls through to plain SMTP via
 #     apps.notifications.email.send_email.
 #
@@ -726,10 +728,16 @@ MSG91_EMAIL_TEMPLATES = {
 # The From *domain* varies by trigger, and for fee / admission mail it
 # varies by the student's course type (institute spec):
 #
-#   Diploma courses        → jdinstitute.edu.in
+#   Diploma courses        → jdindia.com   (was jdinstitute.edu.in)
 #   Degree / Bachelors     → jdindia.com
 #   student password reset → mail.jdinstitute.com
-#   HR / leave / relieving → jdinstitute.edu.in
+#   HR / leave / relieving → jdindia.com   (was jdinstitute.edu.in)
+#
+# Since 2026-11-13 every SMTP-routed trigger sends from jdindia.com via
+# Zoho; jdinstitute.edu.in (Google Workspace) is no longer a sending
+# domain. The diploma / HR knobs are kept so the split can be revived
+# per-env without a code change, but their defaults all point at
+# jdindia.com now.
 #
 # See apps/notifications/sender.py for the resolver. The provider
 # (MSG91 / SMTP) split above is orthogonal: it decides the *transport*,
@@ -742,10 +750,10 @@ MSG91_EMAIL_TEMPLATES = {
 # outbound (local dev, paid PA, a VPS) to use the proper From domains.
 EMAIL_SMTP_OUTBOUND_ENABLED = env.bool("EMAIL_SMTP_OUTBOUND_ENABLED", default=True)
 
-EMAIL_DOMAIN_DIPLOMA = env("EMAIL_DOMAIN_DIPLOMA", default="jdinstitute.edu.in")
+EMAIL_DOMAIN_DIPLOMA = env("EMAIL_DOMAIN_DIPLOMA", default="jdindia.com")
 EMAIL_DOMAIN_DEGREE = env("EMAIL_DOMAIN_DEGREE", default="jdindia.com")
 EMAIL_DOMAIN_PORTAL = env("EMAIL_DOMAIN_PORTAL", default="mail.jdinstitute.com")
-EMAIL_DOMAIN_HR = env("EMAIL_DOMAIN_HR", default="jdinstitute.edu.in")
+EMAIL_DOMAIN_HR = env("EMAIL_DOMAIN_HR", default="jdindia.com")
 
 # trigger template_key → routing token. COURSE = pick diploma/degree by
 # course type; PORTAL / HR = fixed domain; any other value = literal
@@ -764,12 +772,10 @@ EMAIL_SENDER_DOMAIN_POLICY = {
     "fees.installment_undertaking.email":  "COURSE",  # installment pattern / undertaking
     "fees.installment_pending.email":      "COURSE",  # installment-pending reminder
     "fees.fee_link.email":                 "COURSE",  # staff-sent installment pay link
-    # Entrance-exam link → always jdinstitute.edu.in (the default
-    # Workspace mailbox, admin.a@jdinstitute.edu.in), never the course
-    # domains. It is the one lead-facing trigger with no MSG91 template,
-    # so course routing sent degree candidates through the jdindia.com
-    # Zoho connection with nothing to fall back to.
-    "lead.entrance_exam_link.email":       "jdinstitute.edu.in",
+    # Entrance-exam link → HR domain (jdindia.com via Zoho). It is the
+    # one lead-facing trigger with no MSG91 template, so it is pinned
+    # to a fixed SMTP domain rather than COURSE routing.
+    "lead.entrance_exam_link.email":       "HR",
     # Student credentials / password reset → mail.jdinstitute.com.
     "student.portal_credentials.email":    "PORTAL",
     "account.password_reset_by_admin.email": "PORTAL",
@@ -782,7 +788,7 @@ EMAIL_SENDER_DOMAIN_POLICY = {
     "academics.assignment_assigned.email": "PORTAL",
     "academics.assignment_submitted.email": "PORTAL",
     "admissions.application_submitted.email": "PORTAL",
-    # HR / leave / relieving workflows → jdinstitute.edu.in.
+    # HR / leave / relieving workflows → EMAIL_DOMAIN_HR (jdindia.com).
     "leaves.application_employee.email":          "HR",
     "leaves.application_status_employee.email":   "HR",
     "leaves.application_status_student.email":    "HR",
@@ -799,24 +805,29 @@ EMAIL_SENDER_DOMAIN_POLICY = {
 # are actually verified with the transport (MSG91 cross-checks the From
 # domain against its registered senders; SMTP must be authorised to send
 # as the address). Domains absent here resolve to a blank From and the
-# dispatcher falls back to the provider default — so the routing policy
-# above can ship before jdinstitute.edu.in / jdindia.com are verified on
-# MSG91. Add the verified From-address here to make a domain live.
+# dispatcher falls back to the provider default. jdindia.com does NOT
+# need an entry: it delivers over the dedicated Zoho connection below,
+# whose own from_email wins (see apps.notifications.email.send_email).
 EMAIL_SENDER_BY_DOMAIN = {
     "mail.jdinstitute.com": env(
         "SENDER_MAIL_JDINSTITUTE", default="admin@mail.jdinstitute.com",
     ),
-    # Pending MSG91 domain verification — set the env var to go live:
+    # Retired sending domain — kept only so a per-env override of
+    # EMAIL_DOMAIN_* back to jdinstitute.edu.in still has a hook.
     "jdinstitute.edu.in": env("SENDER_JDINSTITUTE_EDU", default=""),
     "jdindia.com":        env("SENDER_JDINDIA", default=""),
 }
 
-# Per-domain dedicated SMTP servers. Some sending domains (e.g.
-# jdindia.com) deliver through their *own* mailbox/host rather than
-# MSG91 or the default internal Gmail relay. When a trigger resolves
-# (via EMAIL_SENDER_DOMAIN_POLICY) to a domain listed here, the
-# dispatcher opens a dedicated SMTP connection with these credentials —
-# this TAKES PRECEDENCE over the MSG91 registry for that domain.
+# Per-domain dedicated SMTP servers. jdindia.com delivers through its
+# own Zoho mailbox (crm@jdindia.com). When a trigger resolves (via
+# EMAIL_SENDER_DOMAIN_POLICY) to a domain listed here, the dispatcher
+# opens a dedicated SMTP connection with these credentials — this TAKES
+# PRECEDENCE over the MSG91 registry for that domain.
+#
+# Since all SMTP-routed triggers now resolve to jdindia.com, this is THE
+# transport for staff/HR/admission mail. The project-default backend
+# (EMAIL_HOST_*) should point at the same Zoho mailbox so un-policied
+# senders (tasks, undertaking, handbook, Django password reset) match.
 #
 # A domain is only active when its *_HOST env var is set; until then the
 # entry is omitted and routing falls back to MSG91 / default SMTP.
@@ -826,11 +837,12 @@ if _jdindia_smtp_host:
     _jdindia_user = env("SMTP_JDINDIA_USER", default="")
     EMAIL_SMTP_BY_DOMAIN["jdindia.com"] = {
         "host": _jdindia_smtp_host,
-        "port": env.int("SMTP_JDINDIA_PORT", default=587),
+        # Zoho: 465 + SSL (587 + STARTTLS also works).
+        "port": env.int("SMTP_JDINDIA_PORT", default=465),
         "username": _jdindia_user,
         "password": env("SMTP_JDINDIA_PASSWORD", default=""),
-        "use_tls": env.bool("SMTP_JDINDIA_USE_TLS", default=True),
-        "use_ssl": env.bool("SMTP_JDINDIA_USE_SSL", default=False),
+        "use_tls": env.bool("SMTP_JDINDIA_USE_TLS", default=False),
+        "use_ssl": env.bool("SMTP_JDINDIA_USE_SSL", default=True),
         # From-address recipients see; defaults to the auth username.
         "from_email": env("SMTP_JDINDIA_FROM", default=_jdindia_user),
     }
@@ -841,6 +853,12 @@ if _jdindia_smtp_host:
 # domain entry still set it with override_settings.
 if len(sys.argv) > 1 and sys.argv[1] == "test":
     EMAIL_SMTP_BY_DOMAIN = {}
+
+# Faculty + admin daily reports freeze month-wise: month M locks on the
+# 1st of M+1 plus this many grace days (0 = strictly month-wise). A
+# frozen month is edited only via an approved + granted access request
+# (apps.audit_reports.freeze).
+DAILY_REPORT_FREEZE_GRACE_DAYS = env.int("DAILY_REPORT_FREEZE_GRACE_DAYS", default=0)
 
 # Department / role group inboxes used as additional recipients or CC on
 # certain triggers (spec: fee receipt → +Accounts, admission filled →
@@ -928,10 +946,11 @@ SMTP_INTERNAL_TEMPLATE_KEYS = {
 
 # --- Email — Django built-in -------------------------------------------
 
-# Default to console backend so dev works with no SMTP. Override per env:
+# Default to console backend so dev works with no SMTP. Override per env
+# (Zoho, same mailbox as SMTP_JDINDIA_* so un-policied mail matches):
 #   EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
-#   EMAIL_HOST=smtp.gmail.com  EMAIL_PORT=587  EMAIL_USE_TLS=True
-#   EMAIL_HOST_USER=…  EMAIL_HOST_PASSWORD=…
+#   EMAIL_HOST=smtp.zoho.com  EMAIL_PORT=465  EMAIL_USE_SSL=True
+#   EMAIL_HOST_USER=crm@jdindia.com  EMAIL_HOST_PASSWORD=…
 EMAIL_BACKEND = env(
     "EMAIL_BACKEND",
     default="django.core.mail.backends.console.EmailBackend",
@@ -944,7 +963,7 @@ EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=False)
 EMAIL_USE_SSL = env.bool("EMAIL_USE_SSL", default=False)
 DEFAULT_FROM_EMAIL = env(
     "DEFAULT_FROM_EMAIL",
-    default="JD Communications <admin.a@jdinstitute.edu.in>",
+    default="JD Communications <crm@jdindia.com>",
 )
 # Display name applied when DEFAULT_FROM_EMAIL is just a bare address
 # or only EMAIL_HOST_USER is configured. Keeps the recipient from

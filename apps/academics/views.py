@@ -42,6 +42,7 @@ from .serializers import (
     AttendanceSerializer, BulkMarkAttendanceSerializer,
     BulkWeeklyPublishSerializer, CertificateIssueSerializer,
     CertificateRejectSerializer, CertificateRequestSerializer,
+    MyCertificateRequestSerializer,
     CertificateSerializer, FreezeSerializer, MarksEntrySerializer,
     MarksSheetKeySerializer, MarksSheetPublishSerializer,
     MarksSheetSaveSerializer,
@@ -1656,6 +1657,9 @@ class CertificatePdfView(APIView):
 
 
 class MyCertificatesView(APIView):
+    """Student self-service: list own certificates, or raise a request
+    for oneself without having to know one's Student id (POST)."""
+
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -1664,6 +1668,37 @@ class MyCertificatesView(APIView):
             return Response([])
         qs = Certificate.objects.filter(student=student).order_by("-requested_on")
         return Response(CertificateSerializer(qs, many=True).data)
+
+    def post(self, request):
+        student = getattr(request.user, "student", None)
+        if student is None:
+            return Response({"detail": "Only students can self-request."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = MyCertificateRequestSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        d = s.validated_data
+
+        # One open request per type at a time — the quick buttons on
+        # "My Certificates" would otherwise pile up duplicates.
+        if Certificate.objects.filter(
+            student=student, type=d["type"],
+            status=Certificate.Status.REQUESTED,
+        ).exists():
+            return Response(
+                {"detail": "You already have a pending request for this certificate."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+
+        enrollment = student.enrollments.order_by("-created_on").first()
+        cert = Certificate.objects.create(
+            student=student, enrollment=enrollment,
+            type=d["type"],
+            purpose=d.get("purpose", ""),
+            remarks=d.get("remarks", ""),
+            requested_by=request.user,
+        )
+        return Response(CertificateSerializer(cert).data,
+                        status=http.HTTP_201_CREATED)
 
 
 # --- Graduation flow -------------------------------------------------

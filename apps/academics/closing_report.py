@@ -13,7 +13,7 @@ batch it composes a single document:
 
 Attendance % follows the same convention as the rest of the Academics
 reporting suite (Attendance Report / Batch Report): "present-like" =
-PRESENT + LATE + ON_DUTY over the rows actually marked.
+PRESENT + LATE over the rows actually marked.
 """
 
 from django.db.models import Count, Max, Min, Q
@@ -23,7 +23,7 @@ from apps.master.models import Batch
 
 from .models import Attendance, ClosingAward, ScheduleSlot
 
-PRESENT_LIKE = ("PRESENT", "LATE", "ON_DUTY")
+PRESENT_LIKE = ("PRESENT", "LATE")
 
 # Students shown on a closing sheet: active + alumni (legacy
 # `enrollment_status IN (1,5)`, mapped to this schema's Status codes).

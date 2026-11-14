@@ -134,9 +134,9 @@ Collect and store these in a password manager before handover:
 - BulkSMS Gateway India login (`jdinstitute`) and the DLT/TRAI principal-entity
   account that owns the approved templates.
 - XIRCLS platform login (API key, WhatsApp project key, trigger/campaign names).
-- Google Workspace mailbox used for internal SMTP (`admin.a@jdinstitute.edu.in`)
-  — an **app password**, not the account password.
-- Zoho/other SMTP credentials for `jdindia.com` if that domain is activated.
+- Zoho mailbox `crm@jdindia.com` used for ALL SMTP mail (staff/HR + admission)
+  — an **app password**, not the account password. The old Google Workspace
+  mailbox `admin.a@jdinstitute.edu.in` is no longer used for sending.
 - VPS SSH key, MySQL credentials, Netlify (or equivalent) account.
 
 ## 1.5 Seed data — order matters

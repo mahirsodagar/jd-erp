@@ -26,6 +26,11 @@ class Task(models.Model):
         blank=True,
         help_text="Notes from the assignee while working on the task.",
     )
+    attachment = models.FileField(
+        upload_to="tasks/attachments/%Y/%m/", blank=True, null=True,
+        help_text="Optional reference file (image, PDF or Office document) "
+                  "the creator attaches when assigning.",
+    )
 
     status = models.PositiveSmallIntegerField(
         choices=Status.choices, default=Status.PENDING, db_index=True,

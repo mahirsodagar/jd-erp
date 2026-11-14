@@ -10,6 +10,7 @@ from .views import (
     FeeReceiptDetailView,
     FeeReceiptListCreateView,
     FeeReceiptPdfView,
+    FeeReceiptSendView,
     FeesMeReceiptPdfView,
     FeesMeReceiptsView,
     FeesMeView,
@@ -46,6 +47,7 @@ urlpatterns = [
     path("receipts/<int:pk>/", FeeReceiptDetailView.as_view(), name="receipt-detail"),
     path("receipts/<int:pk>/cancel/", FeeReceiptCancelView.as_view(), name="receipt-cancel"),
     path("receipts/<int:pk>/pdf/", FeeReceiptPdfView.as_view(), name="receipt-pdf"),
+    path("receipts/<int:pk>/send/", FeeReceiptSendView.as_view(), name="receipt-send"),
 
     # Concessions
     path("concessions/", ConcessionListCreateView.as_view(), name="concession-list-create"),
