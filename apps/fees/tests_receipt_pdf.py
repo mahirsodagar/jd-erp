@@ -84,6 +84,23 @@ class PolicyPageTests(TestCase):
             self.assertNotIn(("h2", "AGREEMENT"), receipt)
             self.assertEqual(len(full) - len(receipt), 2)
 
+    def test_id_card_replacement_fee_per_institute(self):
+        """JD School of Design prints Rs.1000; JD Institute and anything
+        unknown keep the legacy Rs.500."""
+        def fee_line(doc):
+            return next(b for b in doc if b[:2] == ("li", "ID Cards:"))[2]
+
+        self.assertIn("Rs.500.", fee_line(policy_for("Diploma")))
+        self.assertIn("Rs.500.", fee_line(policy_for("B.Sc", institute="JDIFT")))
+        self.assertIn("Rs.1000.", fee_line(policy_for("B.Sc", institute="JDSD")))
+        self.assertIn("Rs.1000.", fee_line(policy_for("Diploma", institute="jdsd")))
+        jdsd = Institute(code="JDSD", name="JD School of Design")
+        self.assertIn("Rs.1000.", fee_line(
+            policy_for("B.Sc", institute=jdsd, agreement=False)))
+        self.assertIn("Rs.500.", fee_line(policy_for("B.Sc", institute=None)))
+        # The module-level documents are never mutated by the swap.
+        self.assertIn("Rs.500.", fee_line(policy_for("B.Sc")))
+
 
 class RenderTests(TestCase):
 

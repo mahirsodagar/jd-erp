@@ -209,8 +209,9 @@ urlpatterns = [
 from .views import (
     AttemptStartView, AttemptSubmitView, AttemptViewWithQuestions,
     MyTestsView, ResponseReviewView, TestAttemptsListView, TestCloseView,
-    TestDetailView, TestListCreateView, TestMapView, TestPublishView,
-    TestQuestionDetailView, TestQuestionListCreateView, TestReportView,
+    TestDetailView, TestDuplicateView, TestListCreateView, TestMapView,
+    TestPublishView, TestQuestionDetailView, TestQuestionListCreateView,
+    TestReportView,
 )
 
 urlpatterns += [
@@ -220,6 +221,8 @@ urlpatterns += [
     path("tests/<int:pk>/publish/", TestPublishView.as_view(),
          name="test-publish"),
     path("tests/<int:pk>/close/", TestCloseView.as_view(), name="test-close"),
+    path("tests/<int:pk>/duplicate/", TestDuplicateView.as_view(),
+         name="test-duplicate"),
     path("tests/<int:pk>/questions/", TestQuestionListCreateView.as_view(),
          name="test-question-list-create"),
     path("tests/<int:pk>/map/", TestMapView.as_view(), name="test-map"),

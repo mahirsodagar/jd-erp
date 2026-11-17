@@ -127,17 +127,26 @@ def _label_value(pdf: FPDF, label: str, value: str, *,
 # --- Header ------------------------------------------------------------
 
 _LOGO_W, _LOGO_H = 42.0, 22.0
+# The JD School of Design stationery carries a noticeably larger logo
+# than the JD Institute one; its address sits opposite, so the extra
+# height costs nothing on the page.
+_LOGO_W_RIGHT, _LOGO_H_RIGHT = 58.0, 30.0
 
 
 def _draw_letterhead(pdf: FPDF, institute) -> None:
-    """Logo top-left in a 42x22mm box, the billing block underneath it:
-    left-aligned on the JD Institute stationery, right-aligned (with a
-    wider gap before the title) on the JD School of Design one."""
+    """Logo top-left (42x22mm box on JD Institute, 58x30mm on JD School
+    of Design), the billing block underneath it: left-aligned on the JD
+    Institute stationery, right-aligned (with a wider gap before the
+    title) on the JD School of Design one."""
     top = 12.0
-    logo_bottom = top + _LOGO_H
+    right = prints_right(institute)
+    logo_w, logo_h = (
+        (_LOGO_W_RIGHT, _LOGO_H_RIGHT) if right else (_LOGO_W, _LOGO_H)
+    )
+    logo_bottom = top + logo_h
     if path := logo_path(institute):
         try:
-            pdf.image(path, x=_MARGIN, y=top, w=_LOGO_W, h=_LOGO_H,
+            pdf.image(path, x=_MARGIN, y=top, w=logo_w, h=logo_h,
                       keep_aspect_ratio=True)
         except Exception:  # noqa: BLE001 — a corrupt logo must not 500 the document
             path = None
@@ -148,7 +157,6 @@ def _draw_letterhead(pdf: FPDF, institute) -> None:
         pdf.multi_cell(_BODY_W, 6, _safe(getattr(institute, "name", "")))
         logo_bottom = max(logo_bottom, pdf.get_y())
 
-    right = prints_right(institute)
     text_bottom = draw_letterhead_block(
         pdf, institute, x=_MARGIN, y=logo_bottom + 3, width=_BODY_W,
         align="R" if right else "L", size=9, line_h=5.0, color=(0, 0, 0),
@@ -390,7 +398,8 @@ def render_receipt_pdf(receipt) -> bytes:
     program = receipt.enrollment.program
     draw_policy_page(
         pdf,
-        policy_for(program.degree_type if program else None, agreement=False),
+        policy_for(program.degree_type if program else None, agreement=False,
+                   institute=receipt.enrollment.student.institute),
         signatures=False,
     )
 

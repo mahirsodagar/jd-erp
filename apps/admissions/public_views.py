@@ -119,14 +119,15 @@ def _missing_required(lead: Lead, payload: dict) -> list[str]:
         if not has_upload and d["header"] not in stored_files:
             missing.append(f"{row}: Document")
 
-    if not payload.get("declaration_accepted") and not (
-        existing and existing.declaration_accepted_at
-    ):
-        missing.append("Declaration")
+    # Listed in the order the form shows them: rules, then declaration.
     if not payload.get("rules_accepted") and not (
         existing and existing.rules_accepted_at
     ):
         missing.append("Rules & Regulations")
+    if not payload.get("declaration_accepted") and not (
+        existing and existing.declaration_accepted_at
+    ):
+        missing.append("Declaration")
     return missing
 
 

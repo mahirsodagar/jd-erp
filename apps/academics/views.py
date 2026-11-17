@@ -1832,13 +1832,13 @@ from .models import TestAttempt as _TestAttempt  # noqa: E402
 from .models import TestQuestion as _TestQuestion  # noqa: E402
 from .models import TestResponse as _TestResponse  # noqa: E402
 from .serializers import (  # noqa: E402
-    MapTestSerializer, ReviewResponseSerializer, SubmitAttemptSerializer,
-    TestAttemptSerializer, TestQuestionSerializer,
+    DuplicateTestSerializer, MapTestSerializer, ReviewResponseSerializer,
+    SubmitAttemptSerializer, TestAttemptSerializer, TestQuestionSerializer,
     TestQuestionStudentSerializer, TestResponseSerializer, TestSerializer,
 )
 from .test_service import (  # noqa: E402
-    can_attempt_now, map_test_to_students, recompute_total_marks,
-    review_response, submit_attempt, test_report,
+    can_attempt_now, duplicate_test, map_test_to_students,
+    recompute_total_marks, review_response, submit_attempt, test_report,
 )
 
 
@@ -1998,6 +1998,37 @@ class TestCloseView(APIView):
         t.status = _Test.Status.CLOSED
         t.save(update_fields=["status", "updated_at"])
         return Response(TestSerializer(t).data)
+
+
+class TestDuplicateView(APIView):
+    """POST `{"name"?, "program"?, "academic_year"?}` — clone this test
+    (any status) with all its questions into a NEW DRAFT test, so the
+    same paper can be published and mapped to another batch separately.
+
+    A Test carries no batch: the batch is chosen when the copy is
+    mapped, exactly like a test created from scratch. The copy keeps
+    name (suffixed "(copy)" unless given), instructions, duration,
+    subject, program and academic year; attempts / responses stay with
+    the original. Allowed for the test's owner or anyone holding
+    `academics.test.publish`; the copy is owned by whoever clicks."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            src = _Test.objects.select_related("subject").get(pk=pk)
+        except _Test.DoesNotExist as e:
+            raise Http404 from e
+        u = request.user
+        if not (_is_test_owner(u, src) or has_perm(u, "academics.test.publish")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = DuplicateTestSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        copy = duplicate_test(
+            src, created_by=u, **s.validated_data,
+        )
+        return Response(TestSerializer(copy).data,
+                        status=http.HTTP_201_CREATED)
 
 
 # --- Question CRUD ----------------------------------------------------

@@ -2,7 +2,9 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
-from apps.master.models import Batch, Semester, Subject
+from apps.master.models import (
+    AcademicYear, Batch, Program, Semester, Subject,
+)
 
 from .models import (
     AlumniRecord, Assignment, AssignmentSubmission, Attendance, Certificate,
@@ -624,6 +626,19 @@ class MapTestSerializer(serializers.Serializer):
                 {"end_dt": "end_dt must be after start_dt."}
             )
         return attrs
+
+
+class DuplicateTestSerializer(serializers.Serializer):
+    """Optional overrides for `POST /tests/<pk>/duplicate/`. Anything
+    left out is copied from the source test."""
+    name = serializers.CharField(max_length=200, required=False,
+                                 allow_blank=True)
+    program = serializers.PrimaryKeyRelatedField(
+        queryset=Program.objects.all(), required=False, allow_null=True,
+    )
+    academic_year = serializers.PrimaryKeyRelatedField(
+        queryset=AcademicYear.objects.all(), required=False, allow_null=True,
+    )
 
 
 class SubmitAnswerSerializer(serializers.Serializer):

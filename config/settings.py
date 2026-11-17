@@ -77,6 +77,7 @@ INSTALLED_APPS = [
     "apps.portal",
     "apps.tasks",
     "apps.payments",
+    "apps.communications",
 ]
 
 

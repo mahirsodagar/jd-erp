@@ -73,8 +73,9 @@ class Institute(models.Model):
     )
     signature = models.ImageField(
         upload_to="institute/signatures/", blank=True, null=True,
-        help_text="Authorised signatory's signature. Printed in that box "
-                  "on the Fee Payment Schedule; receipts are always left unsigned.",
+        help_text="Authorised signatory's signature. Not printed on any "
+                  "document at present (the Fee Payment Schedule and receipts "
+                  "are issued unsigned); kept for future letters.",
     )
     letterhead_title = models.CharField(
         max_length=80, blank=True,

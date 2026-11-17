@@ -8,6 +8,7 @@ from .views import (
     BatchListCreateView,
     CampusDetailView,
     CampusListCreateView,
+    CampusOptionsView,
     CampusProgramsView,
     CityDetailView,
     CityListCreateView,
@@ -60,6 +61,7 @@ urlpatterns = [
     path("cities/<int:pk>/", CityDetailView.as_view(), name="city-detail"),
 
     path("campuses/", CampusListCreateView.as_view(), name="campus-list-create"),
+    path("campuses/options/", CampusOptionsView.as_view(), name="campus-options"),
     path("campuses/<int:pk>/", CampusDetailView.as_view(), name="campus-detail"),
     path("campuses/<int:pk>/programs/", CampusProgramsView.as_view(), name="campus-programs"),
 

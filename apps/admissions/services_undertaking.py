@@ -58,7 +58,6 @@ from apps.common.pdf_theme import (
     draw_policy_page,
     prints_right,
     safe as _safe,
-    signature_path,
 )
 from apps.common.program_policies import policy_for
 from apps.fees.models import Concession, FeeReceipt, Installment
@@ -342,9 +341,11 @@ def render_undertaking_pdf(
         size=8, line_h=5.0, color=(0, 0, 0),
     )
 
+    # No signature boxes since 2026-11-17: the schedule is issued like the
+    # receipt, not countersigned, so the policy page closes with a rule.
     draw_policy_page(
         pdf, policy_for(getattr(program, "degree_type", "")),
-        signature=signature_path(institute),
+        signatures=False,
     )
 
     out = pdf.output(dest="S")

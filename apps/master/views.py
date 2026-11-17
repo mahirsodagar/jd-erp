@@ -114,6 +114,25 @@ class CampusProgramsView(APIView):
         return Response(ProgramSerializer(qs, many=True).data)
 
 
+class CampusOptionsView(APIView):
+    """Every active campus, for pickers on pages whose users hold no
+    `master.campus` key (Flags & Stars, for one). Deriving the list from
+    the staff directory instead hid any campus with no active employee
+    on file. Id / name / code only."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        u = request.user
+        if getattr(u, "student", None) is not None and not u.is_superuser:
+            return Response({"detail": "Permission denied."},
+                            status=status.HTTP_403_FORBIDDEN)
+        qs = Campus.objects.filter(is_active=True).order_by("name")
+        return Response([
+            {"id": c.id, "name": c.name, "code": c.code} for c in qs
+        ])
+
+
 # --- Program ------------------------------------------------------------
 
 class ProgramListCreateView(APIView):

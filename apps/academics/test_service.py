@@ -18,6 +18,40 @@ def recompute_total_marks(test: Test) -> Test:
     return test
 
 
+_UNSET = object()
+
+
+@transaction.atomic
+def duplicate_test(src: Test, *, created_by, name: str = "",
+                   program=_UNSET, academic_year=_UNSET) -> Test:
+    """Clone `src` and its questions into a new DRAFT test. Attempts and
+    responses are never copied: the copy is a fresh paper the caller
+    publishes and maps (to another batch) on its own. `program` /
+    `academic_year` default to the source's values; pass `None` to
+    clear them."""
+    copy = Test.objects.create(
+        name=(name or "").strip() or f"{src.name} (copy)",
+        instructions=src.instructions,
+        duration_min=src.duration_min,
+        subject_id=src.subject_id,
+        program=src.program if program is _UNSET else program,
+        academic_year=(src.academic_year if academic_year is _UNSET
+                       else academic_year),
+        status=Test.Status.DRAFT,
+        total_marks=src.total_marks,
+        created_by=created_by,
+    )
+    TestQuestion.objects.bulk_create([
+        TestQuestion(
+            test=copy, description=q.description, type=q.type,
+            options=list(q.options or []), answer_key=q.answer_key,
+            marks=q.marks, sort_order=q.sort_order,
+        )
+        for q in src.questions.order_by("sort_order", "id")
+    ])
+    return recompute_total_marks(copy)
+
+
 # --- MCQ auto-grade --------------------------------------------------
 
 def _auto_grade(question: TestQuestion, response_text: str) -> Decimal:

@@ -145,16 +145,17 @@ class UndertakingTests(TestCase):
         self.assertTrue(out.startswith(b"%PDF"))
         self.assertGreater(len(out), 2000)
 
-    def test_signature_is_embedded_when_one_is_on_file(self):
-        """The authorised signatory's signature prints on the policy page
-        of the undertaking — nowhere else."""
+    def test_no_signature_block_even_when_one_is_on_file(self):
+        """The schedule has no signature boxes (removed 2026-11-17), so an
+        institute signature on file is never embedded in it."""
         institute = self.enrollment.student.institute
         institute.signature.save("sig.png", ContentFile(_png_bytes()),
                                  save=True)
         self.addCleanup(institute.signature.delete, save=False)
 
         out = render_undertaking_pdf(self.enrollment)
-        self.assertIn(b"/Subtype /Image", out)
+        self.assertNotIn(b"/Subtype /Image", out)
+        self.assertNotIn(b"Authorised Signatory", out)
 
     def test_right_placement_stationery_renders(self):
         institute = self.enrollment.student.institute

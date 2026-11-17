@@ -8,6 +8,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import HasPerm
 from apps.common.csv_export import csv_response, fmt_date, wants_csv
+from apps.common.pagination import StandardPagination
 from apps.common.throttles import LeadIntakeThrottle
 
 from .intake_auth import HasIntakeApiKey
@@ -73,6 +74,14 @@ class LeadListCreateView(APIView):
 
         if wants_csv(request):
             return self._csv(qs)
+        # `?page=` opts into a paginated envelope (All Leads page). Without
+        # it the plain capped list stays, for the dashboard tiles and the
+        # exam "map leads" box that count/select over the whole set.
+        if params.get("page"):
+            paginator = StandardPagination()
+            page = paginator.paginate_queryset(qs, request, view=self)
+            return paginator.get_paginated_response(
+                LeadDetailSerializer(page, many=True).data)
         return Response(LeadDetailSerializer(qs[:500], many=True).data)
 
     def _csv(self, qs):
@@ -504,6 +513,10 @@ class CounsellorEligibleEmployeesView(APIView):
             .select_related("designation", "department", "campus")
             .order_by("first_name", "family_name")
         )
+        # Counsellors are campus-wise, so the Add form picks a campus first
+        # and lists only that campus's employees.
+        if v := request.query_params.get("campus"):
+            qs = qs.filter(campus_id=v)
         if q := request.query_params.get("search"):
             from django.db.models import Q
             qs = qs.filter(
@@ -518,6 +531,7 @@ class CounsellorEligibleEmployeesView(APIView):
                 "designation": e.designation.name,
                 "department": e.department.name,
                 "campus": e.campus.name,
+                "campus_id": e.campus_id,
                 "email": e.email_primary,
             }
             for e in qs

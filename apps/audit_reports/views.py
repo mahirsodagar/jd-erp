@@ -16,6 +16,7 @@ from apps.roles.models import Role
 from django.db import transaction
 from django.db.models import Q, Sum
 
+from apps.common.csv_export import csv_response, fmt_date, wants_csv
 from apps.common.pagination import PaginatedAPIViewMixin, StandardPagination
 
 from . import freeze
@@ -734,6 +735,32 @@ class CourseEndReportListCreateView(APIView):
             qs = qs.filter(subject_id=v)
         if v := params.get("hod_status"):
             qs = qs.filter(hod_status=v)
+        if wants_csv(request):
+            # "Module End Reports.csv" — every matching row, same
+            # visibility rule as the list (own rows without a view_all key).
+            def rows():
+                for r in (qs.select_related("hod_reviewed_by")
+                          .order_by("-completed_on", "batch__name")
+                          .iterator(chunk_size=500)):
+                    rb = r.hod_reviewed_by
+                    yield [
+                        fmt_date(r.completed_on), r.batch.program.name,
+                        r.batch.name, f"{r.subject.name} ({r.subject.code})",
+                        r.instructor.full_name, r.instructor.emp_code,
+                        r.avg_attendance_pct if r.avg_attendance_pct is not None else "",
+                        r.avg_marks_pct if r.avg_marks_pct is not None else "",
+                        r.summary, r.learning_outcomes, r.challenges, r.suggestions,
+                        r.get_hod_status_display(), r.hod_remarks,
+                        fmt_date(r.hod_reviewed_at),
+                        (rb.full_name or rb.username) if rb else "",
+                        fmt_date(r.created_at),
+                    ]
+            return csv_response("Module End Reports.csv", [
+                "Completed on", "Program", "Batch", "Subject", "Instructor",
+                "Emp Code", "Avg attendance %", "Avg marks %", "Summary",
+                "Learning outcomes", "Challenges", "Suggestions", "HOD status",
+                "HOD remarks", "Reviewed on", "Reviewed by", "Submitted on",
+            ], rows())
         return Response(CourseEndReportSerializer(qs[:500], many=True).data)
 
     def post(self, request):
@@ -1023,6 +1050,33 @@ class ZeroHourReportListCreateView(PaginatedAPIViewMixin, APIView):
         if v := params.get("to"):
             if d := parse_date(v):
                 qs = qs.filter(report_date__lte=d)
+        if wants_csv(request):
+            # "0-Hour Reports.csv" — every matching row, not one page.
+            # Same visibility rule as the list.
+            def rows():
+                for r in (qs.select_related("batch__campus", "batch__program")
+                          .order_by("-report_date", "batch__name")
+                          .iterator(chunk_size=500)):
+                    yield [
+                        fmt_date(r.report_date), r.batch.campus.name,
+                        r.batch.program.name, r.batch.name,
+                        r.mentor.full_name if r.mentor_id else "",
+                        r.batch_strength, r.zero_hour_attendance,
+                        r.avg_attendance_first_half if r.avg_attendance_first_half is not None else "",
+                        r.avg_attendance_month_end if r.avg_attendance_month_end is not None else "",
+                        r.agenda, r.outcome, r.activities, r.remarks,
+                        r.hod_discussion, r.action_taken,
+                        (r.submitted_by.full_name or r.submitted_by.username)
+                        if r.submitted_by_id else "",
+                        fmt_date(r.created_at),
+                    ]
+            return csv_response("0-Hour Reports.csv", [
+                "Date", "Campus", "Program", "Class / Batch", "Mentor",
+                "Batch strength", "0-Hour attendance", "Avg attendance 1st half %",
+                "Avg attendance month end %", "Agenda", "Outcome", "Activities",
+                "Remarks", "HOD discussion", "Action taken", "Submitted by",
+                "Submitted on",
+            ], rows())
         return self.paginate(qs, ZeroHourReportSerializer)
 
     def post(self, request):
@@ -1100,6 +1154,24 @@ class StudentFeedbackListCreateView(APIView):
             qs = qs.filter(subject_id=v)
         if v := params.get("batch"):
             qs = qs.filter(batch_id=v)
+        if wants_csv(request):
+            # "Student Feedback.csv" — every matching row, not the
+            # on-screen cap. Same visibility rule as the list.
+            def rows():
+                for f in qs.order_by("-created_at").iterator(chunk_size=500):
+                    yield [
+                        fmt_date(f.created_at), f.get_type_display(),
+                        f.student.student_name, f.student.application_form_id,
+                        f.instructor.full_name, f.instructor.emp_code,
+                        f"{f.subject.name} ({f.subject.code})", f.batch.name,
+                        f.rating_overall, f.rating_clarity, f.rating_engagement,
+                        f.rating_responsiveness, f.what_worked, f.suggestions,
+                    ]
+            return csv_response("Student Feedback.csv", [
+                "Date", "Type", "Student", "Form No", "Instructor", "Emp Code",
+                "Subject", "Batch", "Overall", "Clarity", "Engagement",
+                "Responsiveness", "What worked", "Suggestions",
+            ], rows())
         return Response(StudentFeedbackSerializer(qs[:500], many=True).data)
 
     def post(self, request):
@@ -1196,6 +1268,28 @@ class FacultySelfAppraisalListCreateView(APIView):
             qs = qs.filter(faculty_id=v)
         if v := params.get("year"):
             qs = qs.filter(year=v)
+        if wants_csv(request):
+            # "Faculty Feedback.csv" — every matching row. Same visibility
+            # rule as the list (own rows only without a view_all key).
+            def rows():
+                for a in (qs.select_related("auditor_reviewed_by")
+                          .order_by("-year", "-quarter", "faculty__first_name")
+                          .iterator(chunk_size=500)):
+                    rb = a.auditor_reviewed_by
+                    yield [
+                        a.faculty.emp_code, a.faculty.full_name,
+                        a.year, a.get_quarter_display(),
+                        a.achievements, a.challenges, a.plans,
+                        a.green_flags, a.red_flags,
+                        a.auditor_remarks, fmt_date(a.auditor_reviewed_at),
+                        (rb.full_name or rb.username) if rb else "",
+                        fmt_date(a.created_at),
+                    ]
+            return csv_response("Faculty Feedback.csv", [
+                "Emp Code", "Faculty", "Year", "Quarter", "Achievements",
+                "Challenges", "Plans", "Stars", "Red flags",
+                "Auditor remarks", "Reviewed on", "Reviewed by", "Submitted on",
+            ], rows())
         return Response(FacultySelfAppraisalSerializer(qs[:500], many=True).data)
 
     def post(self, request):
@@ -1875,9 +1969,14 @@ class AuditSubmissionDetailView(APIView):
 # whoever pulls it. Non-superusers with assigned campuses see only those.
 
 class FeeReceiptExportView(APIView):
+    """GET — the preview, paginated with `page` / `page_size` (default
+    50, max 500). Voucher numbers run on across pages so the page shows
+    the same numbers the CSV will carry. `output=csv` ignores paging and
+    streams every matching receipt."""
     permission_classes = [IsAuthenticated]
 
-    PREVIEW_LIMIT = 2000
+    PAGE_SIZE = 50
+    MAX_PAGE_SIZE = 500
 
     def get(self, request):
         from . import fee_export
@@ -1900,11 +1999,26 @@ class FeeReceiptExportView(APIView):
         if (params.get("output") or "").lower() == "csv":
             return fee_export.csv_response(qs)
 
+        try:
+            page_size = min(max(int(params.get("page_size") or self.PAGE_SIZE), 1),
+                            self.MAX_PAGE_SIZE)
+            page = max(int(params.get("page") or 1), 1)
+        except ValueError:
+            return Response({"detail": "page and page_size must be integers."},
+                            status=http.HTTP_400_BAD_REQUEST)
+
         count = qs.count()
-        rows = fee_export.voucher_rows(qs[: self.PREVIEW_LIMIT])
+        total_pages = max(1, -(-count // page_size))
+        page = min(page, total_pages)
+        offset = (page - 1) * page_size
+        rows = fee_export.voucher_rows(
+            qs[offset: offset + page_size], start=offset + 1,
+        )
         return Response({
             "count": count,
-            "truncated": count > len(rows),
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
             "total_amount": str(
                 Decimal(qs.aggregate(t=Sum("amount"))["t"] or 0).quantize(Decimal("0.01"))
             ),

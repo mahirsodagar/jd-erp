@@ -153,8 +153,10 @@ def voucher_row(r: FeeReceipt, voucher_no: int) -> dict:
     }
 
 
-def voucher_rows(qs) -> list[dict]:
-    return [voucher_row(r, i) for i, r in enumerate(qs, start=1)]
+def voucher_rows(qs, *, start: int = 1) -> list[dict]:
+    """`start` is the voucher number of the first row, so a page of the
+    preview numbers its rows exactly as the full CSV does."""
+    return [voucher_row(r, i) for i, r in enumerate(qs, start=start)]
 
 
 def csv_response(qs, filename="Receipt Vch.csv") -> HttpResponse:

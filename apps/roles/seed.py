@@ -615,6 +615,19 @@ CATALOGUE = [
     ("appointments", "appointments.complete", "Mark an appointment as completed"),
     ("admissions", "admissions.parent.view", "See a student's parent account"),
     ("admissions", "admissions.parent.add", "Create a parent account for a student"),
+    # Module 12 — Communication > Bulk Email
+    #
+    # `send` implies seeing your own History; `manage` widens that to
+    # every campaign and unlocks pause / resume / cancel / retry on
+    # anyone's. Templates and the suppression list are readable by any
+    # bulk-email user (Compose needs them) and editable with `manage`.
+    ("comms", "comms.bulk_email.view", "See my bulk email campaigns and their delivery history"),
+    ("comms", "comms.bulk_email.send", "Compose and send a bulk email"),
+    ("comms", "comms.bulk_email.manage", "See everyone's bulk email campaigns; pause, cancel or retry any"),
+    ("comms", "comms.template.view", "See saved email templates"),
+    ("comms", "comms.template.manage", "Create, edit and delete email templates"),
+    ("comms", "comms.suppression.view", "See the unsubscribe / suppression list"),
+    ("comms", "comms.suppression.manage", "Add to and remove from the suppression list"),
 ]
 
 

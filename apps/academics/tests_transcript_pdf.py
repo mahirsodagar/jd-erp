@@ -21,6 +21,20 @@ from apps.master.models import (
 )
 
 
+def _pdf_text(pdf: bytes) -> str:
+    """Inflate every content stream and return the raw text operators,
+    enough to assert on the words a page carries."""
+    import re
+    import zlib
+    out = []
+    for m in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", pdf, re.S):
+        try:
+            out.append(zlib.decompress(m.group(1)).decode("latin-1"))
+        except zlib.error:
+            pass
+    return "\n".join(out)
+
+
 class TranscriptPdfTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -132,6 +146,38 @@ class TranscriptPdfTests(TestCase):
         for pdf in (render_transcript_pdf(self.student),
                     render_marks_card_pdf(self.student)):
             self.assertTrue(pdf.startswith(b"%PDF"))
+
+    def test_transcript_uses_the_framed_template(self):
+        """234 x 321 mm sheet, one page for two semesters, and the
+        template's title / signature block text present."""
+        pdf = render_transcript_pdf(self.student)
+        # fpdf2 writes the MediaBox in points: 234mm = 663.31pt, 321mm = 909.92pt.
+        self.assertIn(b"/MediaBox [0 0 663.31 909.92]", pdf)
+        self.assertEqual(pdf.count(b"/Type /Page\n"), 1)
+        text = _pdf_text(pdf)
+        for needle in ("ACADEMIC ASSESSMENT RECORD", "B.DES", "SEMESTER 1",
+                       "SEMESTER 2", "GRADE SYSTEM", "Scrutinised by",
+                       "Principal", "Bangalore"):
+            self.assertIn(needle, text, needle)
+
+    def test_transcript_overflows_onto_a_second_page(self):
+        """Many semesters push the tables past the fixed bottom block,
+        which then moves to a continuation page."""
+        for n in range(3, 12):
+            sem = Semester.objects.create(name=f"Sem {n}", number=n,
+                                          program=self.core.program)
+            for k in range(4):
+                subj = Subject.objects.create(
+                    name=f"S{n}-{k}", code=f"S{n}{k}", program=self.core.program)
+                MarksEntry.objects.create(
+                    student=self.student, subject=subj, batch=self.batch,
+                    semester=sem, ia_marks=D(30), ea_marks=D(30),
+                    ia_max=D(40), ea_max=D(40), published=True)
+        pdf = render_transcript_pdf(self.student)
+        self.assertGreaterEqual(pdf.count(b"/Type /Page\n"), 2)
+        text = _pdf_text(pdf)
+        self.assertIn("SEMESTER 11", text)
+        self.assertIn("GRADE SYSTEM", text)
 
     # --- endpoints -------------------------------------------------------
 

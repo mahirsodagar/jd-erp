@@ -80,6 +80,7 @@ urlpatterns = [
     path("api/tasks/", include("apps.tasks.urls")),
     path("api/notifications/", include("apps.notifications.urls")),
     path("api/payments/", include("apps.payments.urls")),
+    path("api/comms/", include("apps.communications.urls")),
 ]
 
 if settings.DEBUG:

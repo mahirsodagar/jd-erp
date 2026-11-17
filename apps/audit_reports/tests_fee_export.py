@@ -131,7 +131,8 @@ class FeeReceiptExportTests(TestCase):
     def test_voucher_rows_follow_the_sample_sheet(self):
         data = self.c.get(URL).json()
         self.assertEqual(data["count"], 3)        # cancelled hidden
-        self.assertFalse(data["truncated"])
+        self.assertEqual((data["page"], data["page_size"], data["total_pages"]),
+                         (1, 50, 1))
         self.assertEqual(data["total_amount"], "21300.00")
         r1, r2, r3 = data["rows"]
 
@@ -186,6 +187,22 @@ class FeeReceiptExportTests(TestCase):
         self.assertEqual(
             self.c.get(URL, {"start_date": "07/01/2026"}).status_code, 400,
         )
+
+    def test_pagination_keeps_voucher_numbers_running(self):
+        p1 = self.c.get(URL, {"page_size": 2}).json()
+        self.assertEqual((p1["count"], p1["page"], p1["total_pages"]), (3, 1, 2))
+        self.assertEqual([r["voucher_no"] for r in p1["rows"]], [1, 2])
+        # The total is for every matching receipt, not just this page.
+        self.assertEqual(p1["total_amount"], "21300.00")
+        p2 = self.c.get(URL, {"page_size": 2, "page": 2}).json()
+        self.assertEqual([r["voucher_no"] for r in p2["rows"]], [3])
+        self.assertEqual(p2["rows"][0]["id"], self.r3.id)
+        # Past the end clamps to the last page; junk is a 400.
+        p9 = self.c.get(URL, {"page_size": 2, "page": 9}).json()
+        self.assertEqual(p9["page"], 2)
+        self.assertEqual(self.c.get(URL, {"page": "x"}).status_code, 400)
+        # Oversized page_size is capped, not rejected.
+        self.assertEqual(self.c.get(URL, {"page_size": 9999}).json()["page_size"], 500)
 
     # --- csv ----------------------------------------------------------
 

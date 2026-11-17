@@ -34,12 +34,25 @@ signature boxes), exactly as the paper receipt does.
 
 from __future__ import annotations
 
+# ID-card replacement fee per institute code. JD Institute keeps the
+# legacy Rs.500; JD School of Design charges Rs.1000 (finance, 2026-11).
+ID_CARD_REPLACEMENT_FEE = {"JDIFT": 500, "JDSD": 1000}
+_DEFAULT_ID_CARD_FEE = 500
+
+
+def _id_card_line(fee: int) -> tuple:
+    return ("li", "ID Cards:",
+            f"Mandatory at all times. Replacement fee: Rs.{fee}.")
+
+
+_ID_CARD_LINE = _id_card_line(_DEFAULT_ID_CARD_FEE)
+
 _SHARED_ADDITIONAL = [
     ("h3", "Additional Policies"),
     ("li", "College Property:",
      "Damage (intentional/accidental) will result in financial liability "
      "+ disciplinary action."),
-    ("li", "ID Cards:", "Mandatory at all times. Replacement fee: Rs.500."),
+    _ID_CARD_LINE,
     ("li", "Admission Cancellation:",
      "The institute reserves the right to cancel admission for:"),
     ("li2", "Code of conduct violations (by student/parent/guardian)."),
@@ -159,14 +172,21 @@ SIGNATORIES = ("Authorised Signatory", "Student Signature",
                "Parents/Guardian Signature")
 
 
-def policy_for(degree_type: str | None, *, agreement: bool = True) -> list[tuple]:
+def policy_for(degree_type: str | None, *, agreement: bool = True,
+               institute=None) -> list[tuple]:
     """Pick the policy document for a program's free-text degree type.
 
     `agreement=False` drops the AGREEMENT clause — the receipt variant,
-    which nobody signs."""
+    which nobody signs. `institute` (an `Institute` or its code) swaps in
+    that institute's ID-card replacement fee; without it the default
+    Rs.500 prints."""
     from apps.notifications.sender import is_diploma
 
     doc = DIPLOMA if is_diploma(degree_type) else DEGREE
-    if agreement:
-        return doc
-    return [b for b in doc if b not in _AGREEMENT]
+    if not agreement:
+        doc = [b for b in doc if b not in _AGREEMENT]
+    code = institute if isinstance(institute, str) else getattr(institute, "code", "")
+    fee = ID_CARD_REPLACEMENT_FEE.get((code or "").upper(), _DEFAULT_ID_CARD_FEE)
+    if fee != _DEFAULT_ID_CARD_FEE:
+        doc = [_id_card_line(fee) if b == _ID_CARD_LINE else b for b in doc]
+    return doc
