@@ -17,6 +17,9 @@ from .attendance_service import (
     notify_absent_students, relock_attendance, roster_for,
     student_attendance_summary, unfreeze_attendance, unlock_attendance,
 )
+from .cert_notify import (
+    notify_certificate_decision, notify_certificate_requested,
+)
 from .cert_service import (
     build_snapshot, check_eligibility, generate_certificate_no,
     graduate_enrollment, render_certificate_pdf,
@@ -1416,7 +1419,8 @@ class CertificateListCreateView(APIView):
     def get(self, request):
         u = request.user
         qs = Certificate.objects.select_related(
-            "student", "enrollment__program", "enrollment__batch",
+            "student", "student__campus",
+            "enrollment__program", "enrollment__batch",
             "requested_by", "issued_by",
         )
         # Visibility: own / view_all / superuser
@@ -1431,6 +1435,8 @@ class CertificateListCreateView(APIView):
             if allowed is not None:
                 qs = qs.filter(student__campus_id__in=allowed)
         params = request.query_params
+        if v := params.get("campus"):
+            qs = qs.filter(student__campus_id=v)
         if v := params.get("type"):
             qs = qs.filter(type=v)
         if v := params.get("status"):
@@ -1485,6 +1491,7 @@ class CertificateListCreateView(APIView):
             remarks=d.get("remarks", ""),
             requested_by=u,
         )
+        notify_certificate_requested(cert, actor=u)
         return Response(CertificateSerializer(cert).data,
                         status=http.HTTP_201_CREATED)
 
@@ -1595,6 +1602,7 @@ class CertificateIssueView(APIView):
         if s.validated_data.get("remarks"):
             cert.remarks = s.validated_data["remarks"]
         cert.save()
+        notify_certificate_decision(cert)
         return Response(CertificateSerializer(cert).data)
 
 
@@ -1618,6 +1626,7 @@ class CertificateRejectView(APIView):
         cert.status = Certificate.Status.REJECTED
         cert.remarks = s.validated_data["reason"]
         cert.save(update_fields=["status", "remarks", "updated_at"])
+        notify_certificate_decision(cert)
         return Response(CertificateSerializer(cert).data)
 
 
@@ -1697,6 +1706,7 @@ class MyCertificatesView(APIView):
             remarks=d.get("remarks", ""),
             requested_by=request.user,
         )
+        notify_certificate_requested(cert, actor=request.user)
         return Response(CertificateSerializer(cert).data,
                         status=http.HTTP_201_CREATED)
 

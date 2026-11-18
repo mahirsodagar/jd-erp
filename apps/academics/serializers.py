@@ -439,22 +439,42 @@ class CertificateSerializer(serializers.ModelSerializer):
     issued_by_name = serializers.CharField(
         source="issued_by.username", read_only=True, default="",
     )
+    campus_name = serializers.CharField(
+        source="student.campus.name", read_only=True, default="",
+    )
+    # Outstanding fee balance, only on OPEN NOC / No Dues requests —
+    # that is the one eligibility rule for both, so the staff list can
+    # show "Clear" / "Due ₹x" and approve in place. Null elsewhere.
+    fee_balance = serializers.SerializerMethodField()
+
+    def get_fee_balance(self, obj):
+        if obj.status != Certificate.Status.REQUESTED or obj.type not in (
+                Certificate.Type.NO_DUES, Certificate.Type.NOC):
+            return None
+        if obj.enrollment_id is None:
+            return None
+        try:
+            from apps.fees.services.balance import enrollment_balance
+            return str(enrollment_balance(obj.enrollment)["balance"])
+        except Exception:  # noqa: BLE001 — a balance hiccup must not break the list
+            return None
 
     class Meta:
         model = Certificate
         fields = [
             "id", "student", "student_name", "application_form_id",
+            "campus_name",
             "enrollment", "program_name", "batch_name",
             "type", "status", "certificate_no",
-            "purpose", "remarks", "snapshot",
+            "purpose", "remarks", "snapshot", "fee_balance",
             "requested_by", "requested_by_name", "requested_on",
             "issued_by", "issued_by_name", "issued_at",
             "created_at", "updated_at",
         ]
         read_only_fields = [
-            "id", "student_name", "application_form_id",
+            "id", "student_name", "application_form_id", "campus_name",
             "program_name", "batch_name",
-            "status", "certificate_no", "snapshot",
+            "status", "certificate_no", "snapshot", "fee_balance",
             "requested_by", "requested_by_name", "requested_on",
             "issued_by", "issued_by_name", "issued_at",
             "created_at", "updated_at",

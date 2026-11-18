@@ -727,6 +727,8 @@ class CourseEndReportListCreateView(APIView):
             emp = _emp_of(u)
             qs = qs.filter(instructor=emp) if emp else qs.none()
         params = request.query_params
+        if v := params.get("campus"):
+            qs = qs.filter(batch__campus_id=v)
         if v := params.get("program"):
             qs = qs.filter(batch__program_id=v)
         if v := params.get("batch"):

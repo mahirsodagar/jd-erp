@@ -824,34 +824,53 @@ class FeedbackLinkView(APIView):
 class FeedbackOptionsView(APIView):
     """Instructor + module (subject) options the student can rate.
 
-    Three sources, unioned, so the lists are populated even before the
-    batch's timetable is published (which used to leave both dropdowns
-    empty):
-      1. The batch's timetable slots — scheduled AND completed (a
-         student rates classes that already happened).
-      2. Curriculum mapping (who teaches what) for the enrollment's
-         program / semester.
+    Instructors: the FULL active staff list (same pool the timetable's
+    instructor picker draws from), not just the people on the student's
+    own timetable / curriculum. Scoping it to the batch left the dropdown
+    with a single name whenever only one faculty had slots published, so
+    students could not rate anyone else who actually taught them.
+
+    Modules stay scoped to the student's own program, unioned from three
+    sources so the list is populated even before the batch's timetable
+    is published:
+      1. The batch's timetable slots — scheduled AND completed.
+      2. Curriculum mapping for the enrollment's program / semester.
       3. Active subjects of the enrollment's program / semester.
-    Still scoped to the student's own program, never the full catalogue.
     """
 
     permission_classes = [IsStudentOnly]
 
     def get(self, request):
+        from apps.employees.models import Employee
+
+        from apps.master.models import Campus
+
         e = request.portal_ctx.enrollment
         if e is None:
-            return Response({"instructors": [], "subjects": []})
+            return Response({"instructors": [], "subjects": [],
+                             "campuses": [], "default_campus": None})
 
-        instructors_by_id = {}
+        # Every instructor carries a campus_id so the portal can offer a
+        # campus filter; the student's own campus is the default pick.
+        instructors = [
+            {
+                "id": emp.pk,
+                "name": emp.full_name,
+                "emp_code": emp.emp_code or "",
+                "campus_id": emp.campus_id,
+            }
+            for emp in (Employee.objects
+                        .filter(status=Employee.Status.ACTIVE)
+                        .order_by("first_name", "family_name"))
+        ]
+        campuses = [
+            {"id": c.id, "name": c.name}
+            for c in Campus.objects.order_by("name")
+        ]
+        default_campus = (e.campus_id
+                          or request.portal_ctx.student.campus_id)
+
         subjects_by_id = {}
-
-        def add_instructor(emp):
-            if emp is not None and emp.pk not in instructors_by_id:
-                instructors_by_id[emp.pk] = {
-                    "id": emp.pk,
-                    "name": emp.full_name,
-                    "emp_code": getattr(emp, "emp_code", "") or "",
-                }
 
         def add_subject(sub):
             if sub is not None and sub.pk not in subjects_by_id:
@@ -864,9 +883,8 @@ class FeedbackOptionsView(APIView):
             slots = (ScheduleSlot.objects
                      .filter(batch_id=e.batch_id)
                      .exclude(status=ScheduleSlot.Status.CANCELLED)
-                     .select_related("instructor", "subject"))
+                     .select_related("subject"))
             for s in slots:
-                add_instructor(s.instructor)
                 add_subject(s.subject)
 
         # 2 + 3. Program / semester curriculum.
@@ -874,7 +892,7 @@ class FeedbackOptionsView(APIView):
             from apps.master.models import CurriculumMapping
             maps = (CurriculumMapping.objects
                     .filter(program_id=e.program_id, is_active=True)
-                    .select_related("instructor", "subject"))
+                    .select_related("subject"))
             subs = Subject.objects.filter(
                 program_id=e.program_id, is_active=True,
             )
@@ -882,18 +900,17 @@ class FeedbackOptionsView(APIView):
                 maps = maps.filter(semester_id=e.semester_id)
                 subs = subs.filter(semester_id=e.semester_id)
             for m in maps:
-                add_instructor(m.instructor)
                 add_subject(m.subject)
             for sub in subs:
                 add_subject(sub)
 
         return Response({
-            "instructors": sorted(
-                instructors_by_id.values(), key=lambda x: x["name"],
-            ),
+            "instructors": instructors,
             "subjects": sorted(
                 subjects_by_id.values(), key=lambda x: x["code"],
             ),
+            "campuses": campuses,
+            "default_campus": default_campus,
         })
 
 
