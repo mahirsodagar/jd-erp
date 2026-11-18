@@ -2,11 +2,13 @@
 pages (front, back), one design per institute, the same way the student
 card works (`apps.admissions.services_idcard`).
 
-JDIFT staff card (reference: "Jugal Majhi, Office Assistant"): black
-front with the photo, name, designation and "Employee ID :", over a
-white strip with the cube lockup and the "Since 1988" mark; the back
-lists DOB / blood group / contact / guardian number, the office address
-and contacts, the two rules, and the employee + principal signatures.
+JDIFT staff card (reference: "Kutheja Sarwath, Academic Counsellor"
+template, 2026-11-18): black front with the photo, name, designation,
+department and "Employee ID :", over a white strip with the cube lockup
+and the "Since 1988" mark; the back lists DOB / blood group / contact /
+guardian number in bold, the office address and contacts, a full-width
+rule, the two rules, a Code 39 barcode of the employee code, and the
+employee + principal signatures.
 
 JDSD staff card (reference: "Nealesh Dalal, Professor"): white front
 with the logo, a large photo, the name set vertically on the left edge
@@ -156,68 +158,108 @@ def _jdift_strip(pdf: FPDF, top: float) -> None:
     pdf.cell(wb, 3, "Change")
 
 
+#: Geometry of the JDIFT staff card (reference: "Kutheja Sarwath,
+#: Academic Counsellor" template, 2026-11-18). Front: black block to
+#: 55.5 mm, photo 17.5 x 21 mm, then name / designation / department /
+#: Employee ID. Back: bold field rows, address, a full-width rule,
+#: the rules, a Code 39 barcode of the employee code, signatures.
+JDIFT_FRONT_BLACK_H = 55.5
+JDIFT_PHOTO = (18.3, 8.5, 17.5, 21.0)   # x, y, w, h
+JDIFT_BARCODE = (3.5, 71.0, 32.0, 8.5)   # x, y, w, h — principal signs to its right
+
+_CODE39_SAFE = set("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. $/+%")
+
+
+def _code39_text(code: str) -> str:
+    """The employee code as a Code 39 payload: upper-cased, characters the
+    symbology can't carry dropped, wrapped in the start/stop stars."""
+    body = "".join(c for c in code.upper() if c in _CODE39_SAFE).strip()
+    return f"*{body}*" if body else ""
+
+
+def _barcode(pdf: FPDF, code: str, x: float, y: float, w: float, h: float) -> None:
+    """Code 39 of `code`, scaled to fill `w` x `h`. Each symbol is 3 wide
+    + 6 narrow bars/spaces (5 wide-widths) plus a narrow gap, i.e. 16/3
+    of the wide width per character."""
+    text = _code39_text(code)
+    if not text:
+        return
+    wide = w / (len(text) * 16 / 3)
+    pdf.set_fill_color(0, 0, 0)
+    pdf.code39(text, x=x, y=y, w=wide, h=h)
+
+
 def _jdift_front(pdf: FPDF, d: StaffCardData) -> None:
     lib = _lib()
     pdf.add_page()
     pdf.set_fill_color(*JDIFT_BLACK)
-    pdf.rect(0, 0, CARD_W, 60.0, style="F")
+    pdf.rect(0, 0, CARD_W, JDIFT_FRONT_BLACK_H, style="F")
 
-    lib._photo_slot(pdf, d.photo_bytes(), x=17.0, y=10.0, w=20.0, h=26.0)
+    px, py, pw, ph = JDIFT_PHOTO
+    lib._photo_slot(pdf, d.photo_bytes(), x=px, y=py, w=pw, h=ph)
 
     white = (255, 255, 255)
-    pdf.set_font("Helvetica", "B", 10)
-    lib._centred(pdf, 39.5, safe(d.name), 10, style="B",
+    pdf.set_font("Helvetica", "B", 10.2)
+    lib._centred(pdf, 34.5, safe(d.name), 10.2, style="B",
                  family="Helvetica", color=white, max_w=50)
-    lib._centred(pdf, 44.5, safe(d.designation), 8.5, style="B",
+    lib._centred(pdf, 39.4, safe(d.designation), 8.2, style="B",
                  family="Helvetica", color=white, max_w=50)
-    lib._centred(pdf, 49.5, safe(f"Employee ID : {d.emp_code}"), 8,
+    lib._centred(pdf, 44.5, safe(d.department), 8.2, style="B",
+                 family="Helvetica", color=white, max_w=50)
+    lib._centred(pdf, 49.6, safe(f"Employee ID : {d.emp_code}"), 7.8,
                  style="B", family="Helvetica", color=white, max_w=50)
 
-    _jdift_strip(pdf, top=60.0)
+    _jdift_strip(pdf, top=JDIFT_FRONT_BLACK_H)
 
 
 def _jdift_back(pdf: FPDF, d: StaffCardData) -> None:
     lib = _lib()
     pdf.add_page()
     pdf.set_text_color(0, 0, 0)
-    pdf.set_font("Helvetica", "", 6.1)
+    pdf.set_font("Helvetica", "B", 7.2)
     rows = (
         ("Date of Birth", d.dob),
         ("Blood Group", d.blood_group),
         ("Contact No", d.contact),
         ("Guardian No", d.guardian_contact),
     )
-    y = 8.0
+    y = 7.8
     for label, value in rows:
-        pdf.set_xy(4, y)
-        pdf.cell(19, 5.2, label)
-        pdf.set_xy(23, y)
-        pdf.cell(2, 5.2, ":")
-        pdf.set_xy(25, y)
-        pdf.cell(26, 5.2, safe(value))
-        y += 5.2
+        pdf.set_xy(4.5, y)
+        pdf.cell(21, 3.5, label)
+        pdf.cell(2.5, 3.5, ":")
+        pdf.cell(25, 3.5, safe(value))
+        y += 4.4
 
-    y += 2
+    y += 2.0
+    pdf.set_font("Helvetica", "B", 7.0)
     lines = (
         *JDIFT_ADDRESS,
         f"Contact : {JDIFT_OFFICE_CONTACTS[0]}",
         JDIFT_OFFICE_CONTACTS[1],
     )
     for line in lines:
-        pdf.set_xy(2, y)
-        pdf.cell(50, 4, line, align="C")
-        y += 4
+        pdf.set_xy(3, y)
+        pdf.cell(48, 3.5, line, align="C")
+        y += 4.1
 
-    pdf.set_font("Helvetica", "", 5.8)
-    lib._numbered_rules(pdf, y + 3, 5.8, 2.9)
+    lib._hrule(pdf, 50.0, x0=0, x1=CARD_W, width=0.35)
 
-    # Signatures: employee (left, blank for pen) and principal (right).
-    pdf.image(str(lib._ASSETS / "principal-signature.png"), x=35.0, y=69.5, w=11.0)
-    pdf.set_font("Helvetica", "", 4.8)
-    pdf.set_xy(2, 81)
-    pdf.cell(23, 2, "Employee Signature", align="C")
-    pdf.set_xy(29, 81)
-    pdf.cell(23, 2, "Principal", align="C")
+    pdf.set_font("Helvetica", "B", 5.8)
+    lib._numbered_rules(pdf, 52.5, 5.8, 2.8, x=4, width=47, gap=0.6)
+
+    bx, by, bw, bh = JDIFT_BARCODE
+    _barcode(pdf, d.emp_code, bx, by, bw, bh)
+
+    # Signatures: employee (left, under the barcode, blank for pen) and
+    # principal (right of the barcode).
+    pdf.image(str(lib._ASSETS / "principal-signature.png"), x=38.0, y=71.0, w=13.0)
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Helvetica", "B", 6.0)
+    pdf.set_xy(3, 82.0)
+    pdf.cell(20, 2.4, "Employee Signature", align="C")
+    pdf.set_xy(37, 82.0)
+    pdf.cell(15, 2.4, "Principal", align="C")
 
 
 # --- JDSD ------------------------------------------------------------------
