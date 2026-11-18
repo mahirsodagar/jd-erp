@@ -226,9 +226,8 @@ class AdminResetPasswordView(APIView):
     """Admin issues a temporary password for any user.
 
     Best-effort emails the new password to the target user so they
-    don't depend on the admin reading it out. Goes through MSG91 when
-    settings.MSG91_EMAIL_TEMPLATES has the matching key registered;
-    otherwise falls back to plain SMTP via the notifications layer.
+    don't depend on the admin reading it out (template row
+    `account.password_reset_by_admin.email` via the notifications layer).
     """
 
     permission_classes = [IsAuthenticated, HasPerm]
@@ -250,7 +249,7 @@ class AdminResetPasswordView(APIView):
             "delivery_error": "",
             "recipient": (target.email or "").strip(),
         }
-        # This mail (MSG91 `password_reset_by_admin`, "JD ERP password") is
+        # This mail ("JD ERP password") is
         # for STAFF only. Student / parent portal accounts get their login
         # via "Send portal credentials" on the student record instead.
         is_portal_account = (hasattr(target, "student")

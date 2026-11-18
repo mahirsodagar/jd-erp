@@ -31,6 +31,8 @@ _HEADERS = [
 _GRID_X, _GRID_Y = 5, 43
 _HEADER_H = 22
 _MIN_SUBJECT_ROWS = 7
+# Client template had 64 mm here; trimmed on request (2026-11-18).
+_ACCOUNT_ROW_H = 18
 _SUBJECT_ROW_H = 13
 _PAGE_BOTTOM = 285
 
@@ -80,15 +82,15 @@ def build_rows(no_dues: dict) -> list[dict]:
     """Turn the snapshot's `no_dues` block into grid rows."""
     subjects = no_dues.get("subjects") or []
     n = max(len(subjects), _MIN_SUBJECT_ROWS)
-    # Fixed rows: Account 64 + Library 9 + overall 9 + mentor 9 + 9 + 18.
-    fixed = 64 + 9 + 9 + 9 + 9 + 18
+    # Fixed rows: Account 18 + Library 9 + overall 9 + mentor 9 + 9 + 18.
+    fixed = _ACCOUNT_ROW_H + 9 + 9 + 9 + 9 + 18
     avail = _PAGE_BOTTOM - _GRID_Y - _HEADER_H - fixed
     row_h = min(_SUBJECT_ROW_H, max(avail / n, 6))
 
     rows = [
         {"department": "Account Dept.", "faculty": "", "blue_book": "",
          "attendance": "", "remarks": no_dues.get("accounts_remark", ""),
-         "row_height": 64},
+         "row_height": _ACCOUNT_ROW_H},
         {"department": "Library", "faculty": "", "blue_book": "",
          "attendance": "", "remarks": "", "row_height": 9},
     ]

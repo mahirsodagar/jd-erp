@@ -1,11 +1,12 @@
-"""Admin password reset mails STAFF via MSG91 `password_reset_by_admin`;
-student / parent portal accounts are reset without that mail."""
+"""Admin password reset mails STAFF (template
+`account.password_reset_by_admin.email`); student / parent portal
+accounts are reset without that mail."""
 
 from datetime import date
-from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.core import mail
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework.test import APIClient
 
@@ -13,11 +14,14 @@ from apps.admissions.models import Student
 from apps.master.models import AcademicYear, Campus, Institute, Program
 
 User = get_user_model()
-MSG91_OK = (True, '{"status": "success"}')
 NEW_PW = "Temp#Pass2026"
 
 
-@mock.patch("apps.notifications.msg91.send_msg91_template", return_value=MSG91_OK)
+@override_settings(
+    EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+    DEFAULT_FROM_EMAIL="no-reply@dkul.in",
+    EMAIL_DEFAULT_REPLY_TO="admin.a@jdinstitute.edu.in",
+)
 class AdminResetEmailTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -46,24 +50,24 @@ class AdminResetEmailTests(TestCase):
         return c.post(reverse("user-reset-password", args=[user.pk]),
                       {"new_password": NEW_PW}, format="json")
 
-    def test_staff_gets_msg91_template(self, msg91):
+    def test_staff_gets_the_reset_mail(self):
         r = self._reset(self.staff)
         self.assertEqual(r.status_code, 200, r.content)
         self.assertTrue(r.json()["delivered"])
-        k = msg91.call_args.kwargs
-        self.assertEqual(k["template_name"], "password_reset_by_admin")
-        self.assertEqual(k["recipient_email"], "fac1@example.com")
-        self.assertEqual(k["domain"], "mail.jdinstitute.com")
-        v = k["variables"]
-        self.assertEqual((v["name"], v["username"], v["password"]),
-                         ("Ann Rao", "fac1", NEW_PW))
-        self.assertIn("login_url", v)
+        self.assertEqual(len(mail.outbox), 1)
+        m = mail.outbox[0]
+        self.assertEqual(m.to, ["fac1@example.com"])
+        self.assertIn("no-reply@dkul.in", m.from_email)
+        # Account mails have no handler → default Reply-To.
+        self.assertEqual(m.reply_to, ["admin.a@jdinstitute.edu.in"])
+        for needle in ("Ann Rao", "fac1", NEW_PW):
+            self.assertIn(needle, m.body)
 
-    def test_student_account_reset_without_mail(self, msg91):
+    def test_student_account_reset_without_mail(self):
         r = self._reset(self.stu_user)
         self.assertEqual(r.status_code, 200, r.content)
         self.assertFalse(r.json()["delivered"])
         self.assertIn("portal credentials", r.json()["delivery_error"])
-        msg91.assert_not_called()
+        self.assertEqual(mail.outbox, [])
         self.stu_user.refresh_from_db()
         self.assertTrue(self.stu_user.check_password(NEW_PW))

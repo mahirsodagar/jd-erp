@@ -26,7 +26,7 @@ from apps.fees.models import FeeReceipt
 from apps.notifications.models import NotificationDispatchLog, NotificationTemplate
 
 from .pdf import render_receipt_pdf
-from .receipt_email import _transport, campus_inbox_for
+from .receipt_email import campus_inbox_for
 from .registration import REGISTRATION_DESCRIPTION
 
 logger = logging.getLogger(__name__)
@@ -135,21 +135,17 @@ def send_registration_payment_receipt(payment_request, order) -> NotificationDis
             subject=subject, body=body, related_object=payment_request,
         )
 
-        if not getattr(settings, "EMAIL_SMTP_OUTBOUND_ENABLED", True):
-            log.error = "SMTP outbound disabled on this host."
-            log.save(update_fields=["error"])
-            return log
-
         from apps.notifications.email import send_email
+        from apps.notifications.reply_to import resolve_reply_to
 
         pdf = render_receipt_pdf(receipt)
-        smtp_cfg, from_email = _transport(
-            getattr(student.program, "degree_type", "") or "",
-        )
         ok, detail = send_email(
             recipient=to, cc=", ".join(cc), subject=subject, body=body,
             attachments=[(f"{receipt.receipt_no}.pdf", pdf, "application/pdf")],
-            smtp=smtp_cfg, from_email=from_email,
+            reply_to=resolve_reply_to(
+                TEMPLATE_KEY,
+                {"campus_code": getattr(student.campus, "code", "")},
+            ),
         )
         log.status = (NotificationDispatchLog.Status.SENT if ok
                       else NotificationDispatchLog.Status.FAILED)

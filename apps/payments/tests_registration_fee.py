@@ -35,11 +35,9 @@ from apps.payments.tests_smartgateway import SG_ON
 
 MAIL = dict(
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
-    EMAIL_SMTP_OUTBOUND_ENABLED=True,
-    EMAIL_SMTP_BY_DOMAIN={},
     # The office copy of the application acknowledgement (campus inbox)
     # is the mail that carries the fee pay links; the student copy goes
-    # via MSG91 without them.
+    # out without them.
     APPLICATION_ACK_CAMPUS_INBOXES={"BLR": "ack.blr@jdinstitute.edu.in"},
     FEE_RECEIPT_CAMPUS_INBOXES={"BLR": "receipts.blr@jdinstitute.edu.in"},
     OPERATIONS_INBOX="", ACCOUNTS_INBOX="",
@@ -113,10 +111,12 @@ class RegistrationFeeAtApplicationTests(RequiredFixture):
         self.assertEqual(pr.amount, Decimal("10000.00"))
         self.assertIn(str(pr.token), rp["pay_url"])
 
-        # The office acknowledgement copy carries the link.
-        self.assertEqual(len(mail.outbox), 1)
-        self.assertIn(rp["pay_url"], mail.outbox[0].body)
-        self.assertIn("Registration fee: Rs. 10,000.00", mail.outbox[0].body)
+        # The office acknowledgement copy (with the PDF) carries the
+        # link; the student copy goes out alongside without it.
+        self.assertEqual(len(mail.outbox), 2)
+        office = next(m for m in mail.outbox if m.attachments)
+        self.assertIn(rp["pay_url"], office.body)
+        self.assertIn("Registration fee: Rs. 10,000.00", office.body)
 
     def _jdsd_submit(self):
         jdsd = Institute.objects.create(name="JDSD", code="JDSD")
@@ -146,7 +146,8 @@ class RegistrationFeeAtApplicationTests(RequiredFixture):
         self.assertEqual((rp["status"], rp["gateway"]), ("DUE", "smartgateway"))
         pr = self._request(self._student())
         self.assertEqual((pr.gateway, pr.account), ("smartgateway", "JDSD_TRUST"))
-        self.assertIn("Registration fee", mail.outbox[0].body)
+        office = next(m for m in mail.outbox if m.attachments)
+        self.assertIn("Registration fee", office.body)
 
     @override_settings(SMARTGATEWAY_ENABLED=False)
     def test_jdsd_registration_does_not_fall_back_to_razorpay(self):
@@ -159,7 +160,8 @@ class RegistrationFeeAtApplicationTests(RequiredFixture):
         data = self._jdsd_submit()
         self.assertIsNone(data["registration_payment"])
         self.assertEqual(PaymentRequest.objects.count(), 0)
-        self.assertNotIn("Registration fee", mail.outbox[0].body)
+        office = next(m for m in mail.outbox if m.attachments)
+        self.assertNotIn("Registration fee", office.body)
 
     @override_settings(RAZORPAY_ENABLED=False)
     def test_gateway_off_hides_the_step_entirely(self):

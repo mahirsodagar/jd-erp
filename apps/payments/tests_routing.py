@@ -490,12 +490,8 @@ class InstallmentRoutingTests(_Fixture):
 
     @override_settings(
         EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
-        EMAIL_SMTP_OUTBOUND_ENABLED=True,
         FEE_RECEIPT_CAMPUS_INBOXES={"BLR": "dkul.receipts@jdinstitute.edu.in"},
         ACCOUNTS_INBOX="",
-        # A developer .env may point jdindia.com at a real Zoho SMTP;
-        # pin it off so the message lands in the locmem outbox.
-        EMAIL_SMTP_BY_DOMAIN={},
     )
     def test_online_payment_emails_receipt_to_student_and_campus(self):
         from django.core import mail

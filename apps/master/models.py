@@ -259,9 +259,9 @@ class Program(models.Model):
     degree_type = models.CharField(
         max_length=40, blank=True,
         help_text="Free-text degree label, e.g. B.Des, M.Des, Diploma. "
-                  "Kept alongside `degree` because notifications.sender "
-                  "routes the outgoing mail domain off this string "
-                  "(is_diploma()) — do not drop it.",
+                  "Kept alongside `degree` because the policy / terms "
+                  "documents are picked off this string "
+                  "(common.program_policies.is_diploma()) — do not drop it.",
     )
     category = models.CharField(
         max_length=10, choices=Category.choices, default=Category.REGULAR,

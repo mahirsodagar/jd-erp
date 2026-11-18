@@ -1,14 +1,14 @@
-"""Student leave e-mails, sent through MSG91 templates via the
-notifications layer (both keys routed to mail.jdinstitute.com by
-EMAIL_SENDER_DOMAIN_POLICY). Every send writes a NotificationDispatchLog
-row (GFK → the application) for audit.
+"""Student leave e-mails via the notifications layer (ZeptoMail, From
+no-reply@dkul.in). Every send writes a NotificationDispatchLog row
+(GFK → the application) for audit.
 
-    submitted → `student_leaves.applied.email`  → MSG91 `student_leave_application_`
-                To batch mentor; CC module mentor + student's CCs + student
-    approved  → `student_leaves.accepted.email` → MSG91 `student_leave_accepted`
-                To student
+    submitted → `student_leaves.applied.email`
+                To batch mentor; CC module mentor + student's CCs + student;
+                Reply-To the student
+    approved  → `student_leaves.accepted.email`
+                To student; Reply-To the batch mentor
 
-Both MSG91 templates use the same variables (names must match exactly):
+Both templates use the same variables (names must match exactly):
     Student_Name, Leave_Start_Date, Leave_End_Date, Leave_Count, Reason
 """
 
@@ -38,12 +38,13 @@ def leave_context(app: StudentLeaveApplication) -> dict:
     }
 
 
-def _queue(app, key, recipient, cc=""):
+def _queue(app, key, recipient, cc="", reply_to=""):
     """Never raises — a mail failure must not undo the leave action."""
     try:
         return queue_notification(
             template_key=key, recipient=recipient,
-            context=leave_context(app), cc=cc, related=app,
+            context={**leave_context(app), "reply_to": reply_to},
+            cc=cc, related=app,
         )
     except Exception:  # noqa: BLE001 — log and move on
         log.exception("student leave %s: %s mail failed", app.pk, key)
@@ -63,7 +64,8 @@ def send_leave_applied(app: StudentLeaveApplication):
         if e and e.lower() not in seen:
             seen.add(e.lower())
             cc.append(e)
-    return _queue(app, APPLIED_KEY, to, ",".join(cc))
+    return _queue(app, APPLIED_KEY, to, ",".join(cc),
+                  reply_to=(app.student.student_email or "").strip())
 
 
 def send_leave_accepted(app: StudentLeaveApplication):
@@ -72,4 +74,5 @@ def send_leave_accepted(app: StudentLeaveApplication):
     if not recipient:
         log.warning("student leave %s approved but student has no email", app.pk)
         return None
-    return _queue(app, ACCEPTED_KEY, recipient)
+    return _queue(app, ACCEPTED_KEY, recipient,
+                  reply_to=(app.batch_mentor_email or "").strip())

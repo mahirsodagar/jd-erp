@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# test-jd-mail.sh — send a test email through all three sending domains
-# from the JD-ERP VPS, using the live server .env / venv.
+# test-jd-mail.sh — send a test email through the ZeptoMail SMTP
+# transport from the JD-ERP VPS, using the live server .env / venv.
 #
 # Wraps:  manage.py send_test_mail  (apps/notifications)
 # Runs as www-data so the chmod-600 server .env is readable and the
@@ -9,7 +9,8 @@
 #
 # Usage (on the VPS, as root or via sudo):
 #   /usr/local/bin/test-jd-mail you@example.com
-#   /usr/local/bin/test-jd-mail you@example.com --only msg91
+#   /usr/local/bin/test-jd-mail you@example.com --reply-to hr@example.com
+#   /usr/local/bin/test-jd-mail you@example.com --template student.portal_credentials.email
 #
 # Install once (mirrors the deploy-jd-erp convention):
 #   sudo cp /var/www/jd-erp/scripts/test-jd-mail.sh /usr/local/bin/test-jd-mail
@@ -22,7 +23,7 @@ PY="${APP_DIR}/venv/bin/python"
 RUN_AS="www-data"
 
 if [[ $# -lt 1 ]]; then
-  echo "usage: $(basename "$0") <recipient-email> [--only jdindia|msg91|edu] [--msg91-template NAME]" >&2
+  echo "usage: $(basename "$0") <recipient-email> [--reply-to ADDR] [--template KEY]" >&2
   exit 2
 fi
 

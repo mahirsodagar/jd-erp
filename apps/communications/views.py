@@ -54,15 +54,12 @@ def _display_name(user) -> str:
 
 
 def _default_from() -> str:
-    """The From the campaign will carry — the project's default SMTP
-    mailbox (jdindia.com over Zoho since 2026-11-13). A bulk-specific
-    sender domain is a delivery-side decision; the field is stored per
-    campaign so it can change without touching history."""
-    by_domain = getattr(settings, "EMAIL_SMTP_BY_DOMAIN", {}) or {}
-    for cfg in by_domain.values():
-        if cfg.get("from_email"):
-            return cfg["from_email"]
-    return getattr(settings, "EMAIL_HOST_USER", "") or getattr(settings, "DEFAULT_FROM_EMAIL", "")
+    """The From the campaign will carry — the project's single sender
+    (no-reply@dkul.in over ZeptoMail since 2026-11-18). Stored per
+    campaign so history survives a later change."""
+    from apps.notifications.email import resolve_from_email
+
+    return resolve_from_email() or getattr(settings, "DEFAULT_FROM_EMAIL", "")
 
 
 def _campaign_qs():

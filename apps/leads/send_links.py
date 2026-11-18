@@ -189,17 +189,12 @@ def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict
             template_key="lead.application_link.email",
             recipient=lead.email,
             context={
-                # MSG91 `application_form_link` vars.
                 "Student_Name": lead.name,
                 "Course_Name": lead.program.name if lead.program_id else "",
                 "Application_Form_Link": long_url,
                 "name": lead.name, "url": long_url,
                 "institute": institute_label,
-                # Drives the From domain via EMAIL_DOMAIN_DIPLOMA / _DEGREE (both
-                # jdindia.com since 2026-11-13). See notifications.sender.
-                "degree_type": (
-                    lead.program.degree_type if lead.program_id else ""
-                ),
+                **_reply_context(lead),
             },
             related=lead,
         )
@@ -473,17 +468,12 @@ def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
             template_key="lead.fee_link.email",
             recipient=lead.email,
             context={
-                # MSG91 `application_fee_payment_link_3` vars.
                 "Student_Name": lead.name,
                 "Course_Name": lead.program.name if lead.program_id else "",
                 "Payment_Link": url,
                 "name": lead.name, "url": url,
                 "institute": institute_label,
-                # Drives the From domain via EMAIL_DOMAIN_DIPLOMA / _DEGREE (both
-                # jdindia.com since 2026-11-13). See notifications.sender.
-                "degree_type": (
-                    lead.program.degree_type if lead.program_id else ""
-                ),
+                **_reply_context(lead),
             },
             related=lead,
         )
@@ -548,11 +538,15 @@ def send_fee_payment_instructions_email(
         lead=lead, payment=payment, amount=amount, qr_cid=qr_cid,
     )
 
+    from apps.notifications.email import resolve_from_email
+    from apps.notifications.reply_to import resolve_reply_to
+
     msg = EmailMultiAlternatives(
         subject=subject,
         body=text_body,
-        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+        from_email=resolve_from_email(),
         to=[lead.email],
+        reply_to=[resolve_reply_to("lead.fee_link.email", _reply_context(lead))],
     )
     msg.attach_alternative(html_body, "text/html")
     qr_attachment = _build_inline_image(qr_bytes, qr_cid, "fee-qr.png")
@@ -638,11 +632,7 @@ def send_entrance_exam_link(*, attempt, actor=None) -> dict:
             "url": url,
             "duration": str(exam.duration_min),
             "window": window_note,
-            # Drives the From domain via EMAIL_DOMAIN_DIPLOMA / _DEGREE (both
-            # jdindia.com since 2026-11-13). See notifications.sender.
-            "degree_type": (
-                lead.program.degree_type if lead.program_id else ""
-            ),
+            **_reply_context(lead),
         },
         related=lead,
     )
@@ -666,9 +656,20 @@ def send_entrance_exam_link(*, attempt, actor=None) -> dict:
     }
 
 
+def _reply_context(lead: Lead) -> dict:
+    """Reply-To routing for lead mail: the assigned counsellor's address
+    (explicit `reply_to`), with the lead's campus so the policy can fall
+    back to the campus admissions inbox when no counsellor is set."""
+    counsellor = getattr(lead, "assign_to", None)
+    return {
+        "reply_to": (getattr(counsellor, "email", "") or "").strip(),
+        "campus_code": (getattr(lead.campus, "code", "") or "") if lead.campus_id else "",
+    }
+
+
 # Status → (template_key, timeline subject). Fired from
-# services.change_status when a lead enters that status; each key maps to
-# an MSG91 template in settings.MSG91_EMAIL_TEMPLATES.
+# services.change_status when a lead enters that status; each key has a
+# NotificationTemplate row (seeded by migrations / seed command).
 STATUS_EMAILS = {
     Lead.Status.INACTIVE: (
         "lead.inactive.email", "We'd love to stay in touch | JD Institute",
@@ -681,9 +682,8 @@ STATUS_EMAILS = {
 
 def send_status_email(*, lead: Lead, status: str, actor=None):
     """Mail the lead when moved to a status in STATUS_EMAILS and log it on
-    the lead timeline. MSG91 vars: First_Name, Course_Name (templates
-    ignore vars they don't use). Never raises — a mail failure must not
-    undo the status change."""
+    the lead timeline. Template vars: First_Name, Course_Name. Never
+    raises — a mail failure must not undo the status change."""
     if status not in STATUS_EMAILS or not lead.email:
         return None
     key, subject = STATUS_EMAILS[status]
@@ -694,6 +694,7 @@ def send_status_email(*, lead: Lead, status: str, actor=None):
             context={
                 "First_Name": _first_name(lead.name),
                 "Course_Name": lead.program.name if lead.program_id else "",
+                **_reply_context(lead),
             },
             related=lead,
         )
@@ -734,7 +735,7 @@ def send_welcome_message(*, lead: Lead, actor=None) -> dict:
     email_log = queue_notification(
         template_key="lead.welcome.email",
         recipient=lead.email,
-        context={"name": lead.name, "lead_id": lead.id},
+        context={"name": lead.name, "lead_id": lead.id, **_reply_context(lead)},
         related=lead,
     )
 

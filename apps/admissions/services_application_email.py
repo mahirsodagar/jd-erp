@@ -3,11 +3,11 @@
 Fires once, on the student's first submit of the public self-fill form
 (`PublicApplicationView.post`), as two mails:
 
-* Student copy — MSG91 template `application_submitted_3` via
-  `queue_notification` (key `admissions.application_submitted.email`).
-  MSG91 can't carry the PDF or the fee pay links; the student sees the
-  "Pay fees" page right after submitting anyway.
-* Office copy — the original SMTP mail with the application form PDF
+* Student copy — template row `admissions.application_submitted.email`
+  via `queue_notification` (no PDF, no pay links; the student sees the
+  "Pay fees" page right after submitting anyway). Replies go to the
+  campus admissions inbox.
+* Office copy — the mail with the application form PDF
   (`services_application_pdf.render_application_pdf`) and fee lines, To
   the campus acknowledgement inbox (`APPLICATION_ACK_CAMPUS_INBOXES`,
   keyed on `Campus.code`), CC `OPERATIONS_INBOX`. Skipped when neither
@@ -27,8 +27,8 @@ from .services_application_pdf import render_application_pdf
 
 logger = logging.getLogger(__name__)
 
-TEMPLATE_KEY = "admissions.form_submitted.email"  # office copy (SMTP + PDF)
-STUDENT_TEMPLATE_KEY = "admissions.application_submitted.email"  # MSG91
+TEMPLATE_KEY = "admissions.form_submitted.email"  # office copy (+ PDF)
+STUDENT_TEMPLATE_KEY = "admissions.application_submitted.email"  # student copy
 
 
 def campus_inbox_for(campus) -> str:
@@ -36,20 +36,6 @@ def campus_inbox_for(campus) -> str:
     inboxes = getattr(settings, "APPLICATION_ACK_CAMPUS_INBOXES", {}) or {}
     code = (getattr(campus, "code", "") or "").strip().upper()
     return (inboxes.get(code) or "").strip()
-
-
-def _transport(degree_type: str):
-    """(smtp_config, from_email) for the trigger. Course-aware policy;
-    MSG91 cannot carry a PDF, so a MSG91 verdict falls back to SMTP."""
-    from apps.notifications.sender import resolve_sender, transport_for
-
-    sender = resolve_sender(TEMPLATE_KEY, degree_type=degree_type)
-    if sender is None:
-        return None, ""
-    kind, smtp_cfg = transport_for(sender.domain)
-    if kind != "smtp":
-        smtp_cfg = None
-    return smtp_cfg, (sender.from_email if sender.is_live else "")
 
 
 def _fee_lines(fee_page: dict | None) -> str:
@@ -96,7 +82,7 @@ def _compose(student, fee_page: dict | None = None) -> tuple[str, str]:
 
 
 def _send_student_copy(student):
-    """MSG91 `application_submitted_3` to the student. Never raises."""
+    """Student copy of the acknowledgement. Never raises."""
     to = (student.student_email or "").strip()
     if not to:
         return None
@@ -114,17 +100,18 @@ def _send_student_copy(student):
                 "Course_Name": getattr(student.program, "name", "") or "",
                 "Application_ID": student.application_form_id,
                 "Submission_Date": submitted.strftime("%d-%m-%Y"),
+                "campus_code": getattr(student.campus, "code", "") or "",
             },
             related=student,
         )
     except Exception:  # noqa: BLE001 — never break the submission
-        logger.exception("Application %s: student MSG91 ack failed",
+        logger.exception("Application %s: student ack failed",
                          getattr(student, "application_form_id", ""))
         return None
 
 
 def _send_office_copy(student, fee_page):
-    """SMTP mail with the form PDF to the campus inbox (CC operations)."""
+    """Mail with the form PDF to the campus inbox (CC operations)."""
     campus_email = campus_inbox_for(student.campus)
     operations = (getattr(settings, "OPERATIONS_INBOX", "") or "").strip()
     to = campus_email or operations
@@ -142,24 +129,20 @@ def _send_office_copy(student, fee_page):
         subject=subject, body=body, related_object=student,
     )
 
-    if not getattr(settings, "EMAIL_SMTP_OUTBOUND_ENABLED", True):
-        log.error = "SMTP outbound disabled on this host."
-        log.save(update_fields=["error"])
-        return log
-
     from django.utils import timezone
 
     from apps.notifications.email import send_email
+    from apps.notifications.reply_to import resolve_reply_to
 
     pdf = render_application_pdf(student)
-    smtp_cfg, from_email = _transport(
-        getattr(student.program, "degree_type", "") or "",
-    )
     ok, detail = send_email(
         recipient=to, cc=", ".join(cc), subject=subject, body=body,
         attachments=[(f"Application-{student.application_form_id}.pdf",
                       pdf, "application/pdf")],
-        smtp=smtp_cfg, from_email=from_email,
+        reply_to=resolve_reply_to(
+            TEMPLATE_KEY,
+            {"campus_code": getattr(student.campus, "code", "") or ""},
+        ),
     )
     log.status = (NotificationDispatchLog.Status.SENT if ok
                   else NotificationDispatchLog.Status.FAILED)
@@ -175,7 +158,7 @@ def _send_office_copy(student, fee_page):
 def send_application_acknowledgement(
     student, fee_page: dict | None = None,
 ) -> tuple:
-    """Student MSG91 ack + office SMTP copy with the PDF. `fee_page` is
+    """Student ack + office copy with the PDF. `fee_page` is
     the summary from `payments.applicant_fees.fee_page_for`; fees still
     due online ride along in the office copy. Returns
     (student_log, office_log) — either may be None. Never raises."""

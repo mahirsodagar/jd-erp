@@ -1,17 +1,15 @@
 """Email dispatch for leave / comp-off workflows.
 
 Every send is recorded in `EmailDispatchLog` *and* handed to the real
-transport: `apps.notifications.email.send_email`, with the From-domain
-and SMTP connection chosen by `apps.notifications.sender` (leave and
-comp-off triggers route to the HR domain — see
-`settings.EMAIL_SENDER_DOMAIN_POLICY`).
+transport: `apps.notifications.email.send_email` (ZeptoMail, From
+no-reply@dkul.in). Replies go to the leave department
+(`LEAVES_HR_INBOX`, policy token HR_LEAVE) — the address is used only
+as Reply-To, never as the sender.
 
 A row therefore reflects what actually happened:
   sent   — the transport accepted the message,
-  failed — it was rejected (reason in `error`),
-  queued — this host has SMTP egress disabled
-           (`EMAIL_SMTP_OUTBOUND_ENABLED=False`), so the mail is kept
-           for replay by `manage.py send_leave_emails`.
+  failed — it was rejected (reason in `error`); replay the failed rows
+           with `manage.py send_leave_emails --failed`.
 
 Delivery never raises into the request: a mail problem must not fail the
 leave application itself.
@@ -27,9 +25,7 @@ from apps.notifications.models import InAppNotification
 
 HR_INBOX = getattr(settings, "LEAVES_HR_INBOX", "leave@jdinstitute.edu.in")
 
-# Trigger keys registered in settings.EMAIL_SENDER_DOMAIN_POLICY. These
-# are also listed in SMTP_INTERNAL_TEMPLATE_KEYS — internal HR mail is
-# composed here and sent over SMTP, never through the MSG91 registry.
+# Trigger keys registered in settings.EMAIL_REPLY_TO_POLICY (HR_LEAVE).
 TPL_LEAVE_APPLIED = "leaves.application_employee.email"
 TPL_LEAVE_DECISION = "leaves.application_status_employee.email"
 TPL_COMPOFF_APPLIED = "leaves.compoff_application_employee.email"
@@ -42,41 +38,22 @@ def _split_emails(s: str | None) -> list[str]:
     return [e.strip() for e in s.split(",") if e.strip()]
 
 
-def _transport_for(template: str) -> tuple[dict | None, str]:
-    """Resolve (smtp_config, from_email) for a leave trigger.
+def reply_to_for(template: str, context: dict | None = None) -> str:
+    """Reply-To for a leave trigger: the leave department inbox."""
+    from apps.notifications.reply_to import resolve_reply_to
 
-    `smtp_config` is a dedicated per-domain connection dict, or None to
-    use the project's default backend. `from_email` is "" when the
-    resolved domain isn't a configured live sender, which tells
-    `send_email` to keep the settings-derived default From.
-    """
-    from apps.notifications.sender import resolve_sender, transport_for
-
-    sender = resolve_sender(template)
-    if sender is None:
-        return None, ""
-    kind, smtp_cfg = transport_for(sender.domain)
-    # These triggers have no MSG91 template (they're SMTP-internal), so a
-    # "msg91" verdict would have nothing to send — use default SMTP.
-    if kind != "smtp":
-        smtp_cfg = None
-    return smtp_cfg, (sender.from_email if sender.is_live else "")
+    return resolve_reply_to(template, context)
 
 
 def deliver(log: EmailDispatchLog) -> EmailDispatchLog:
     """Attempt delivery of one logged email and record the outcome."""
-    if not getattr(settings, "EMAIL_SMTP_OUTBOUND_ENABLED", True):
-        # No SMTP egress on this host — leave the row queued for replay.
-        return log
-
     from apps.notifications.email import send_email
 
-    smtp_cfg, from_email = _transport_for(log.template)
     try:
         ok, detail = send_email(
             recipient=log.to, cc=log.cc,
             subject=log.subject, body=log.body,
-            smtp=smtp_cfg, from_email=from_email,
+            reply_to=reply_to_for(log.template, log.context),
         )
     except Exception as e:  # defensive — send_email already traps SMTP errors
         ok, detail = False, f"{type(e).__name__}: {e}"

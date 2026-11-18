@@ -1,11 +1,13 @@
-"""New-assignment e-mail: MSG91 `assignmentassigned`, one per reached
-student, fired on publish (create or unpublished → published)."""
+"""New-assignment e-mail (template `academics.assignment_assigned.email`),
+one per reached student, fired on publish (create or unpublished →
+published). Sent over the single SMTP transport; Reply-To = faculty."""
 
 from datetime import date, datetime, timezone as dt_tz
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.core import mail
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from apps.academics import assignment_notify as an
@@ -15,9 +17,11 @@ from apps.master.models import (
     AcademicYear, Batch, Campus, Institute, Program, Semester, Subject,
 )
 
-MSG91_OK = (True, '{"status": "success"}')
-
-
+@override_settings(
+    EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+    DEFAULT_FROM_EMAIL="no-reply@dkul.in",
+    EMAIL_DEFAULT_REPLY_TO="admin.a@jdinstitute.edu.in",
+)
 class AssignmentNotifyTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -78,19 +82,25 @@ class AssignmentNotifyTests(TestCase):
         a.semester = self.sem2
         self.assertEqual(self._emails(a), ["s3@example.com"])
 
-    @mock.patch("apps.notifications.msg91.send_msg91_template",
-                return_value=MSG91_OK)
-    def test_sends_msg91_template_with_vars(self, msg91):
-        n = an.send_assignment_assigned(self._assignment())
+    def test_sends_one_mail_per_student_with_vars(self):
+        faculty = get_user_model().objects.create_user(
+            username="fac0", password="x", email="fac0@example.com")
+        n = an.send_assignment_assigned(self._assignment(created_by=faculty))
         self.assertEqual(n, 2)
-        k = msg91.call_args_list[0].kwargs
-        self.assertEqual(k["template_name"], "assignmentassigned")
-        self.assertEqual(k["domain"], "mail.jdinstitute.com")
-        v = k["variables"]
-        self.assertEqual(v["VAR2"], "Pattern Making")
-        self.assertEqual(v["VAR3"], "Bodice block")
-        self.assertEqual(v["VAR4"], "20-11-2026 06:00 PM")  # 12:30 UTC → IST
-        self.assertEqual(v["VAR5"], an.SUBMISSION_MODE)
+        self.assertEqual(len(mail.outbox), 2)
+        self.assertEqual(sorted(m.to[0] for m in mail.outbox),
+                         ["s1@example.com", "s2@example.com"])
+        m = mail.outbox[0]
+        self.assertIn("no-reply@dkul.in", m.from_email)
+        self.assertEqual(m.reply_to, ["fac0@example.com"])  # faculty answers
+        self.assertIn("Pattern Making", m.body)
+        self.assertIn("Bodice block", m.body)
+        self.assertIn("20-11-2026 06:00 PM", m.body)  # 12:30 UTC → IST
+        self.assertIn(an.SUBMISSION_MODE, m.body)
+
+    def test_no_faculty_falls_back_to_default_reply_to(self):
+        an.send_assignment_assigned(self._assignment())
+        self.assertEqual(mail.outbox[0].reply_to, ["admin.a@jdinstitute.edu.in"])
 
     def _post(self, published):
         c = APIClient()
@@ -164,8 +174,8 @@ class AssignmentNotifyTests(TestCase):
 
 
 class AssignmentSubmittedNotifyTests(AssignmentNotifyTests):
-    """Student submits → faculty (assignment.created_by) gets MSG91
-    `assignment_submitted`."""
+    """Student submits → faculty (assignment.created_by) gets the
+    `academics.assignment_submitted.email` mail, Reply-To the student."""
 
     def _sub(self, created_by):
         from apps.academics.models import AssignmentSubmission
@@ -173,23 +183,18 @@ class AssignmentSubmittedNotifyTests(AssignmentNotifyTests):
         s = Student.objects.get(application_form_id="AF-1")
         return AssignmentSubmission.objects.create(assignment=a, student=s)
 
-    @mock.patch("apps.notifications.msg91.send_msg91_template",
-                return_value=MSG91_OK)
-    def test_mails_creator_with_vars(self, msg91):
+    def test_mails_creator_with_vars(self):
         faculty = get_user_model().objects.create_user(
             username="fac", password="x", email="fac@example.com",
             full_name="Ann Rao")
         an.send_assignment_submitted(self._sub(faculty))
-        k = msg91.call_args.kwargs
-        self.assertEqual(k["template_name"], "assignment_submitted")
-        self.assertEqual(k["recipient_email"], "fac@example.com")
-        self.assertEqual(k["variables"], {
-            "Faculty_Name": "Ann Rao", "Student_Name": "Student 1",
-            "Subject_Name": "Pattern Making", "Assignment_Title": "Bodice block",
-        })
+        self.assertEqual(len(mail.outbox), 1)
+        m = mail.outbox[0]
+        self.assertEqual(m.to, ["fac@example.com"])
+        self.assertEqual(m.reply_to, ["s1@example.com"])  # student answers
+        for needle in ("Ann Rao", "Student 1", "Pattern Making", "Bodice block"):
+            self.assertIn(needle, m.body)
 
-    @mock.patch("apps.notifications.msg91.send_msg91_template",
-                return_value=MSG91_OK)
-    def test_no_creator_is_silent(self, msg91):
+    def test_no_creator_is_silent(self):
         self.assertIsNone(an.send_assignment_submitted(self._sub(None)))
-        msg91.assert_not_called()
+        self.assertEqual(mail.outbox, [])

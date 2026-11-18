@@ -1,9 +1,8 @@
 """Replay leave / comp-off emails that were not delivered.
 
 Leave mail is sent inline when the application is filed or decided. Rows
-only pile up when the host had SMTP egress disabled at that moment
-(`EMAIL_SMTP_OUTBOUND_ENABLED=False`) or the transport rejected the
-message. This command drains them.
+only pile up when the transport (ZeptoMail SMTP) rejected the message.
+This command drains them.
 
     python manage.py send_leave_emails            # queued only
     python manage.py send_leave_emails --failed   # queued + failed
@@ -31,14 +30,6 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **opts):
-        if not getattr(settings, "EMAIL_SMTP_OUTBOUND_ENABLED", True):
-            self.stderr.write(self.style.ERROR(
-                "EMAIL_SMTP_OUTBOUND_ENABLED is False — this host is "
-                "configured as having no SMTP egress, so nothing would be "
-                "sent. Set it True and re-run."
-            ))
-            return
-
         backend = getattr(settings, "EMAIL_BACKEND", "")
         if "console" in backend or "locmem" in backend:
             self.stderr.write(self.style.WARNING(

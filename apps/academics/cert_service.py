@@ -176,20 +176,50 @@ def build_snapshot(*, student, enrollment, cert_type: str) -> dict:
 
 
 def _no_dues_block(student, enrollment) -> dict:
-    """Data for the No Due clearance sheet: one row per subject taught
-    to the student's batch (faculty = everyone who took a scheduled
-    class in it, attendance % = present+late over scheduled slots),
-    the overall attendance %, the batch's class mentor, and the
+    """Data for the No Due clearance sheet.
+
+    Subjects = the subject master for the enrollment's program +
+    current semester, plus anything else on the batch timetable (so an
+    unpublished timetable still yields the module list). Faculty = the
+    instructors on the batch's non-cancelled timetable slots for that
+    subject — the timetable is the only faculty↔subject link in the
+    ERP, so a subject with no published class has no faculty name.
+    Attendance % = present+late over scheduled slots (same rule as the
+    attendance reports); blank when no class has been scheduled.
+    Also: overall attendance %, the batch's class mentor, and the
     accounts remark (the cert is only issued once the balance is zero).
     Blue Book / Record submission and the hall-ticket number are not
     tracked in the ERP and stay blank for manual fill."""
     from django.db.models import Q
 
+    from apps.master.models import Subject
+
     from .models import Attendance, ScheduleSlot
 
     batch = enrollment.batch
+    per_subject: dict[int, dict] = {}
+
+    def row_for(sub):
+        return per_subject.setdefault(sub.pk, {
+            "name": sub.name, "code": sub.code,
+            "faculty": [], "total": 0, "present": 0,
+        })
+
+    # 1. Subject master for this program + semester. Legacy rows may
+    #    carry no semester; those count when nothing is tagged with
+    #    the student's semester.
+    program_qs = Subject.objects.filter(is_active=True, program=enrollment.program)
+    master_qs = program_qs.filter(semester_id=enrollment.semester_id)
+    if not master_qs.exists():
+        master_qs = program_qs.filter(semester__isnull=True)
+    for sub in master_qs.order_by("code"):
+        row_for(sub)
+
+    # 2. Batch timetable: faculty from every non-cancelled slot,
+    #    attendance from scheduled ones.
     slots = (ScheduleSlot.objects
-             .filter(batch=batch, status=ScheduleSlot.Status.SCHEDULED)
+             .filter(batch=batch)
+             .exclude(status=ScheduleSlot.Status.CANCELLED)
              .select_related("subject", "instructor"))
     present_q = Q(status__in=(Attendance.Status.PRESENT,
                               Attendance.Status.LATE))
@@ -200,22 +230,20 @@ def _no_dues_block(student, enrollment) -> dict:
         .values_list("schedule_slot_id", flat=True)
     )
 
-    per_subject: dict[int, dict] = {}
     total = present = 0
     for s in slots:
-        row = per_subject.setdefault(s.subject_id, {
-            "name": s.subject.name, "code": s.subject.code,
-            "faculty": [], "total": 0, "present": 0,
-        })
+        row = row_for(s.subject)
+        if s.instructor_id:
+            fn = s.instructor.full_name
+            if fn and fn not in row["faculty"]:
+                row["faculty"].append(fn)
+        if s.status != ScheduleSlot.Status.SCHEDULED:
+            continue
         row["total"] += 1
         total += 1
         if s.id in present_slot_ids:
             row["present"] += 1
             present += 1
-        if s.instructor_id:
-            fn = s.instructor.full_name
-            if fn and fn not in row["faculty"]:
-                row["faculty"].append(fn)
 
     subjects = [
         {

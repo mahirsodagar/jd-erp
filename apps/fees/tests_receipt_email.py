@@ -25,10 +25,9 @@ INBOXES = {
 
 @override_settings(
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
-    EMAIL_SMTP_OUTBOUND_ENABLED=True,
+    DEFAULT_FROM_EMAIL="no-reply@dkul.in",
     FEE_RECEIPT_CAMPUS_INBOXES=INBOXES,
     ACCOUNTS_INBOX="",
-    EMAIL_SMTP_BY_DOMAIN={},
 )
 class ReceiptEmailTests(TestCase):
 
@@ -137,9 +136,8 @@ class ReceiptEmailTests(TestCase):
         self.assertIn("no email", resp.data["detail"])
         self.assertEqual(len(mail.outbox), 0)
 
-    @override_settings(EMAIL_SMTP_OUTBOUND_ENABLED=False)
-    def test_no_smtp_egress_logs_but_does_not_send(self):
-        log = send_receipt_email(_receipt(_fixture()))
-        self.assertEqual(len(mail.outbox), 0)
-        self.assertEqual(log.status, NotificationDispatchLog.Status.QUEUED)
-        self.assertIn("SMTP", log.error)
+    def test_from_is_noreply_and_reply_to_is_campus_receipts_inbox(self):
+        send_receipt_email(_receipt(_fixture()))
+        m = mail.outbox[0]
+        self.assertIn("no-reply@dkul.in", m.from_email)
+        self.assertEqual(m.reply_to, ["dkul.receipts@jdinstitute.edu.in"])

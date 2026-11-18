@@ -7,7 +7,7 @@ Two calls and one check:
 * `check_webhook_auth()`                  → validates an inbound webhook
 
 Deliberately stdlib-only (`urllib.request`), matching
-`apps.notifications.msg91`. The Juspay Java SDK in the repo root uses the
+`apps.notifications.msg91_sms`. The Juspay Java SDK in the repo root uses the
 JWE/JWS-signed flavour of the same API; this module implements the
 Basic-auth flavour documented at
 https://smartgateway.hdfcbank.com/docs/smartgateway-api-ref-basicauth/,
@@ -57,7 +57,7 @@ API_VERSION = "2023-06-30"
 
 #: SmartGateway sits behind Cloudflare, which blocks the default
 #: `Python-urllib/3.x` agent with a 1010 "Access denied" (403). A
-#: browser-shaped UA gets us to the origin — same trick as the MSG91
+#: browser-shaped UA gets us to the origin — same trick as the MSG91 SMS
 #: client. (Fixed 2026-08: without this every /session + /orders call 403s.)
 _BROWSER_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "

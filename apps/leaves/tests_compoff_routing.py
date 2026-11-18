@@ -20,7 +20,6 @@ URL = "/api/leaves/comp-off/"
 
 @override_settings(
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
-    EMAIL_SMTP_OUTBOUND_ENABLED=True,
 )
 class CompOffRoutingTests(TestCase):
     @classmethod

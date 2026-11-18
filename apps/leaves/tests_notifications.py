@@ -7,7 +7,7 @@ from django.test import TestCase, override_settings
 
 from apps.leaves.models import EmailDispatchLog
 from apps.leaves.services.notifications import (
-    TPL_COMPOFF_APPLIED, TPL_LEAVE_APPLIED, _transport_for, send_email_now,
+    TPL_COMPOFF_APPLIED, TPL_LEAVE_APPLIED, reply_to_for, send_email_now,
 )
 
 
@@ -22,14 +22,9 @@ SEND_KW = dict(
 
 @override_settings(
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
-    EMAIL_SMTP_OUTBOUND_ENABLED=True,
-    EMAIL_SENDER_DOMAIN_POLICY={
-        TPL_LEAVE_APPLIED: "HR", TPL_COMPOFF_APPLIED: "HR",
-    },
-    EMAIL_SENDER_BY_DOMAIN={"jdinstitute.edu.in": "admin.a@jdinstitute.edu.in"},
-    EMAIL_SMTP_BY_DOMAIN={},
-    EMAIL_DOMAIN_HR="jdinstitute.edu.in",
-    DEFAULT_FROM_EMAIL="JD Communications <admin.a@jdinstitute.edu.in>",
+    DEFAULT_FROM_EMAIL="no-reply@dkul.in",
+    LEAVES_HR_INBOX="leave@jdinstitute.edu.in",
+    EMAIL_REPLY_TO_POLICY={TPL_LEAVE_APPLIED: "HR_LEAVE", TPL_COMPOFF_APPLIED: "HR_LEAVE"},
 )
 class LeaveMailDeliveryTests(TestCase):
 
@@ -41,6 +36,9 @@ class LeaveMailDeliveryTests(TestCase):
         self.assertEqual(msg.to, ["manager@jdinstitute.edu.in"])
         self.assertEqual(msg.cc, ["hr@jdinstitute.edu.in"])
         self.assertEqual(msg.subject, SEND_KW["subject"])
+        # From is the fixed no-reply sender; replies go to the leave dept.
+        self.assertIn("no-reply@dkul.in", msg.from_email)
+        self.assertEqual(msg.reply_to, ["leave@jdinstitute.edu.in"])
 
         log.refresh_from_db()
         self.assertEqual(log.status, EmailDispatchLog.Status.SENT)
@@ -57,31 +55,19 @@ class LeaveMailDeliveryTests(TestCase):
         self.assertIn("SMTPAuthenticationError", log.error)
         self.assertIsNone(log.sent_at)
 
-    def test_leave_mail_sends_from_the_hr_domain(self):
-        smtp_cfg, from_email = _transport_for(TPL_LEAVE_APPLIED)
-        self.assertIsNone(smtp_cfg)  # HR domain uses the default backend
-        self.assertEqual(from_email, "admin.a@jdinstitute.edu.in")
+    def test_leave_and_compoff_reply_to_the_leave_department(self):
+        self.assertEqual(reply_to_for(TPL_LEAVE_APPLIED), "leave@jdinstitute.edu.in")
+        self.assertEqual(reply_to_for(TPL_COMPOFF_APPLIED), "leave@jdinstitute.edu.in")
 
-        # Comp-off follows the same policy as leave.
-        self.assertEqual(_transport_for(TPL_COMPOFF_APPLIED)[1], from_email)
-
-    @override_settings(EMAIL_SMTP_OUTBOUND_ENABLED=False)
-    def test_host_without_smtp_egress_keeps_the_mail_queued(self):
-        log = send_email_now(**SEND_KW)
-
-        self.assertEqual(mail.outbox, [])
-        log.refresh_from_db()
-        self.assertEqual(log.status, EmailDispatchLog.Status.QUEUED)
-
-    @override_settings(EMAIL_SMTP_OUTBOUND_ENABLED=False)
-    def test_queued_rows_are_drained_by_the_replay_command(self):
+    def test_failed_rows_are_replayed_by_the_command(self):
         from django.core.management import call_command
 
-        send_email_now(**SEND_KW)
+        with patch("apps.notifications.email.send_email",
+                   return_value=(False, "SMTPServerDisconnected")):
+            send_email_now(**SEND_KW)
         self.assertEqual(mail.outbox, [])
 
-        with override_settings(EMAIL_SMTP_OUTBOUND_ENABLED=True):
-            call_command("send_leave_emails")
+        call_command("send_leave_emails", "--failed")
 
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(

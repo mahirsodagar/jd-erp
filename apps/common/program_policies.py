@@ -172,6 +172,16 @@ SIGNATORIES = ("Authorised Signatory", "Student Signature",
                "Parents/Guardian Signature")
 
 
+def is_diploma(degree_type: str | None) -> bool:
+    """True when a program's free-form `degree_type` denotes a diploma.
+
+    `degree_type` is entered by hand (e.g. "B.Des", "M.Des", "Diploma"),
+    so we match on substring rather than equality. Anything that isn't a
+    diploma is treated as a degree / bachelors course.
+    """
+    return "diploma" in (degree_type or "").strip().lower()
+
+
 def policy_for(degree_type: str | None, *, agreement: bool = True,
                institute=None) -> list[tuple]:
     """Pick the policy document for a program's free-text degree type.
@@ -180,8 +190,6 @@ def policy_for(degree_type: str | None, *, agreement: bool = True,
     which nobody signs. `institute` (an `Institute` or its code) swaps in
     that institute's ID-card replacement fee; without it the default
     Rs.500 prints."""
-    from apps.notifications.sender import is_diploma
-
     doc = DIPLOMA if is_diploma(degree_type) else DEGREE
     if not agreement:
         doc = [b for b in doc if b not in _AGREEMENT]

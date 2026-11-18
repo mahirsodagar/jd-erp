@@ -1,7 +1,7 @@
 """Fees-related SMS dispatch (payment confirmation + installment-due reminders).
 
 All sends go through `apps.notifications.services.queue_notification` so
-they get a dispatch log row + provider routing via MSG91. Best-effort by
+they get a dispatch log row + provider routing (SMS_PROVIDER). Best-effort by
 design — a failed SMS never blocks the receipt/installment operation.
 """
 

@@ -44,7 +44,6 @@ from decimal import Decimal
 from pathlib import Path
 
 from django.conf import settings
-from django.core.mail import EmailMessage
 from django.db.models import Sum
 from django.utils import timezone
 from fpdf import FPDF
@@ -427,88 +426,27 @@ def send_undertaking(
     course_name = (enrollment.course.name if enrollment.course
                    else enrollment.program.name)
 
-    # MSG91 template (PDF attached) for opted-in institutes; any MSG91
-    # failure falls through to the SMTP mail below so the student still
-    # gets the PDF.
-    transport, msg91_error = "smtp", ""
-    if _uses_msg91(enrollment):
-        ok, detail = _send_msg91(
-            enrollment, to_addr=to_addr, cc_list=cc_list,
-            course_name=course_name, filename=filename, pdf_bytes=pdf_bytes,
-        )
-        if ok:
-            transport = "msg91"
-        else:
-            msg91_error = detail
-
-    if transport == "smtp":
-        msg = EmailMessage(
-            subject=subject,
-            body=body,
-            from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
-            to=[to_addr],
-            cc=cc_list,
-        )
-        msg.attach(filename, pdf_bytes, "application/pdf")
-        try:
-            msg.send(fail_silently=False)
-        except Exception as e:
-            raise RuntimeError(
-                f"Email delivery failed: {type(e).__name__}: {e}"
-            )
-
-    return {
-        "sent_to": to_addr,
-        "cc": cc_list,
-        "sent_at": timezone.now().isoformat(),
-        "pdf_bytes": len(pdf_bytes),
-        "transport": transport,
-        **({"msg91_error": msg91_error} if msg91_error else {}),
-    }
-
-
-MSG91_TEMPLATE_KEY = "admissions.undertaking.email"
-
-
-def _uses_msg91(enrollment: Enrollment) -> bool:
-    institute = getattr(enrollment.program, "institute", None)
-    code = (getattr(institute, "code", "") or "").strip().upper()
-    allowed = {c.strip().upper() for c in
-               getattr(settings, "UNDERTAKING_MSG91_INSTITUTES", []) or []}
-    from apps.notifications.msg91 import template_for
-    return bool(code and code in allowed and template_for(MSG91_TEMPLATE_KEY))
-
-
-def _send_msg91(enrollment, *, to_addr, cc_list, course_name, filename,
-                pdf_bytes) -> tuple[bool, str]:
-    """MSG91 `undertaking_institute` with the PDF attached; logged to
-    NotificationDispatchLog. Returns (ok, detail). Never raises."""
+    # One transport (ZeptoMail, From no-reply@dkul.in); replies go to the
+    # campus undertaking inbox. Logged under TEMPLATE_KEY for audit.
+    from apps.notifications.email import send_email
     from apps.notifications.models import (
         NotificationDispatchLog, NotificationTemplate,
     )
-    from apps.notifications.msg91 import send_msg91_template, template_for
+    from apps.notifications.reply_to import resolve_reply_to
 
-    student = enrollment.student
-    variables = {"StudentName": student.student_name,
-                 "CourseName": course_name}
-    try:
-        ok, detail = send_msg91_template(
-            template_name=template_for(MSG91_TEMPLATE_KEY),
-            recipient_email=to_addr, recipient_name=student.student_name,
-            variables=variables, cc=cc_list,
-            attachments=[(filename, pdf_bytes, "application/pdf")],
-        )
-    except Exception as e:  # noqa: BLE001
-        ok, detail = False, f"{type(e).__name__}: {e}"
+    ok, detail = send_email(
+        recipient=to_addr, cc=cc_list, subject=subject, body=body,
+        attachments=[(filename, pdf_bytes, "application/pdf")],
+        reply_to=resolve_reply_to(
+            TEMPLATE_KEY, {"campus_code": enrollment.campus.code},
+        ),
+    )
     S = NotificationDispatchLog.Status
     try:
         NotificationDispatchLog.objects.create(
             channel=NotificationTemplate.Channel.EMAIL,
-            template_key=MSG91_TEMPLATE_KEY, recipient=to_addr,
-            cc=", ".join(cc_list),
-            subject="Admission Confirmed - JD Institute",
-            body=(f"MSG91 {template_for(MSG91_TEMPLATE_KEY)} {variables} "
-                  f"+ {filename}"),
+            template_key=TEMPLATE_KEY, recipient=to_addr,
+            cc=", ".join(cc_list), subject=subject, body=body,
             status=S.SENT if ok else S.FAILED,
             sent_at=timezone.now() if ok else None,
             error="" if ok else detail[:2000],
@@ -516,4 +454,16 @@ def _send_msg91(enrollment, *, to_addr, cc_list, course_name, filename,
         )
     except Exception:  # noqa: BLE001 — logging must not block the send
         pass
-    return ok, detail
+    if not ok:
+        raise RuntimeError(f"Email delivery failed: {detail}")
+
+    return {
+        "sent_to": to_addr,
+        "cc": cc_list,
+        "sent_at": timezone.now().isoformat(),
+        "pdf_bytes": len(pdf_bytes),
+        "transport": "smtp",
+    }
+
+
+TEMPLATE_KEY = "admissions.undertaking.email"

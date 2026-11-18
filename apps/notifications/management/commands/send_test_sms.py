@@ -179,7 +179,7 @@ class Command(BaseCommand):
                 f"password={'set' if getattr(settings, 'BULK_SMS_PASSWORD', '') else 'UNSET'}"
             )
         elif provider == "msg91":
-            key = getattr(settings, "MSG91_SMS_AUTHKEY", "") or getattr(settings, "MSG91_AUTHKEY", "")
+            key = getattr(settings, "MSG91_SMS_AUTHKEY", "")
             self.stdout.write(f"  MSG91 authkey={'set' if key else 'UNSET'}")
         self.stdout.write("=" * 84)
 

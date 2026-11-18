@@ -34,8 +34,9 @@ from .letters import render_experience_letter, render_relieving_letter
 from .models import RelievingApproval
 
 
-# Keys registered in settings.EMAIL_SENDER_DOMAIN_POLICY (HR domain) and
-# SMTP_INTERNAL_TEMPLATE_KEYS.
+# Keys registered in settings.EMAIL_REPLY_TO_POLICY. Mail leaves From
+# no-reply@dkul.in; replies go to the first approver in the chain (the
+# manager handling the application), else the Principal's inbox.
 TPL_APPLICATION = "hr.relieving.application.email"
 TPL_REJECTED = "hr.relieving.application_rejected.email"
 TPL_APPROVED = "hr.relieving.application_approved.email"  # PART_TIME completion
@@ -76,7 +77,7 @@ def _join(*groups) -> str:
 def _send(*, template: str, application, to: str, cc: str, subject: str,
           body: str, attachments=()) -> NotificationDispatchLog:
     from apps.notifications.email import send_email
-    from apps.notifications.sender import resolve_sender, transport_for
+    from apps.notifications.reply_to import resolve_reply_to
 
     # Don't CC the primary recipient.
     cc = _join([c for c in cc.split(",") if c.strip().lower() != to.lower()])
@@ -90,17 +91,16 @@ def _send(*, template: str, application, to: str, cc: str, subject: str,
         object_id=str(application.pk),
     )
 
-    smtp_cfg, from_email = None, ""
-    sender = resolve_sender(template)
-    if sender is not None:
-        kind, cfg = transport_for(sender.domain)
-        smtp_cfg = cfg if kind == "smtp" else None
-        from_email = sender.from_email if sender.is_live else ""
+    # Reply-To = the approver handling this application (L1), unless
+    # the mail is addressed to them — then the next in the chain.
+    approvers = _approver_emails(application)
+    handler = next((a for a in approvers if a.lower() != to.lower()), "")
+    reply_to = resolve_reply_to(template, {"reply_to": handler})
 
     try:
         ok, detail = send_email(
             recipient=to, cc=cc, subject=subject, body=body,
-            attachments=attachments, smtp=smtp_cfg, from_email=from_email,
+            attachments=attachments, reply_to=reply_to,
         )
     except Exception as e:  # defensive — send_email already traps SMTP errors
         ok, detail = False, f"{type(e).__name__}: {e}"

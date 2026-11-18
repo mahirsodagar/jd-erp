@@ -25,7 +25,7 @@ with the dashboard's webhook secret). We still re-read the link before
 settling, so every path settles from the API's answer.
 
 Docs: https://razorpay.com/docs/api/payments/payment-links/
-Stdlib-only, matching `gateway.py` and `apps.notifications.msg91`.
+Stdlib-only, matching `gateway.py` and `apps.notifications.msg91_sms`.
 """
 
 from __future__ import annotations

@@ -1,5 +1,6 @@
-"""'New assignment' e-mail to students — MSG91 template `assignmentassigned`
-via the notifications layer (key `academics.assignment_assigned.email`).
+"""'New assignment' e-mail to students via the notifications layer (key
+`academics.assignment_assigned.email`, ZeptoMail From no-reply@dkul.in,
+Reply-To the faculty who set the assignment).
 
 Fires when an assignment becomes visible to students: on create when
 published, or when an unpublished one is flipped to published. One mail
@@ -8,10 +9,10 @@ enrollment the assignment reaches — the exact batch, or every batch of
 the program when no batch is set (narrowed to the assignment's semester
 when one is set). Same reach as the portal's `_assignments_for_batch`.
 
-The fan-out runs in a background thread after commit: MSG91 is one HTTP
-call per student, and a batch of 60 must not hold the faculty's request.
+The fan-out runs in a background thread after commit: one SMTP message
+per student, and a batch of 60 must not hold the faculty's request.
 
-MSG91 variables (positional, as the template defines them):
+Template variables (positional, as the client's template defines them):
     VAR1 student name   VAR2 subject   VAR3 assignment title
     VAR4 deadline       VAR5 submission mode
 """
@@ -59,12 +60,14 @@ def recipients_for(assignment):
 
 def context_for(assignment, student) -> dict:
     due = assignment.due_date.astimezone(_IST)
+    faculty_email, _ = faculty_for(assignment)
     return {
         "VAR1": student.student_name,
         "VAR2": assignment.subject.name,
         "VAR3": assignment.title,
         "VAR4": due.strftime("%d-%m-%Y %I:%M %p"),
         "VAR5": SUBMISSION_MODE,
+        "reply_to": faculty_email,
     }
 
 
@@ -117,7 +120,7 @@ def schedule_assignment_assigned(assignment) -> None:
 
 
 # ---------------------------------------------------------------------
-# Student submitted → faculty (MSG91 `assignment_submitted`)
+# Student submitted → faculty (Reply-To the student)
 # ---------------------------------------------------------------------
 
 SUBMITTED_KEY = "academics.assignment_submitted.email"
@@ -156,6 +159,7 @@ def send_assignment_submitted(submission):
                 "Student_Name": submission.student.student_name,
                 "Subject_Name": a.subject.name,
                 "Assignment_Title": a.title,
+                "reply_to": (submission.student.student_email or "").strip(),
             },
             related=submission,
         )

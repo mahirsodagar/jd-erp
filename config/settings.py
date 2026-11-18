@@ -482,11 +482,13 @@ BULK_SMS_TEMPLATE_IDS = {
 
 # --- SMS — MSG91 v5 flow API ------------------------------------------
 
-# Separate authkey from the email one; MSG91 lets you mint per-purpose
-# keys ("SMS" row in the dashboard). Falls back to MSG91_AUTHKEY if the
-# SMS-specific key isn't set.
+# Only used when SMS_PROVIDER=msg91 (default is bulksms). Authkey from
+# the MSG91 dashboard → Authkeys → "SMS" row. MSG91 email is gone
+# (2026-11-18, ZeptoMail) — there is no shared MSG91_AUTHKEY any more.
 MSG91_SMS_AUTHKEY = env("MSG91_SMS_AUTHKEY", default="")
 MSG91_SMS_SENDER_ID = env("MSG91_SMS_SENDER_ID", default="JDEDUC")
+# Network timeout (seconds) for the MSG91 SMS API.
+MSG91_TIMEOUT = env.int("MSG91_TIMEOUT", default=10)
 
 # Map our internal template_key → the MSG91 *flow ID* (24-char hex from
 # the MSG91 dashboard after a DLT template has been linked). MSG91
@@ -635,225 +637,27 @@ XIRCLS_WA_PARAM_MAP = {
 }
 
 
-# --- Email — MSG91 v5 transactional -----------------------------------
-
-# Legacy PHP project posts to https://control.msg91.com/api/v5/email/send
-# with hardcoded credentials. We default to the same values so the
-# template-based mails (`student_invoice_copy`, `assignment_assigned`,
-# `application_fee_receipt` etc.) keep working through the migration.
-# Override via env per environment — see apps/notifications/msg91.py.
-MSG91_AUTHKEY = env(
-    "MSG91_AUTHKEY", default="411327AvSZtxr9aUFW6669485dP1",
-)
-MSG91_SENDER_EMAIL = env(
-    "MSG91_SENDER_EMAIL", default="admin@mail.jdinstitute.com",
-)
-MSG91_DOMAIN = env(
-    "MSG91_DOMAIN", default="mail.jdinstitute.com",
-)
-MSG91_TIMEOUT = env.int("MSG91_TIMEOUT", default=10)
-# True = build the payload but never POST it (send reports success).
-# Forced on under `manage.py test` — the default authkey is real, so any
-# test that fires a MSG91-routed trigger would otherwise send live mail.
-MSG91_DRY_RUN = env.bool("MSG91_DRY_RUN", default=False) or (
-    len(sys.argv) > 1 and sys.argv[1] == "test"
-)
-
-# Routing policy:
+# --- Email — ZeptoMail SMTP (the ONLY outbound mail transport) --------
 #
-#   * MSG91 (mail.jdinstitute.com) — transactional mail to EXTERNAL
-#     recipients (leads, students, parents). Anything in this dict
-#     goes through the MSG91 v5 email API.
+# Since 2026-11-18 every outgoing email (enquiry mail, automated
+# notifications, bulk campaigns, PDFs) leaves through ZeptoMail's SMTP
+# relay, authenticated with the ZeptoMail send-mail token. The From
+# address is ALWAYS `no-reply@dkul.in` (the client's verified ZeptoMail
+# domain). Credentials of jdindia.com, jdinstitute.com,
+# jdinstitute.edu.in or any other mailbox must never be used here — not
+# for SMTP auth and not as the From. Those addresses survive only as
+# recipient inboxes and as Reply-To (see EMAIL_REPLY_TO_POLICY below).
 #
-#   * SMTP (crm@jdindia.com via Zoho) — INTERNAL mail to faculty /
-#     employees (HR workflows, leave notifications to employees, task
-#     assignments, etc.) and every non-MSG91 student/admission mail.
-#     jdinstitute.edu.in is RETIRED as a sending domain (2026-11-13);
-#     it survives only as recipient inboxes (leave@, dkul.receipts@ …).
-#     Any template NOT listed below falls through to plain SMTP via
-#     apps.notifications.email.send_email.
+# Who answers a reply is decided per trigger: the From stays no-reply,
+# the Reply-To header is set to the person/department that handles that
+# kind of mail (apps.notifications.reply_to.resolve_reply_to).
 #
-# Don't bypass this policy by adding internal-staff templates here —
-# the two domains have different reputations + branding for a reason.
-MSG91_EMAIL_TEMPLATES = {
-    # Fees — to students / parents
-    "fees.receipt.email":                  "student_invoice_copy",
-    "fees.application_fee_receipt.email":  "application_fee_receipt",
-
-    # Academics — to students
-    # Vars VAR1 name, VAR2 subject, VAR3 title, VAR4 deadline, VAR5 mode
-    # (apps/academics/assignment_notify.py).
-    "academics.assignment_assigned.email": "assignmentassigned",
-    # Student submitted → faculty (vars Faculty_Name, Student_Name,
-    # Subject_Name, Assignment_Title).
-    "academics.assignment_submitted.email": "assignment_submitted",
-
-    # Leaves — STUDENT leave status (employee leave stays on SMTP).
-    "leaves.application_status_student.email": "leave_application_status_student",
-    # Student leave approved → student (apps/student_leaves/notifications.py).
-    "student_leaves.accepted.email":           "student_leave_accepted",
-    # Student leave submitted → batch mentor (CC module mentor/CCs/student).
-    # NB: the MSG91 template id really ends in an underscore.
-    "student_leaves.applied.email":            "student_leave_application_",
-
-    # Student portal credential + reset (student-facing).
-    "student.portal_credentials.email": "student_portal_credentials",
-    # Admin-issued temporary password — STAFF accounts only (the view
-    # skips student/parent accounts). Vars name, username, password,
-    # login_url.
-    "account.password_reset_by_admin.email": "password_reset_by_admin",
-
-    # Lead / CRM — to leads (external prospects).
-    # Vars: Student_Name, Course_Name, Application_Form_Link.
-    "lead.application_link.email": "application_form_link",
-    # Vars: Student_Name, Course_Name, Payment_Link.
-    "lead.fee_link.email":         "application_fee_payment_link_3",
-    "lead.welcome.email":          "lead_welcome",
-
-    # Admissions — application received, student copy (vars Student_Name,
-    # Course_Name, Application_ID, Submission_Date). The campus/office copy
-    # with the PDF stays on SMTP as admissions.form_submitted.email.
-    "admissions.application_submitted.email": "application_submitted_3",
-    # Undertaking (fee schedule PDF attached via MSG91 attachments) —
-    # only for institutes in UNDERTAKING_MSG91_INSTITUTES; vars
-    # StudentName, CourseName. Sent from services_undertaking directly.
-    "admissions.undertaking.email": "undertaking_institute",
-    # Lead moved to Inactive → "we'd love to stay in touch" (var First_Name).
-    "lead.inactive.email":         "inactive_lead",
-    # Lead moved to Non Responsive → follow-up (vars First_Name, Course_Name).
-    "lead.non_responsive.email":   "non_responsive",
-}
-
-# --- Email — per-trigger sender domain routing ------------------------
-#
-# The From *domain* varies by trigger, and for fee / admission mail it
-# varies by the student's course type (institute spec):
-#
-#   Diploma courses        → jdindia.com   (was jdinstitute.edu.in)
-#   Degree / Bachelors     → jdindia.com
-#   student password reset → mail.jdinstitute.com
-#   HR / leave / relieving → jdindia.com   (was jdinstitute.edu.in)
-#
-# Since 2026-11-13 every SMTP-routed trigger sends from jdindia.com via
-# Zoho; jdinstitute.edu.in (Google Workspace) is no longer a sending
-# domain. The diploma / HR knobs are kept so the split can be revived
-# per-env without a code change, but their defaults all point at
-# jdindia.com now.
-#
-# See apps/notifications/sender.py for the resolver. The provider
-# (MSG91 / SMTP) split above is orthogonal: it decides the *transport*,
-# this decides the *From domain*.
-# Whether this host can open outbound SMTP connections. PythonAnywhere
-# *free* accounts block all non-HTTP egress, so SMTP (Zoho 465 / Gmail
-# 587) can't connect there — set this False on such hosts and the
-# dispatcher downgrades SMTP-routed triggers to MSG91 (HTTPS) when a
-# template exists, keeping mail flowing. Set True on any host with full
-# outbound (local dev, paid PA, a VPS) to use the proper From domains.
-EMAIL_SMTP_OUTBOUND_ENABLED = env.bool("EMAIL_SMTP_OUTBOUND_ENABLED", default=True)
-
-EMAIL_DOMAIN_DIPLOMA = env("EMAIL_DOMAIN_DIPLOMA", default="jdindia.com")
-EMAIL_DOMAIN_DEGREE = env("EMAIL_DOMAIN_DEGREE", default="jdindia.com")
-EMAIL_DOMAIN_PORTAL = env("EMAIL_DOMAIN_PORTAL", default="mail.jdinstitute.com")
-EMAIL_DOMAIN_HR = env("EMAIL_DOMAIN_HR", default="jdindia.com")
-
-# trigger template_key → routing token. COURSE = pick diploma/degree by
-# course type; PORTAL / HR = fixed domain; any other value = literal
-# domain. Triggers absent here keep the provider's default From.
-EMAIL_SENDER_DOMAIN_POLICY = {
-    # Fees + admission, to students/parents — domain by course type.
-    # Fee link → mail.jdinstitute.com so it uses the MSG91
-    # `application_fee_payment_link_3` template (was COURSE → SMTP).
-    "lead.fee_link.email":                "PORTAL",
-    # Application link → mail.jdinstitute.com so it uses the MSG91
-    # `application_form_link` template (was COURSE → Zoho/Workspace SMTP).
-    "lead.application_link.email":         "PORTAL",
-    "fees.receipt.email":                 "COURSE",
-    "fees.application_fee_receipt.email":  "COURSE",
-    "admissions.form_submitted.email":     "COURSE",  # "admission form filled"
-    "fees.installment_undertaking.email":  "COURSE",  # installment pattern / undertaking
-    "fees.installment_pending.email":      "COURSE",  # installment-pending reminder
-    "fees.fee_link.email":                 "COURSE",  # staff-sent installment pay link
-    # Entrance-exam link → HR domain (jdindia.com via Zoho). It is the
-    # one lead-facing trigger with no MSG91 template, so it is pinned
-    # to a fixed SMTP domain rather than COURSE routing.
-    "lead.entrance_exam_link.email":       "HR",
-    # Student credentials / password reset → mail.jdinstitute.com.
-    "student.portal_credentials.email":    "PORTAL",
-    "account.password_reset_by_admin.email": "PORTAL",
-    # Student leave approved → mail.jdinstitute.com so it goes via MSG91.
-    "student_leaves.accepted.email":       "PORTAL",
-    "student_leaves.applied.email":        "PORTAL",
-    # Inactive-lead nudge → mail.jdinstitute.com so it goes via MSG91.
-    "lead.inactive.email":                 "PORTAL",
-    "lead.non_responsive.email":           "PORTAL",
-    "academics.assignment_assigned.email": "PORTAL",
-    "academics.assignment_submitted.email": "PORTAL",
-    "admissions.application_submitted.email": "PORTAL",
-    # HR / leave / relieving workflows → EMAIL_DOMAIN_HR (jdindia.com).
-    "leaves.application_employee.email":          "HR",
-    "leaves.application_status_employee.email":   "HR",
-    "leaves.application_status_student.email":    "HR",
-    "leaves.compoff_application_employee.email":  "HR",
-    "leaves.compoff_status_employee.email":       "HR",
-    "hr.relieving.application.email":             "HR",
-    "hr.relieving.application_rejected.email":     "HR",
-    "hr.relieving.application_approved.email":     "HR",
-    "hr.relieving.experience_letter.email":        "HR",
-    "hr.relieving.letter.email":                   "HR",
-}
-
-# From-address to use for each sending domain. ONLY list domains that
-# are actually verified with the transport (MSG91 cross-checks the From
-# domain against its registered senders; SMTP must be authorised to send
-# as the address). Domains absent here resolve to a blank From and the
-# dispatcher falls back to the provider default. jdindia.com does NOT
-# need an entry: it delivers over the dedicated Zoho connection below,
-# whose own from_email wins (see apps.notifications.email.send_email).
-EMAIL_SENDER_BY_DOMAIN = {
-    "mail.jdinstitute.com": env(
-        "SENDER_MAIL_JDINSTITUTE", default="admin@mail.jdinstitute.com",
-    ),
-    # Retired sending domain — kept only so a per-env override of
-    # EMAIL_DOMAIN_* back to jdinstitute.edu.in still has a hook.
-    "jdinstitute.edu.in": env("SENDER_JDINSTITUTE_EDU", default=""),
-    "jdindia.com":        env("SENDER_JDINDIA", default=""),
-}
-
-# Per-domain dedicated SMTP servers. jdindia.com delivers through its
-# own Zoho mailbox (crm@jdindia.com). When a trigger resolves (via
-# EMAIL_SENDER_DOMAIN_POLICY) to a domain listed here, the dispatcher
-# opens a dedicated SMTP connection with these credentials — this TAKES
-# PRECEDENCE over the MSG91 registry for that domain.
-#
-# Since all SMTP-routed triggers now resolve to jdindia.com, this is THE
-# transport for staff/HR/admission mail. The project-default backend
-# (EMAIL_HOST_*) should point at the same Zoho mailbox so un-policied
-# senders (tasks, undertaking, handbook, Django password reset) match.
-#
-# A domain is only active when its *_HOST env var is set; until then the
-# entry is omitted and routing falls back to MSG91 / default SMTP.
-EMAIL_SMTP_BY_DOMAIN = {}
-_jdindia_smtp_host = env("SMTP_JDINDIA_HOST", default="")
-if _jdindia_smtp_host:
-    _jdindia_user = env("SMTP_JDINDIA_USER", default="")
-    EMAIL_SMTP_BY_DOMAIN["jdindia.com"] = {
-        "host": _jdindia_smtp_host,
-        # Zoho: 465 + SSL (587 + STARTTLS also works).
-        "port": env.int("SMTP_JDINDIA_PORT", default=465),
-        "username": _jdindia_user,
-        "password": env("SMTP_JDINDIA_PASSWORD", default=""),
-        "use_tls": env.bool("SMTP_JDINDIA_USE_TLS", default=False),
-        "use_ssl": env.bool("SMTP_JDINDIA_USE_SSL", default=True),
-        # From-address recipients see; defaults to the auth username.
-        "from_email": env("SMTP_JDINDIA_FROM", default=_jdindia_user),
-    }
-# Under `manage.py test` never open a dedicated SMTP connection: the dev
-# .env carries real Zoho creds, and Django's locmem swap only covers the
-# default backend, so any test missing EMAIL_SMTP_BY_DOMAIN={} sent live
-# mail (and tripped Zoho's abuse block on 2026-11-05). Tests that need a
-# domain entry still set it with override_settings.
-if len(sys.argv) > 1 and sys.argv[1] == "test":
-    EMAIL_SMTP_BY_DOMAIN = {}
+# Configuration lives in the Django EMAIL_* settings, so every code
+# path — the notifications dispatcher, direct EmailMessage senders,
+# Django's own password-reset mail — goes through the same relay.
+# The transport settings themselves (EMAIL_HOST…, DEFAULT_FROM_EMAIL,
+# EMAIL_DEFAULT_REPLY_TO, EMAIL_REPLY_TO_POLICY) are further down,
+# after the inbox maps they refer to.
 
 # Faculty + admin daily reports freeze month-wise: month M locks on the
 # 1st of M+1 plus this many grace days (0 = strictly month-wise). A
@@ -894,12 +698,6 @@ APPLICATION_ACK_CAMPUS_INBOXES = {
 
 # Fee undertaking PDF (sent by staff from the enrollment) goes to the
 # student with the campus undertaking inbox in CC, keyed on `Campus.code`.
-# Institutes (Institute.code) whose undertaking goes via the MSG91
-# template above. The template is JDIFT-branded, so others stay on SMTP
-# until they get their own template. Empty list = everyone on SMTP.
-UNDERTAKING_MSG91_INSTITUTES = env.list(
-    "UNDERTAKING_MSG91_INSTITUTES", default=["JDIFT"],
-)
 UNDERTAKING_CAMPUS_INBOXES = {
     "BLR": env("UNDERTAKING_INBOX_BLR",
                default="undertaking.bangalore@jdinstitute.edu.in"),
@@ -926,50 +724,112 @@ RELIEVING_LETTER_SIGNATORY_TITLE = env(
     "RELIEVING_LETTER_SIGNATORY_TITLE", default="HR",
 )
 
-# Templates that *intentionally* route through SMTP — listed here so
-# the dispatcher logs a warning if someone tries to add them to
-# MSG91_EMAIL_TEMPLATES by mistake. Keep in sync with the policy above.
-SMTP_INTERNAL_TEMPLATE_KEYS = {
-    "leaves.application_employee.email",
-    "leaves.application_status_employee.email",
-    "leaves.compoff_application_employee.email",
-    "leaves.compoff_status_employee.email",
-    "hr.relieving.application.email",
-    "hr.relieving.application_rejected.email",
-    "hr.relieving.application_approved.email",
-    "hr.relieving.experience_letter.email",
-    "hr.relieving.letter.email",
-    "tasks.assigned.email",
-    "tasks.completed.email",
-    # account.password_reset_by_admin.email moved to MSG91 2026-11-06.
-}
-
-
-# --- Email — Django built-in -------------------------------------------
-
-# Default to console backend so dev works with no SMTP. Override per env
-# (Zoho, same mailbox as SMTP_JDINDIA_* so un-policied mail matches):
-#   EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
-#   EMAIL_HOST=smtp.zoho.com  EMAIL_PORT=465  EMAIL_USE_SSL=True
-#   EMAIL_HOST_USER=crm@jdindia.com  EMAIL_HOST_PASSWORD=…
+# ZeptoMail SMTP relay. Host/port/user are fixed by ZeptoMail; only the
+# token differs per Mail Agent. Prod .env needs exactly:
+#   ZEPTOMAIL_SMTP_TOKEN=<token from ZeptoMail → Mail Agent → SMTP>
+# (EMAIL_HOST_PASSWORD is accepted as an alias.) Everything else below
+# may stay at its default.
 EMAIL_BACKEND = env(
-    "EMAIL_BACKEND",
-    default="django.core.mail.backends.console.EmailBackend",
+    "EMAIL_BACKEND", default="django.core.mail.backends.smtp.EmailBackend",
 )
-EMAIL_HOST = env("EMAIL_HOST", default="localhost")
-EMAIL_PORT = env.int("EMAIL_PORT", default=25)
-EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
-EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
+EMAIL_HOST = env("EMAIL_HOST", default="smtp.zeptomail.in")
+# 465 = implicit SSL (the setup that already works from the VPS);
+# 587 + EMAIL_USE_TLS=True / EMAIL_USE_SSL=False also works.
+EMAIL_PORT = env.int("EMAIL_PORT", default=465)
+EMAIL_USE_SSL = env.bool("EMAIL_USE_SSL", default=True)
 EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=False)
-EMAIL_USE_SSL = env.bool("EMAIL_USE_SSL", default=False)
-DEFAULT_FROM_EMAIL = env(
-    "DEFAULT_FROM_EMAIL",
-    default="JD Communications <crm@jdindia.com>",
+EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="emailapikey")
+EMAIL_HOST_PASSWORD = env(
+    "ZEPTOMAIL_SMTP_TOKEN", default=env("EMAIL_HOST_PASSWORD", default=""),
 )
-# Display name applied when DEFAULT_FROM_EMAIL is just a bare address
-# or only EMAIL_HOST_USER is configured. Keeps the recipient from
-# seeing "admin.a" auto-derived from the email's local-part.
-DEFAULT_FROM_NAME = env("DEFAULT_FROM_NAME", default="JD Communications")
+EMAIL_TIMEOUT = env.int("EMAIL_TIMEOUT", default=30)
+
+# The one and only From. ZeptoMail rejects any From whose domain is not
+# verified under the Mail Agent, so this must stay on dkul.in.
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="no-reply@dkul.in")
+# Display name wrapped around DEFAULT_FROM_EMAIL when it is a bare
+# address — recipients see "JD Institute <no-reply@dkul.in>".
+DEFAULT_FROM_NAME = env("DEFAULT_FROM_NAME", default="JD Institute")
+SERVER_EMAIL = DEFAULT_FROM_EMAIL
+
+# Reply-To fallback for every mail with no specific handler (client
+# decision 2026-11-18: use the jdinstitute.edu.in admin inbox for now;
+# a dedicated enquiries inbox can replace it later via env).
+EMAIL_DEFAULT_REPLY_TO = env(
+    "EMAIL_DEFAULT_REPLY_TO", default="admin.a@jdinstitute.edu.in",
+)
+
+# trigger template_key → who handles replies. Values are either a
+# literal address or one of these tokens (resolved against the inbox
+# settings + the send context):
+#   HR_LEAVE            → LEAVES_HR_INBOX (leave / comp-off department)
+#   CAMPUS_RECEIPTS     → FEE_RECEIPT_CAMPUS_INBOXES[context.campus_code]
+#   CAMPUS_ADMISSIONS   → APPLICATION_ACK_CAMPUS_INBOXES[context.campus_code]
+#   CAMPUS_UNDERTAKING  → UNDERTAKING_CAMPUS_INBOXES[context.campus_code]
+#   PRINCIPAL           → PRINCIPAL_INBOX
+#   ACCOUNTS            → ACCOUNTS_INBOX
+#   CONTEXT             → context["reply_to"] only (no static fallback)
+# A caller can always pass `reply_to` in the context (counsellor,
+# manager, faculty, mentor…) — that wins over this table. Anything that
+# resolves blank falls back to EMAIL_DEFAULT_REPLY_TO.
+EMAIL_REPLY_TO_POLICY = {
+    # Leads / CRM — the assigned counsellor (passed in context by
+    # apps/leads/send_links.py); campus admissions inbox otherwise.
+    "lead.application_link.email":   "CAMPUS_ADMISSIONS",
+    "lead.fee_link.email":           "CAMPUS_ADMISSIONS",
+    "lead.entrance_exam_link.email": "CAMPUS_ADMISSIONS",
+    "lead.welcome.email":            "CAMPUS_ADMISSIONS",
+    "lead.inactive.email":           "CAMPUS_ADMISSIONS",
+    "lead.non_responsive.email":     "CAMPUS_ADMISSIONS",
+    "lead_welcome_email":            "CAMPUS_ADMISSIONS",
+    "hot_why_join_jd":               "CAMPUS_ADMISSIONS",
+    "campus_visit_confirmation":     "CAMPUS_ADMISSIONS",
+    "post_visit_thanks":             "CAMPUS_ADMISSIONS",
+    "not_answered_closing_soon":     "CAMPUS_ADMISSIONS",
+    "cold_drip_30":                  "CAMPUS_ADMISSIONS",
+    "cold_drip_60":                  "CAMPUS_ADMISSIONS",
+    "cold_drip_90":                  "CAMPUS_ADMISSIONS",
+    "enrolled_confirmation":         "CAMPUS_ADMISSIONS",
+
+    # Admissions — application ack / office copy / undertaking.
+    "admissions.application_submitted.email": "CAMPUS_ADMISSIONS",
+    "admissions.form_submitted.email":        "CAMPUS_ADMISSIONS",
+    "admissions.undertaking.email":           "CAMPUS_UNDERTAKING",
+    "fees.installment_undertaking.email":     "CAMPUS_UNDERTAKING",
+
+    # Fees — campus receipts inbox (accounts).
+    "fees.receipt.email":                 "CAMPUS_RECEIPTS",
+    "fees.application_fee_receipt.email": "CAMPUS_RECEIPTS",
+    "fees.fee_link.email":                "CAMPUS_RECEIPTS",
+    "fees.installment_pending.email":     "CAMPUS_RECEIPTS",
+
+    # Employee leave / comp-off → the leave department.
+    "leaves.application_employee.email":         "HR_LEAVE",
+    "leaves.application_status_employee.email":  "HR_LEAVE",
+    "leaves.compoff_application_employee.email": "HR_LEAVE",
+    "leaves.compoff_status_employee.email":      "HR_LEAVE",
+
+    # Relieving — the approver handling the application is passed in
+    # context by apps/relieving/notifications.py; Principal otherwise.
+    "hr.relieving.application.email":          "PRINCIPAL",
+    "hr.relieving.application_rejected.email": "PRINCIPAL",
+    "hr.relieving.application_approved.email": "PRINCIPAL",
+    "hr.relieving.experience_letter.email":    "PRINCIPAL",
+    "hr.relieving.letter.email":               "PRINCIPAL",
+
+    # Student leave / assignments / attendance: mentor, faculty or
+    # student passed in context by the caller; default inbox otherwise.
+    "student_leaves.applied.email":          "CONTEXT",
+    "student_leaves.accepted.email":         "CONTEXT",
+    "leaves.application_status_student.email": "CONTEXT",
+    "academics.assignment_assigned.email":   "CONTEXT",
+    "academics.assignment_submitted.email":  "CONTEXT",
+    "student_absent_email":                  "CONTEXT",
+    "parent_absent_email":                   "CONTEXT",
+
+    # Account mails (portal credentials, admin reset) and certificates
+    # intentionally have no handler — they use EMAIL_DEFAULT_REPLY_TO.
+}
 
 
 # --- django-axes --------------------------------------------------------

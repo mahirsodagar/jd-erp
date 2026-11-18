@@ -4,11 +4,14 @@
 (if a `fire_at` is given) or directly to `NotificationDispatchLog`
 (immediate). `process_due()` drains the schedule queue.
 
-On PythonAnywhere free we cannot reach external SMTP / MSG91 hostnames,
-so the dispatcher just creates a `NotificationDispatchLog` row at
-status=QUEUED. Replace `_send` once outbound is reachable.
+Email leaves through the one ZeptoMail SMTP transport
+(`apps.notifications.email.send_email`) From `no-reply@dkul.in`, with
+the Reply-To resolved per trigger (`apps.notifications.reply_to`).
+Template bodies live in `NotificationTemplate` rows; an HTML body (one
+that starts with a tag) is sent as HTML with a text fallback.
 """
 
+import re
 from datetime import datetime
 from typing import Iterable
 
@@ -20,15 +23,35 @@ from .models import (
 )
 
 
+# `{name}` (our seeded bodies) and `{{name}}` (the client's HTML
+# templates, which were written for MSG91's double-brace syntax).
+_PLACEHOLDER_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}|\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
 def _render(template_text: str, context: dict) -> str:
+    """Substitute `{var}` / `{{var}}` placeholders from `context`.
+
+    Unlike `str.format`, braces that are not a placeholder (CSS blocks
+    in an HTML template, literal `{`) pass through untouched, and an
+    unknown placeholder is left as-is rather than failing the whole
+    render — we would rather send an imperfect message than drop it.
+    """
     if not template_text:
         return ""
-    try:
-        return template_text.format(**(context or {}))
-    except (KeyError, IndexError, ValueError):
-        # Missing placeholder = fall back to literal template; we'd
-        # rather queue an imperfect message than drop it silently.
-        return template_text
+    context = context or {}
+
+    def sub(m):
+        name = m.group(1) or m.group(2)
+        if name in context:
+            v = context[name]
+            return "" if v is None else str(v)
+        return m.group(0)
+
+    return _PLACEHOLDER_RE.sub(sub, template_text)
+
+
+def _looks_html(text: str) -> bool:
+    return (text or "").lstrip()[:1] == "<"
 
 
 def _gfk_for(obj) -> tuple[ContentType | None, str]:
@@ -97,77 +120,19 @@ def queue_notification(
 
 
 def _send_email(tmpl, recipient, cc, subject, body, context) -> tuple[bool, str]:
-    """Deliver one email, choosing the transport from the resolved From
-    domain (institute domain↔service table — see sender.transport_for):
+    """Deliver one email over the ZeptoMail transport.
 
-        jdindia.com          → dedicated Zoho SMTP (all staff/HR/admission)
-        mail.jdinstitute.com → MSG91 templated API
-        <anything else>      → default SMTP (EMAIL_HOST_*, also Zoho)
-
-    A trigger with no domain policy keeps the legacy behaviour: MSG91 if
-    it's in the MSG91 template registry, else default SMTP.
+    From is fixed (no-reply@dkul.in); the Reply-To comes from the
+    per-trigger policy / the caller's context (see reply_to.py). A body
+    that is HTML goes out as HTML with a text alternative.
     """
-    from django.conf import settings
-    from .msg91 import send_msg91_template, template_for
-    from .sender import resolve_sender, transport_for
-
-    # Per-trigger From domain (course-type aware). `degree_type` is
-    # carried in the context by callers that know the student's program;
-    # absent → treated as a degree course.
-    sender = resolve_sender(tmpl.key, degree_type=context.get("degree_type", ""))
-    msg91_name = template_for(tmpl.key)
-
-    if sender is None:
-        # No domain policy → legacy routing by MSG91 registry membership.
-        if msg91_name:
-            return send_msg91_template(
-                template_name=msg91_name, recipient_email=recipient,
-                variables=context, cc=cc,
-            )
-        from .email import send_email
-        return send_email(
-            recipient=recipient, cc=cc, subject=subject, body=body,
-            is_html=False,
-        )
-
-    kind, smtp_cfg = transport_for(sender.domain)
-
-    # Hosts without SMTP egress (e.g. PythonAnywhere free tier) can't open
-    # the Zoho/Gmail connections. When SMTP is disabled, downgrade an
-    # SMTP-routed trigger back to MSG91 *if* it has a registered template,
-    # so live mail keeps flowing (from mail.jdinstitute.com) until SMTP
-    # egress is available — flip EMAIL_SMTP_OUTBOUND_ENABLED=True to send
-    # from the proper course/HR domain once the host can reach SMTP.
-    smtp_ok = getattr(settings, "EMAIL_SMTP_OUTBOUND_ENABLED", True)
-    if kind == "smtp" and not smtp_ok and msg91_name:
-        kind, smtp_cfg = "msg91", None
-
-    if kind == "msg91" and msg91_name:
-        # Only override MSG91's From when the resolved domain IS the
-        # verified MSG91 sender domain — the SMTP domain (jdindia.com)
-        # is not a valid MSG91 sender, so a downgraded
-        # trigger sends from the configured MSG91 default instead.
-        use_override = (
-            sender.is_live
-            and sender.domain == getattr(settings, "MSG91_DOMAIN", "")
-        )
-        sender_kw = (
-            {"sender_email": sender.from_email, "domain": sender.domain}
-            if use_override else {}
-        )
-        return send_msg91_template(
-            template_name=msg91_name, recipient_email=recipient,
-            variables=context, cc=cc, **sender_kw,
-        )
-
-    # SMTP — dedicated per-domain connection (smtp_cfg) or default backend.
-    # (Also reached when a MSG91-domain trigger has no registered template,
-    # or SMTP is disabled but no MSG91 template exists to downgrade to.)
     from .email import send_email
+    from .reply_to import resolve_reply_to
+
     return send_email(
         recipient=recipient, cc=cc, subject=subject, body=body,
-        is_html=False, smtp=smtp_cfg,
-        from_email=(sender.from_email if sender.is_live else ""),
+        is_html=_looks_html(tmpl.body_template),
+        reply_to=resolve_reply_to(tmpl.key, context),
     )
 
 

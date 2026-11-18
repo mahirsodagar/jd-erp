@@ -1,9 +1,8 @@
 """Dispatcher for "Send portal credentials".
 
-Routes through the notifications layer (`queue_notification`) so the
-email goes via MSG91 when `MSG91_EMAIL_TEMPLATES["student.portal_credentials.email"]`
-is registered, and falls back to plain SMTP otherwise. Either way a
-NotificationDispatchLog row is written for audit.
+Routes through the notifications layer (`queue_notification`): template
+row `student.portal_credentials.email`, ZeptoMail From no-reply@dkul.in,
+default Reply-To. A NotificationDispatchLog row is written for audit.
 """
 
 from __future__ import annotations

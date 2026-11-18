@@ -1,5 +1,6 @@
 from django.core.management.base import BaseCommand
 
+from apps.notifications.email_html import load_html
 from apps.notifications.models import NotificationTemplate as T
 
 
@@ -75,23 +76,11 @@ TEMPLATES = [
     # apps/leads/send_links.py.)
     ("lead.application_link.sms", "SMS", "",
      "Dear{name}, Thank you for selecting JD, Your inquiry has been submitted. Please click the link to complete your application - {url}"),
-    # MSG91 template `application_form_link` (vars Student_Name,
-    # Course_Name, Application_Form_Link); this body is the SMTP fallback.
+    # Vars Student_Name, Course_Name, Application_Form_Link. Client HTML
+    # (ex-MSG91 `application_form_link`) in apps/notifications/email_html/.
     ("lead.application_link.email", "EMAIL",
      "JD Institute Application Form Link",
-     "Dear {Student_Name},\n\n"
-     "Thank you for your interest in {Course_Name} at JD Institute.\n\n"
-     "You can now take the next step by completing your application form "
-     "using the link below:\n\n{Application_Form_Link}\n\n"
-     "Before you begin, please keep these ready:\n"
-     "  - Academic marksheets (10th to up to latest qualification)\n"
-     "  - Passport-size photograph with white background\n"
-     "  - Adhaar ID proof\n\n"
-     "Once you submit the form, our admissions team will review your "
-     "application and contact you with the next steps.\n\n"
-     "We look forward to welcoming you to JD Institute.\n\n"
-     "Warm regards,\nAdmissions Team\n"
-     "JD School of Design | JD Institute of Fashion Technology"),
+     load_html("lead.application_link.email")),
     # WhatsApp leg of the application-link send. XIRCLS stores the approved
     # body on their side (trigger "application_form"); this body_template
     # is only used for the dispatch-log audit row. Variables: {name}, {url}.
@@ -127,169 +116,84 @@ TEMPLATES = [
     ("lead.fee_link.wa", "WHATSAPP", "",
      "Dear {name}, Thank you for choosing JD. Click the link {url} to pay "
      "your fees and complete the admission process. — JD Admissions Team"),
-    # MSG91 template `application_fee_payment_link_3` (vars Student_Name,
-    # Course_Name, Payment_Link); this body is the SMTP fallback.
+    # Vars Student_Name, Course_Name, Payment_Link. Client HTML
+    # (ex-MSG91 `application_fee_payment_link_3`) in email_html/.
     ("lead.fee_link.email", "EMAIL",
      "Application Fee Payment Link",
-     "Dear {Student_Name},\n\n"
-     "Thank you for your interest in {Course_Name} at JD Institute.\n\n"
-     "To begin your application, please pay the application fee using "
-     "the secure link below:\n\n{Payment_Link}\n\n"
-     "Please note: the application form link will be shared with you as "
-     "soon as your payment is confirmed.\n\n"
-     "Warm regards,\nAdmissions Team\n"
-     "JD School of Design | JD Institute of Fashion Technology"),
+     load_html("lead.fee_link.email")),
+    # Var name. Client HTML (ex-MSG91 `lead_welcome`) in email_html/.
     ("lead.welcome.email", "EMAIL",
      "Welcome Note for New Students and Parents",
-     "Dear {name},\n\n"
-     "Thank you for choosing JD as the place to pursue further "
-     "education! We are happy to welcome you onboard.\n\n"
-     "Our endeavours have always been to provide our students with a "
-     "cohesive learning environment that encompasses practical and "
-     "theoretical education.\n\n"
-     "For any clarifications or queries you can reach out to your "
-     "administrative office.\n\n"
-     "See you very soon!\n\nRegards,\nJD"),
+     load_html("lead.welcome.email")),
 
     # Admin-issued password reset (Admin → Users → Reset password).
-    # Goes through MSG91 when MSG91_EMAIL_TEMPLATES has the matching
-    # key registered — otherwise falls back to plain SMTP. Variables:
+    # Variables:
     # {name}, {username}, {password}, {login_url}.
+    # Vars name, username, password, login_url. Client HTML (ex-MSG91
+    # `password_reset_by_admin`) in email_html/.
     ("account.password_reset_by_admin.email", "EMAIL",
      "Your JD ERP password has been reset",
-     "Hi {name},\n\n"
-     "An administrator has reset your JD ERP password.\n\n"
-     "You can log in using the credentials below:\n\n"
-     "  Username : {username}\n"
-     "  Password : {password}\n\n"
-     "Please change your password after logging in.\n\n"
-     "Sign in at: {login_url}\n\n"
-     "If you didn't expect this, contact the admin team.\n\n"
-     "— JD Admin"),
+     load_html("account.password_reset_by_admin.email")),
 
     # Student portal credentials (Student Detail → Reset & send creds).
     # Same routing pattern as the admin reset above. Variables:
     # {name}, {email}, {username}, {password}, {institute}, {login_url}.
+    # Vars name, institute, email, username, password, login_url. Client
+    # HTML (ex-MSG91 `student_portal_credentials`) in email_html/.
     ("student.portal_credentials.email", "EMAIL",
      "Your student portal login",
-     "Hi {name},\n\n"
-     "Welcome to {institute}. Your student portal account is ready.\n\n"
-     "You can log in using the credentials below:\n\n"
-     "  Login email : {email}\n"
-     "  Username    : {username}\n"
-     "  Password    : {password}\n\n"
-     "Please change your password after the first login.\n\n"
-     "Sign in at: {login_url}\n\n"
-     "If you didn't request this, contact your admissions office.\n\n"
-     "— JD Admissions"),
+     load_html("student.portal_credentials.email")),
 
-    # Student leave approved. Sent via MSG91 template
-    # `student_leave_accepted` (vars: Student_Name, Leave_Start_Date,
-    # Leave_End_Date, Leave_Count, Reason); this body is the SMTP fallback.
+    # Student leave approved (vars: Student_Name, Leave_Start_Date,
+    # Leave_End_Date, Leave_Count, Reason). Client HTML (ex-MSG91
+    # `student_leave_accepted`) in email_html/.
     ("student_leaves.accepted.email", "EMAIL",
      "Leave Application Accepted",
-     "Hi {Student_Name},\n\n"
-     "Your leave application has been accepted.\n\n"
-     "  Leave Start Date : {Leave_Start_Date}\n"
-     "  Leave End Date   : {Leave_End_Date}\n"
-     "  Leave Count      : {Leave_Count}\n"
-     "  Reason           : {Reason}\n\n"
-     "Regards,\nJDSD / JDINST\n\n"
-     "Note: This is an auto-generated email. Please do not reply to this email."),
+     load_html("student_leaves.accepted.email")),
 
-    # Lead moved to Inactive. MSG91 template `inactive_lead` (var First_Name).
+    # Lead moved to Inactive (var First_Name).
+    # Client HTML (ex-MSG91 `inactive_lead`) in email_html/.
     ("lead.inactive.email", "EMAIL",
      "We'd love to stay in touch | JD Institute",
-     "Dear {First_Name},\n\n"
-     "It's been a while since we last connected. If your plans have "
-     "changed, no problem at all.\n\n"
-     "If you'd like to revisit your options, just let us know and we'll "
-     "pick up where we left off.\n\n"
-     "Warm regards,\nAdmissions Team\n"
-     "JD School of Design | JD Institute of Fashion Technology"),
+     load_html("lead.inactive.email")),
 
-    # Lead moved to Non Responsive. MSG91 template `non_responsive`
-    # (vars First_Name, Course_Name).
+    # Lead moved to Non Responsive (vars First_Name, Course_Name).
+    # Client HTML (ex-MSG91 `non_responsive`) in email_html/.
     ("lead.non_responsive.email", "EMAIL",
      "JD Institute | Course Inquiry Follow-up",
-     "Dear {First_Name},\n\n"
-     "We've tried reaching you a few times and haven't been able to "
-     "connect. We understand you may be busy.\n\n"
-     "Could you let us know a convenient time to talk to further address "
-     "your queries regarding your Design course interest {Course_Name}? "
-     "If you are no longer interested, please let us know as well.\n\n"
-     "We look forward to your response.\n\n"
-     "Warm regards,\nAdmissions Team\n"
-     "JD School of Design | JD Institute of Fashion Technology"),
+     load_html("lead.non_responsive.email")),
 
-    # Application received — student copy. MSG91 template
-    # `application_submitted_3`; this body is the SMTP fallback.
+    # Application received — student copy. Vars Student_Name, Course_Name,
+    # Application_ID, Submission_Date. Client HTML (ex-MSG91
+    # `application_submitted_3`) in email_html/.
     ("admissions.application_submitted.email", "EMAIL",
      "Application Received - JD Institute",
-     "Dear {Student_Name},\n\n"
-     "Thank you for submitting your application for {Course_Name} at JD "
-     "Institute. We're pleased to confirm that your application has been "
-     "received.\n\n"
-     "Your application details\n"
-     "  Application ID     : {Application_ID}\n"
-     "  Course applied for : {Course_Name}\n"
-     "  Date of submission : {Submission_Date}\n\n"
-     "What happens next\n"
-     "  1. Our admissions team will review your application.\n"
-     "  2. Pay your College Registration Fee to reserve the seat.\n\n"
-     "Warm regards,\nAdmissions Team\n"
-     "JD School of Design | JD Institute of Fashion Technology"),
+     load_html("admissions.application_submitted.email")),
 
-    # New assignment → each student. MSG91 template `assignmentassigned`
-    # (positional VAR1..VAR5); this body is the SMTP fallback.
+    # New assignment → each student (positional VAR1..VAR5: name, subject,
+    # title, deadline, mode). Client HTML (ex-MSG91 `assignmentassigned`)
+    # in email_html/.
     ("academics.assignment_assigned.email", "EMAIL",
      "New Assignment: {VAR3}",
-     "Dear {VAR1},\n\n"
-     "This is to inform you that a new assignment has been assigned to you.\n\n"
-     "Subject: {VAR2}\n\n"
-     "Assignment Details:\n"
-     "  Assignment Title    : {VAR3}\n"
-     "  Submission Deadline : {VAR4}\n"
-     "  Submission Mode     : {VAR5}\n\n"
-     "Instructions:\n"
-     "Please ensure that you complete and submit the assignment on or "
-     "before the specified deadline. Late submissions may not be accepted.\n\n"
-     "For any queries or assistance, please contact your respective faculty.\n\n"
-     "Thanks & Regards,\nJD Institute of Fashion Technology"),
+     load_html("academics.assignment_assigned.email")),
 
-    # Student submitted an assignment → faculty. MSG91 template
-    # `assignment_submitted`; this body is the SMTP fallback.
+    # Student submitted an assignment → faculty. Interim body.
+    # Vars Faculty_Name, Student_Name, Subject_Name, Assignment_Title.
+    # Client HTML (ex-MSG91 `assignment_submitted`) in email_html/.
     ("academics.assignment_submitted.email", "EMAIL",
      "Assignment submitted: {Assignment_Title} — {Student_Name}",
-     "Dear {Faculty_Name},\n\n"
-     "This is to inform you that the assigned assessment for "
-     "{Subject_Name} has been successfully submitted by the student.\n\n"
-     "  Student Name      : {Student_Name}\n"
-     "  Subject           : {Subject_Name}\n"
-     "  Assignment Title  : {Assignment_Title}\n"
-     "  Submission Status : Successfully Submitted\n\n"
-     "Thank you.\n\n"
-     "Regards,\n{Student_Name}\nJD Institute of Fashion Technology"),
+     load_html("academics.assignment_submitted.email")),
 
-    # Student leave submitted → batch mentor. MSG91 template
-    # `student_leave_application_` (same 5 vars as accepted).
+    # Student leave submitted → batch mentor (same 5 vars as accepted).
+    # Client HTML (ex-MSG91 `student_leave_application_`) in email_html/.
     ("student_leaves.applied.email", "EMAIL",
      "Student Leave Application Submitted",
-     "Student Leave Application Submitted\n\n"
-     "A new leave application has been recorded with the following details:\n\n"
-     "  Student Name     : {Student_Name}\n"
-     "  Leave Start Date : {Leave_Start_Date}\n"
-     "  Leave End Date   : {Leave_End_Date}\n"
-     "  Total Leave Days : {Leave_Count}\n"
-     "  Reason           : {Reason}\n\n"
-     "Regards,\nJDSD / JDINST\n\n"
-     "Note: This is an auto-generated email. Please do not reply to this email."),
+     load_html("student_leaves.applied.email")),
 
     # ------------------------------------------------------------------
     # SMS templates — bodies match DLT-approved wording exactly (any
-    # drift causes BulkSMS / MSG91 to garble or reject the send).
-    # MSG91 stores its own copy of the body — the body_template here is
-    # used (a) for SMTP/BulkSMS dispatch and (b) for the audit row.
+    # drift causes the SMS gateway to garble or reject the send). The
+    # body_template here is used for BulkSMS dispatch and the audit row.
     # ------------------------------------------------------------------
 
     # Attendance — student/parent (legacy DLT variants from PHP project)

@@ -195,6 +195,8 @@ class LeadBulkMessageView(APIView):
                     subject=subject or "(no subject)",
                     body=rendered,
                     attachments=attachments or None,
+                    # Replies go to the counsellor who sent the message.
+                    reply_to=(getattr(actor, "email", "") or "").strip(),
                 )
                 row["email_status"] = "sent" if ok else "failed"
                 row["email_error"] = "" if ok else payload

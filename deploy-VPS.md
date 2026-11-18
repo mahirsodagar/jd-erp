@@ -223,7 +223,8 @@ CORS_ALLOWED_ORIGINS=...,https://jdsd.netlify.app   # + localhost dev ports
 CSRF_TRUSTED_ORIGINS=https://dkul.jediiians.com,https://jdsd.netlify.app,...
 FRONTEND_BASE_URL=https://jdsd.netlify.app
 SMS_PROVIDER=bulksms
-# MSG91 email/SMS, BulkSMS, Zoho/Gmail SMTP, DLT templates, etc.
+ZEPTOMAIL_SMTP_TOKEN=***        # the ONLY mail credential (see §10a)
+# BulkSMS, DLT templates, XIRCLS, payment gateways, etc.
 ```
 
 After editing `.env`: `systemctl restart jd-erp.service`.
@@ -272,6 +273,35 @@ Notes:
   always send a `tinyurl.com` link, never a raw URL.
 - Some "installment paid" SMS templates may be unregistered; seed them:
   `python manage.py seed_notification_templates`.
+
+---
+
+## 10a. Email (ZeptoMail)
+
+All outbound mail goes through ZeptoMail SMTP From `no-reply@dkul.in`
+(client rule since 2026-11-18: no other mailbox for auth or From).
+The only prod `.env` key needed:
+
+```bash
+ZEPTOMAIL_SMTP_TOKEN=<ZeptoMail → Mail Agents → dkul.in → SMTP → token>
+```
+
+Host/port/user/From default correctly in `settings.py`
+(`smtp.zeptomail.in:465` SSL, user `emailapikey`). Remove the old
+`EMAIL_HOST*`, `SMTP_JDINDIA_*`, `MSG91_AUTHKEY`, `DEFAULT_FROM_EMAIL`
+lines from the prod `.env` so they cannot override the defaults, then
+`systemctl restart jd-erp.service`.
+
+Test from the VPS:
+
+```bash
+test-jd-mail you@example.com                                   # plain test mail
+test-jd-mail you@example.com --reply-to leave@jdinstitute.edu.in
+test-jd-mail you@example.com --template student.portal_credentials.email
+```
+
+Replies land per trigger via Reply-To (`EMAIL_REPLY_TO_POLICY`); the
+fallback is `EMAIL_DEFAULT_REPLY_TO` (admin.a@jdinstitute.edu.in).
 
 ---
 

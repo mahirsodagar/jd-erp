@@ -1,3 +1,4 @@
+from django.db.models import Q
 from django.http import Http404, HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -1437,6 +1438,20 @@ class CertificateListCreateView(APIView):
         params = request.query_params
         if v := params.get("campus"):
             qs = qs.filter(student__campus_id=v)
+        # Program / batch = the enrollment the certificate was raised
+        # against. Portal requests always set one; a staff-raised
+        # certificate without one matches on any of the student's
+        # enrollments instead of vanishing from the filtered list.
+        if v := params.get("program"):
+            qs = qs.filter(
+                Q(enrollment__program_id=v)
+                | Q(enrollment__isnull=True, student__enrollments__program_id=v)
+            ).distinct()
+        if v := params.get("batch"):
+            qs = qs.filter(
+                Q(enrollment__batch_id=v)
+                | Q(enrollment__isnull=True, student__enrollments__batch_id=v)
+            ).distinct()
         if v := params.get("type"):
             qs = qs.filter(type=v)
         if v := params.get("status"):

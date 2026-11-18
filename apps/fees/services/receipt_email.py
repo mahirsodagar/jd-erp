@@ -32,21 +32,6 @@ def campus_inbox_for(campus) -> str:
     return (inboxes.get(code) or "").strip()
 
 
-def _transport(degree_type: str):
-    """(smtp_config, from_email) for the receipt trigger. The policy is
-    course-aware (diploma vs degree domain); MSG91 cannot carry a PDF,
-    so a MSG91 verdict falls back to the default SMTP connection."""
-    from apps.notifications.sender import resolve_sender, transport_for
-
-    sender = resolve_sender(TEMPLATE_KEY, degree_type=degree_type)
-    if sender is None:
-        return None, ""
-    kind, smtp_cfg = transport_for(sender.domain)
-    if kind != "smtp":
-        smtp_cfg = None
-    return smtp_cfg, (sender.from_email if sender.is_live else "")
-
-
 def _compose(receipt) -> tuple[str, str]:
     enrollment = receipt.enrollment
     student = enrollment.student
@@ -106,23 +91,19 @@ def send_receipt_email(receipt) -> NotificationDispatchLog | None:
             subject=subject, body=body, related_object=receipt,
         )
 
-        if not getattr(settings, "EMAIL_SMTP_OUTBOUND_ENABLED", True):
-            log.error = "SMTP outbound disabled on this host."
-            log.save(update_fields=["error"])
-            return log
-
         from django.utils import timezone
 
         from apps.notifications.email import send_email
+        from apps.notifications.reply_to import resolve_reply_to
 
         pdf = render_receipt_pdf(receipt)
-        smtp_cfg, from_email = _transport(
-            getattr(enrollment.program, "degree_type", "") or "",
-        )
+        # Replies go to the campus receipts inbox (policy CAMPUS_RECEIPTS).
         ok, detail = send_email(
             recipient=to, cc=", ".join(cc), subject=subject, body=body,
             attachments=[(f"{receipt.receipt_no}.pdf", pdf, "application/pdf")],
-            smtp=smtp_cfg, from_email=from_email,
+            reply_to=resolve_reply_to(
+                TEMPLATE_KEY, {"campus_code": enrollment.campus.code},
+            ),
         )
         log.status = (NotificationDispatchLog.Status.SENT if ok
                       else NotificationDispatchLog.Status.FAILED)

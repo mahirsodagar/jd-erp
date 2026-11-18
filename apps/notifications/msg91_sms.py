@@ -87,10 +87,9 @@ def send_msg91_sms(
     if not mobiles:
         return False, f"msg91-sms: could not normalize phone {recipient!r}"
 
-    authkey = authkey or getattr(settings, "MSG91_SMS_AUTHKEY", "") or \
-        getattr(settings, "MSG91_AUTHKEY", "")
+    authkey = authkey or getattr(settings, "MSG91_SMS_AUTHKEY", "")
     if not authkey:
-        return False, "msg91-sms: MSG91_SMS_AUTHKEY / MSG91_AUTHKEY not configured"
+        return False, "msg91-sms: MSG91_SMS_AUTHKEY not configured"
 
     sender = sender or getattr(settings, "MSG91_SMS_SENDER_ID", "") or "JDEDUC"
 

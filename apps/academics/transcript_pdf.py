@@ -514,26 +514,35 @@ def _t_grade_table(pdf: FPDF, x: float, y: float, row_h: float = 4.4) -> None:
         y += row_h
 
 
-def _t_bottom_block(pdf: FPDF, institute) -> None:
+#: Template position of the grade / signature block. The block floats up
+#: to sit just under the last table (2026-11-18, "reduce the gap"), and
+#: never below this.
+_T_BOTTOM_BLOCK_Y = 245.0
+_T_BOTTOM_GAP = 8.0
+
+
+def _t_bottom_block(pdf: FPDF, institute, top: float = _T_BOTTOM_BLOCK_Y) -> None:
     """Grade system (left) and the scrutiny / principal signatures
-    (right), at the template's fixed positions above the footer."""
+    (right). Laid out as on the template, shifted so the block starts
+    at `top`."""
+    dy = top - _T_BOTTOM_BLOCK_Y
     pdf.set_text_color(*T_NAVY)
     pdf.set_font("Helvetica", "B", 7)
-    pdf.set_xy(22, 245)
+    pdf.set_xy(22, 245 + dy)
     pdf.cell(73, 5, "GRADE SYSTEM", align="C")
-    _t_grade_table(pdf, 22, 250)
+    _t_grade_table(pdf, 22, 250 + dy)
 
     pdf.set_text_color(*T_NAVY)
     pdf.set_font("Helvetica", "B", 7.5)
-    pdf.set_xy(145, 250)
+    pdf.set_xy(145, 250 + dy)
     pdf.cell(70, 5, "Scrutinised by")
     pdf.set_draw_color(*T_RULE)
     pdf.set_line_width(0.2)
-    pdf.line(145, 259, 215, 259)
+    pdf.line(145, 259 + dy, 215, 259 + dy)
     pdf.set_font("Helvetica", "", 7)
-    pdf.set_xy(145, 260)
+    pdf.set_xy(145, 260 + dy)
     pdf.cell(70, 5, "Signature :")
-    pdf.set_xy(145, 268)
+    pdf.set_xy(145, 268 + dy)
     pdf.set_font("Helvetica", "B", 7.5)
     pdf.cell(70, 5, safe("Name : " + TRANSCRIPT_SCRUTINISED_BY))
 
@@ -542,14 +551,15 @@ def _t_bottom_block(pdf: FPDF, institute) -> None:
     from apps.common.pdf_theme import signature_path
     if sig := signature_path(institute):
         try:
-            pdf.image(sig, x=95, y=263, w=35, h=15, keep_aspect_ratio=True)
+            pdf.image(sig, x=95, y=263 + dy, w=35, h=15,
+                      keep_aspect_ratio=True)
         except Exception:  # noqa: BLE001
             pass
-    pdf.set_xy(92, 284)
+    pdf.set_xy(92, 284 + dy)
     pdf.set_text_color(*T_NAVY)
     pdf.set_font("Helvetica", "B", 7)
     pdf.cell(42, 5, safe(TRANSCRIPT_PRINCIPAL), align="C")
-    pdf.set_xy(99, 289)
+    pdf.set_xy(99, 289 + dy)
     pdf.set_font("Helvetica", "", 6.5)
     pdf.cell(28, 4, "Principal", align="C")
 
@@ -587,10 +597,15 @@ def render_transcript_pdf(student, *, only_published: bool = True) -> bytes:
              for r in sem["rows"]],
             _T_TABLE_X, y, _T_TABLE_W,
         ) + 6
+    if not doc["semesters"]:
+        y += 12
     if y > _T_TABLES_BOTTOM:
         _t_page(pdf, watermark)
         _t_footer(pdf, institute)
-    _t_bottom_block(pdf, institute)
+        y = _T_CONT_TOP
+    # Sit just under the last table; never lower than the template spot.
+    _t_bottom_block(pdf, institute,
+                    top=min(_T_BOTTOM_BLOCK_Y, y + _T_BOTTOM_GAP))
 
     return bytes(pdf.output())
 
