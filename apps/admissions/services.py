@@ -958,6 +958,25 @@ def provision_student_portal_credentials(*, student: Student) -> dict:
     }
 
 
+def sync_portal_password(user, plain_password: str) -> bool:
+    """Mirror a freshly-set password onto `Student.portal_password` when
+    `user` is a student portal account, so the staff-facing student page
+    always shows the password that currently works.
+
+    Call this right after `user.set_password(...)` from every path that
+    rotates a password (student self-service, admin reset, forgot-password
+    link, staff change-password). Parent accounts and staff accounts have
+    no plain-text copy and are left untouched. Returns True if a student
+    row was updated.
+    """
+    if user is None or not plain_password:
+        return False
+    updated = Student.objects.filter(user_account=user).exclude(
+        portal_password=plain_password,
+    ).update(portal_password=plain_password)
+    return bool(updated)
+
+
 # --- Drop Out / Re-activate --------------------------------------------
 
 LIVE_STATUSES = (Enrollment.Status.ACTIVE, Enrollment.Status.PENDING)

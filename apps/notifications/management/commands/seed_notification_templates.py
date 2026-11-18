@@ -239,14 +239,12 @@ TEMPLATES = [
     # Fees — staff-sent pay link for the next payable installment
     # (apps.fees.services.fee_link). Email only until a DLT SMS template
     # is approved.
+    # Vars Student_Name, Course_Name, Fee_type, Payment_Link (+ the older
+    # name/course/installment/amount/due_date/url). Client HTML in
+    # email_html/.
     ("fees.fee_link.email", "EMAIL",
      "{institute} — Fee payment link ({installment})",
-     "Dear {name},\n\n"
-     "Your {installment} of INR {amount} for the course {course} is due "
-     "on {due_date}.\n\n"
-     "Click the link below to pay online:\n\n{url}\n\n"
-     "Kindly ignore if the payment is already made.\n\n"
-     "Regards,\nJD Accounts Department"),
+     load_html("fees.fee_link.email")),
 
     # Fees — bulk reminder (no variables; static body)
     ("fees.bulk_reminder.sms", "SMS", "",

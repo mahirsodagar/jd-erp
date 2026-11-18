@@ -198,9 +198,11 @@ class ClientHtmlTemplateTests(TestCase):
             with self.subTest(key=key):
                 row = NotificationTemplate.objects.get(key=key)
                 self.assertEqual(row.body_template, load_html(key))
-                names = {(m.group(1) or m.group(2))
-                         for m in _PLACEHOLDER_RE.finditer(
-                             row.subject_template + row.body_template)}
+                body_names = {(m.group(1) or m.group(2))
+                              for m in _PLACEHOLDER_RE.finditer(row.body_template)}
+                subj_names = {(m.group(1) or m.group(2))
+                              for m in _PLACEHOLDER_RE.finditer(row.subject_template)}
+                names = body_names | subj_names
                 ctx = {n: f"V_{n}" for n in names}
                 log = queue_notification(template_key=key,
                                          recipient="t@example.com", context=ctx)
@@ -210,6 +212,8 @@ class ClientHtmlTemplateTests(TestCase):
                 html, mime = m.alternatives[0]
                 self.assertEqual(mime, "text/html")
                 self.assertNotIn("{{", html)
-                for n in names:
+                for n in body_names:
                     self.assertIn(f"V_{n}", html)
                     self.assertIn(f"V_{n}", m.body)   # text fallback too
+                for n in subj_names:
+                    self.assertIn(f"V_{n}", m.subject)

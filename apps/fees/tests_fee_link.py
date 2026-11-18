@@ -27,10 +27,16 @@ class SendFeeLinkTests(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        T.objects.create(
-            key="fees.fee_link.email", channel="EMAIL",
-            subject_template="{institute} — Fee payment link",
-            body_template="Dear {name}, pay {amount}: {url}",
+        # Migration 0025 seeds the client's HTML; swap in a short text
+        # body so the assertions below can read the rendered values.
+        T.objects.update_or_create(
+            key="fees.fee_link.email",
+            defaults=dict(
+                channel="EMAIL",
+                subject_template="{institute} — Fee payment link",
+                body_template="Dear {Student_Name}, pay {Fee_type} fee for "
+                              "{Course_Name} ({amount}): {Payment_Link}",
+            ),
         )
         cls.jdsd = Institute.objects.create(name="JD School of Design", code="JDSD")
         cls.jdift = Institute.objects.create(name="JD Institute of Fashion Technology", code="JDIFT")
@@ -99,6 +105,9 @@ class SendFeeLinkTests(TestCase):
         log = NotificationDispatchLog.objects.get(template_key="fees.fee_link.email")
         self.assertEqual(log.recipient, "asha@example.com")
         self.assertIn(body["url"], log.body)
+        # Client-template names are populated (Fee_type drops the word "fee").
+        self.assertIn("Dear Asha", log.body)
+        self.assertIn("pay Installment #1 fee for", log.body)
 
     def test_resend_reuses_the_same_pay_link(self):
         enrollment, *_ = self._enroll(self.jdsd)
@@ -275,3 +284,18 @@ class RowSendFeeLinkTests(SendFeeLinkTests):
             reverse("other-fee-list-create"), {"enrollment": enrollment.id},
         ).json()[0]
         self.assertFalse(row["online_payable"])
+
+
+class FeeTypeLabelTests(TestCase):
+    """`Fee_type` feeds "pay the {{Fee_type}} fee" / "Pay {{Fee_type}} Fee"
+    in the client's HTML, so the trailing word "fee" must not double up."""
+
+    def test_labels(self):
+        from apps.fees.services.fee_link import fee_type_label
+
+        self.assertEqual(fee_type_label("Registration fee"), "Registration")
+        self.assertEqual(fee_type_label("Library Fee"), "Library")
+        self.assertEqual(fee_type_label("Exam fees"), "Exam")
+        self.assertEqual(fee_type_label("Installment #2"), "Installment #2")
+        self.assertEqual(fee_type_label("  Hostel   deposit "), "Hostel deposit")
+        self.assertEqual(fee_type_label(""), "course")

@@ -13,6 +13,7 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 
+from apps.admissions.services import sync_portal_password
 from apps.audit.events import (
     record_login_failure,
     record_login_success,
@@ -120,6 +121,7 @@ class ChangePasswordView(APIView):
         new_pw = serializer.validated_data["new_password"]
         request.user.set_password(new_pw)
         request.user.save(update_fields=["password"])
+        sync_portal_password(request.user, new_pw)
         record_password_change(request, user=request.user)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -242,6 +244,8 @@ class AdminResetPasswordView(APIView):
         new_pw = serializer.validated_data["new_password"]
         target.set_password(new_pw)
         target.save(update_fields=["password"])
+        # Student accounts: keep the staff-visible copy on the student row.
+        sync_portal_password(target, new_pw)
         record_password_reset(request, actor=request.user, target=target)
 
         delivery = {
@@ -367,6 +371,7 @@ class ResetPasswordView(APIView):
         new_pw = serializer.validated_data["new_password"]
         user.set_password(new_pw)
         user.save(update_fields=["password"])
+        sync_portal_password(user, new_pw)
         record_password_reset_completed(request, target=user)
 
         # Best-effort: tell the user their password just changed.

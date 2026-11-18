@@ -124,18 +124,10 @@ def send_fee_link(*, enrollment, actor=None) -> dict:
     email_log = queue_notification(
         template_key="fees.fee_link.email",
         recipient=email,
-        context={
-            "name": student.student_name,
-            "institute": institute_label,
-            "course": program.name,
-            "installment": installment_label,
-            "amount": _money(balance),
-            "due_date": target.due_date.strftime("%d %b %Y") if target.due_date else "—",
-            "url": url,
-            # Drives the From domain via EMAIL_DOMAIN_DIPLOMA / _DEGREE (both
-            # jdindia.com since 2026-11-13). See notifications.sender.
-            "degree_type": program.degree_type,
-        },
+        context=fee_link_context(
+            enrollment, label=installment_label, amount=balance,
+            due_date=target.due_date, url=url,
+        ),
         related=enrollment,
     )
 
@@ -210,22 +202,49 @@ def _online_request(make_request, *, what: str):
         ) from e
 
 
-def _email_link(*, enrollment, email, label, amount, due_date, url) -> dict:
+def fee_type_label(label: str) -> str:
+    """`Fee_type` for the client's template, which already appends the
+    word "fee" ("pay the {{Fee_type}} fee", "Pay {{Fee_type}} Fee"):
+    "Registration fee" → "Registration", "Library Fee" → "Library",
+    "Installment #2" → "Installment #2"."""
+    text = " ".join((label or "").split())
+    if text.lower().endswith(" fee"):
+        text = text[:-4].rstrip()
+    elif text.lower().endswith(" fees"):
+        text = text[:-5].rstrip()
+    return text or "course"
+
+
+def fee_link_context(enrollment, *, label, amount, due_date, url) -> dict:
+    """Context for `fees.fee_link.email`. Carries the client template's
+    names (Student_Name, Course_Name, Fee_type, Payment_Link), the older
+    plain names, and `campus_code` so Reply-To resolves to the campus
+    receipts inbox."""
     program = enrollment.program
     _key, institute_label = _institute_bits(enrollment)
+    return {
+        "Student_Name": enrollment.student.student_name,
+        "Course_Name": program.name,
+        "Fee_type": fee_type_label(label),
+        "Payment_Link": url,
+        "name": enrollment.student.student_name,
+        "institute": institute_label,
+        "course": program.name,
+        "installment": label,
+        "amount": _money(amount),
+        "due_date": due_date.strftime("%d %b %Y") if due_date else "—",
+        "url": url,
+        "campus_code": getattr(getattr(enrollment, "campus", None), "code", "") or "",
+    }
+
+
+def _email_link(*, enrollment, email, label, amount, due_date, url) -> dict:
     email_log = queue_notification(
         template_key="fees.fee_link.email",
         recipient=email,
-        context={
-            "name": enrollment.student.student_name,
-            "institute": institute_label,
-            "course": program.name,
-            "installment": label,
-            "amount": _money(amount),
-            "due_date": due_date.strftime("%d %b %Y") if due_date else "—",
-            "url": url,
-            "degree_type": program.degree_type,
-        },
+        context=fee_link_context(
+            enrollment, label=label, amount=amount, due_date=due_date, url=url,
+        ),
         related=enrollment,
     )
     sent = getattr(email_log, "status", "") == "SENT"

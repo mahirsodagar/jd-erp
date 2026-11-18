@@ -22,6 +22,7 @@ from apps.academics.models import (
 from apps.academics.serializers import PortalLessonSerializer
 from apps.academics import test_service as test_svc
 from apps.admissions.models import Student, StudentDocument
+from apps.admissions.services import sync_portal_password
 from apps.appointments import services as appointment_svc
 from apps.appointments.models import StudentAppointment
 from apps.common.throttles import PasswordChangeThrottle
@@ -82,8 +83,11 @@ class ChangePasswordView(APIView):
         if not user.check_password(s.validated_data["current_password"]):
             return Response({"current_password": "Incorrect."},
                             status=http.HTTP_400_BAD_REQUEST)
-        user.set_password(s.validated_data["new_password"])
+        new_pw = s.validated_data["new_password"]
+        user.set_password(new_pw)
         user.save(update_fields=["password"])
+        # Keep the staff-visible plain-text copy on the student row current.
+        sync_portal_password(user, new_pw)
         return Response({"detail": "Password updated."})
 
 
