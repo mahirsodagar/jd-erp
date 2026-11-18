@@ -4,6 +4,10 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import StudentAppointment
+from .notify import (
+    notify_appointment_cancelled, notify_appointment_decided,
+    notify_appointment_requested,
+)
 
 
 @transaction.atomic
@@ -28,10 +32,12 @@ def request_appointment(*, student, reason: str,
         raise ValueError(
             f"You already have an open appointment with this {who}."
         )
-    return StudentAppointment.objects.create(
+    appt = StudentAppointment.objects.create(
         student=student, team=team or "", faculty=faculty, reason=reason,
         preferred_date=preferred_date, preferred_time=preferred_time,
     )
+    notify_appointment_requested(appt)
+    return appt
 
 
 @transaction.atomic
@@ -60,6 +66,7 @@ def decide_appointment(*, appointment: StudentAppointment, decision: str,
         "status", "scheduled_date", "scheduled_time", "venue",
         "staff_remarks", "decided_by", "decided_at", "updated_at",
     ])
+    notify_appointment_decided(appointment)
     return appointment
 
 
@@ -87,4 +94,5 @@ def cancel_appointment(*, appointment: StudentAppointment) -> StudentAppointment
         )
     appointment.status = StudentAppointment.Status.CANCELLED
     appointment.save(update_fields=["status", "updated_at"])
+    notify_appointment_cancelled(appointment)
     return appointment

@@ -144,6 +144,7 @@ def build_snapshot(*, student, enrollment, cert_type: str) -> dict:
             "father_name": student.father_name,
             "mother_name": student.mother_name,
             "application_form_id": student.application_form_id,
+            "registration_number": student.registration_number or "",
             "dob": str(student.dob) if student.dob else "",
         },
         "institute": {
@@ -169,7 +170,72 @@ def build_snapshot(*, student, enrollment, cert_type: str) -> dict:
         only_pub = (cert_type == Certificate.Type.COMPLETION)
         tr = build_transcript(student=student, only_published=only_pub)
         snap["transcript"] = tr
+    if cert_type == Certificate.Type.NO_DUES and enrollment:
+        snap["no_dues"] = _no_dues_block(student, enrollment)
     return snap
+
+
+def _no_dues_block(student, enrollment) -> dict:
+    """Data for the No Due clearance sheet: one row per subject taught
+    to the student's batch (faculty = everyone who took a scheduled
+    class in it, attendance % = present+late over scheduled slots),
+    the overall attendance %, the batch's class mentor, and the
+    accounts remark (the cert is only issued once the balance is zero).
+    Blue Book / Record submission and the hall-ticket number are not
+    tracked in the ERP and stay blank for manual fill."""
+    from django.db.models import Q
+
+    from .models import Attendance, ScheduleSlot
+
+    batch = enrollment.batch
+    slots = (ScheduleSlot.objects
+             .filter(batch=batch, status=ScheduleSlot.Status.SCHEDULED)
+             .select_related("subject", "instructor"))
+    present_q = Q(status__in=(Attendance.Status.PRESENT,
+                              Attendance.Status.LATE))
+    present_slot_ids = set(
+        Attendance.objects
+        .filter(student=student, schedule_slot__batch=batch)
+        .filter(present_q)
+        .values_list("schedule_slot_id", flat=True)
+    )
+
+    per_subject: dict[int, dict] = {}
+    total = present = 0
+    for s in slots:
+        row = per_subject.setdefault(s.subject_id, {
+            "name": s.subject.name, "code": s.subject.code,
+            "faculty": [], "total": 0, "present": 0,
+        })
+        row["total"] += 1
+        total += 1
+        if s.id in present_slot_ids:
+            row["present"] += 1
+            present += 1
+        if s.instructor_id:
+            fn = s.instructor.full_name
+            if fn and fn not in row["faculty"]:
+                row["faculty"].append(fn)
+
+    subjects = [
+        {
+            "name": r["name"],
+            "code": r["code"],
+            "faculty": ", ".join(r["faculty"]),
+            "attendance_pct": round(r["present"] / r["total"] * 100, 2)
+                              if r["total"] else None,
+        }
+        for r in sorted(per_subject.values(), key=lambda r: r["code"])
+    ]
+    mentor = batch.mentor.full_name if batch.mentor_id else ""
+    return {
+        "semester": enrollment.semester.number if enrollment.semester_id else "",
+        "subjects": subjects,
+        "overall_attendance_pct": round(present / total * 100, 2) if total else None,
+        "class_mentor": mentor,
+        "accounts_remark": "Fees cleared - no outstanding dues",
+        "hall_ticket_number": "",
+    }
 
 
 # --- PDF rendering ---------------------------------------------------
@@ -249,6 +315,12 @@ def _title_for(cert_type: str) -> str:
 
 
 def render_certificate_pdf(certificate: Certificate) -> bytes:
+    if certificate.type == Certificate.Type.NO_DUES:
+        # Client's two-page clearance sheet (no_dues_pdf.py), not the
+        # generic certificate layout.
+        from .no_dues_pdf import render_no_dues_pdf
+        return render_no_dues_pdf(certificate)
+
     snap = certificate.snapshot or {}
     student = snap.get("student", {})
     enrl = snap.get("enrollment", {})

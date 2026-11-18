@@ -1150,6 +1150,9 @@ class StudentFeedbackListCreateView(APIView):
             student = _student_of(u)
             qs = qs.filter(student=student) if student else qs.none()
         params = request.query_params
+        # Campus = the batch's campus (feedback is always tied to a batch).
+        if v := params.get("campus"):
+            qs = qs.filter(batch__campus_id=v)
         if v := params.get("instructor"):
             qs = qs.filter(instructor_id=v)
         if v := params.get("subject"):
