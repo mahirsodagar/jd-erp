@@ -3,10 +3,14 @@ no-reply@dkul.in). Every send writes a NotificationDispatchLog row
 (GFK → the application) for audit.
 
     submitted → `student_leaves.applied.email`
-                To batch mentor; CC module mentor + student's CCs + student;
-                Reply-To the student
+                To batch mentor; CC module mentor + student's CCs + student
+                + campus leave inbox; Reply-To the student
     approved  → `student_leaves.accepted.email`
-                To student; Reply-To the batch mentor
+                To student; CC campus leave inbox; Reply-To the batch mentor
+
+The campus leave inbox (settings LEAVE_CAMPUS_INBOXES, keyed on the
+student's `Campus.code` — client list 2026-11-20) is CC'd on both so
+the campus desk holds a copy.
 
 Both templates use the same variables (names must match exactly):
     Student_Name, Leave_Start_Date, Leave_End_Date, Leave_Count, Reason
@@ -38,6 +42,22 @@ def leave_context(app: StudentLeaveApplication) -> dict:
     }
 
 
+def campus_leave_inbox(app: StudentLeaveApplication) -> str:
+    """The leave inbox of the student's campus, "" when none is set."""
+    from apps.notifications.reply_to import campus_code_of, leave_inbox_for_code
+
+    return leave_inbox_for_code(campus_code_of(getattr(app, "student", None)))
+
+
+def _with_campus_inbox(app, to: str, cc: list[str]) -> list[str]:
+    """`cc` plus the campus leave inbox, unless it is already To or CC."""
+    inbox = campus_leave_inbox(app)
+    seen = {to.lower(), *(e.lower() for e in cc)}
+    if inbox and inbox.lower() not in seen:
+        cc = [*cc, inbox]
+    return cc
+
+
 def _queue(app, key, recipient, cc="", reply_to=""):
     """Never raises — a mail failure must not undo the leave action."""
     try:
@@ -64,6 +84,7 @@ def send_leave_applied(app: StudentLeaveApplication):
         if e and e.lower() not in seen:
             seen.add(e.lower())
             cc.append(e)
+    cc = _with_campus_inbox(app, to, cc)
     return _queue(app, APPLIED_KEY, to, ",".join(cc),
                   reply_to=(app.student.student_email or "").strip())
 
@@ -74,5 +95,6 @@ def send_leave_accepted(app: StudentLeaveApplication):
     if not recipient:
         log.warning("student leave %s approved but student has no email", app.pk)
         return None
-    return _queue(app, ACCEPTED_KEY, recipient,
+    cc = _with_campus_inbox(app, recipient, [])
+    return _queue(app, ACCEPTED_KEY, recipient, ",".join(cc),
                   reply_to=(app.batch_mentor_email or "").strip())

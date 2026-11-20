@@ -10,8 +10,10 @@ Fires once, on the student's first submit of the public self-fill form
 * Office copy — the mail with the application form PDF
   (`services_application_pdf.render_application_pdf`) and fee lines, To
   the campus acknowledgement inbox (`APPLICATION_ACK_CAMPUS_INBOXES`,
-  keyed on `Campus.code`), CC `OPERATIONS_INBOX`. Skipped when neither
-  inbox is configured.
+  keyed on `Campus.code`), else `OPERATIONS_INBOX`, else the academic
+  counsellor assigned to the originating lead. CC `OPERATIONS_INBOX` and
+  that counsellor (client decision 2026-11-20). Skipped only when none
+  of the three exists.
 
 Best-effort: a mail problem is logged in `NotificationDispatchLog` and
 never fails the submission itself.
@@ -110,15 +112,32 @@ def _send_student_copy(student):
         return None
 
 
+def counsellor_email_for(student) -> str:
+    """Address of the academic counsellor assigned to the lead this
+    student was promoted from (`Lead.assign_to` is a User), or ""."""
+    lead = getattr(student, "lead_origin", None)
+    counsellor = getattr(lead, "assign_to", None) if lead else None
+    return (getattr(counsellor, "email", "") or "").strip()
+
+
 def _send_office_copy(student, fee_page):
-    """Mail with the form PDF to the campus inbox (CC operations)."""
+    """Mail with the form PDF to the campus inbox, CC operations and the
+    lead's academic counsellor. With no campus inbox the mail goes To
+    operations, and failing that To the counsellor."""
     campus_email = campus_inbox_for(student.campus)
     operations = (getattr(settings, "OPERATIONS_INBOX", "") or "").strip()
-    to = campus_email or operations
-    cc = [e for e in (operations,) if e and e.lower() != to.lower()]
+    counsellor = counsellor_email_for(student)
+    to = campus_email or operations or counsellor
+    cc = []
+    for addr in (operations, counsellor):
+        if addr and addr.lower() != to.lower() and addr.lower() not in (
+            c.lower() for c in cc
+        ):
+            cc.append(addr)
     if not to:
         logger.info("Application %s: no office copy (campus %s has no inbox, "
-                    "no OPERATIONS_INBOX).", student.application_form_id,
+                    "no OPERATIONS_INBOX, no counsellor on the lead).",
+                    student.application_form_id,
                     getattr(student.campus, "code", ""))
         return None
 

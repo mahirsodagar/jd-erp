@@ -9,6 +9,7 @@ is each such user's email.
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
 
+from apps.leads.send_links import _reply_context
 from apps.leads.services import find_overdue_hot_leads
 from apps.notifications.services import queue_notification
 
@@ -50,6 +51,9 @@ class Command(BaseCommand):
                 "program": lead.program.name if lead.program else "",
                 "campus": lead.campus.name if lead.campus else "",
                 "hours": hours,
+                # Reply-To: assigned counsellor, else campus admissions
+                # inbox, else default (policy CAMPUS_ADMISSIONS).
+                **_reply_context(lead),
             }
             for mgr in _managers_for(lead):
                 queue_notification(

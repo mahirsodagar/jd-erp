@@ -11,7 +11,9 @@ header per trigger:
     application / lead mail   → the assigned counsellor, else the campus
                                 admissions inbox
     relieving                 → the approver handling the application,
-                                else the Principal's inbox
+                                else the Principal of the employee's campus
+                                (active employee with the Principal
+                                designation), else PRINCIPAL_INBOX
     student leave / assignments
                               → mentor / faculty / student (from context)
     everything else           → EMAIL_DEFAULT_REPLY_TO
@@ -63,6 +65,29 @@ def leave_inbox_for_code(campus_code: str) -> str:
     )
 
 
+def principal_inbox_for_code(campus_code: str) -> str:
+    """The Principal of a campus (client 2026-11-20): the primary email
+    of the active employee whose designation is PRINCIPAL_DESIGNATION
+    at that campus. Falls back to PRINCIPAL_INBOX when the campus is
+    unknown or has no such employee; "" when neither applies."""
+    fallback = (getattr(settings, "PRINCIPAL_INBOX", "") or "").strip()
+    code = (campus_code or "").strip()
+    if not code:
+        return fallback
+    from apps.employees.models import Employee
+
+    name = (getattr(settings, "PRINCIPAL_DESIGNATION", "") or "Principal").strip()
+    email = (
+        Employee.objects
+        .filter(campus__code__iexact=code, status=Employee.Status.ACTIVE,
+                designation__name__iexact=name)
+        .order_by("date_of_joining", "pk")
+        .values_list("email_primary", flat=True)
+        .first()
+    )
+    return (email or "").strip() or fallback
+
+
 def _from_token(token: str, context: dict) -> str:
     campus_code = (context.get("campus_code") or "")
     if token == "HR_LEAVE":
@@ -74,7 +99,7 @@ def _from_token(token: str, context: dict) -> str:
     if token == "CAMPUS_UNDERTAKING":
         return _campus_inbox("UNDERTAKING_CAMPUS_INBOXES", campus_code)
     if token == "PRINCIPAL":
-        return (getattr(settings, "PRINCIPAL_INBOX", "") or "").strip()
+        return principal_inbox_for_code(campus_code)
     if token == "ACCOUNTS":
         return (getattr(settings, "ACCOUNTS_INBOX", "") or "").strip()
     if token == "CONTEXT":

@@ -226,3 +226,57 @@ class ClientHtmlTemplateTests(TestCase):
                     self.assertIn(f"V_{n}", m.body)   # text fallback too
                 for n in subj_names:
                     self.assertIn(f"V_{n}", m.subject)
+
+
+@override_settings(
+    PRINCIPAL_DESIGNATION="Principal",
+    PRINCIPAL_INBOX="principal-fallback@jdinstitute.edu.in",
+    EMAIL_DEFAULT_REPLY_TO="webmaster@dkul.in",
+    EMAIL_REPLY_TO_POLICY={"hr.relieving.letter.email": "PRINCIPAL"},
+)
+class PrincipalReplyToTests(TestCase):
+    """Client 2026-11-20: the Principal is the active employee holding
+    the Principal designation at the mail's campus, not a fixed inbox."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from apps.employees.models import Designation, Employee
+        from apps.master.models import Campus, Institute
+        from apps.relieving.tests_notifications import make_employee
+
+        inst = Institute.objects.create(name="JDIFT", code="JDIFT")
+        cls.blr = Campus.objects.create(name="Bengaluru", code="BLR")
+        cls.goa = Campus.objects.create(name="Goa", code="GOA")
+        principal, _ = Designation.objects.get_or_create(name="Principal")
+
+        cls.head = make_employee("HEAD", institute=inst, campus=cls.blr)
+        cls.head.designation = principal
+        cls.head.save(update_fields=["designation"])
+        # A former Principal at the same campus must not be picked.
+        old = make_employee("OLDH", institute=inst, campus=cls.blr)
+        old.designation = principal
+        old.status = Employee.Status.INACTIVE
+        old.save(update_fields=["designation", "status"])
+
+    def test_campus_principal_is_used(self):
+        self.assertEqual(
+            resolve_reply_to("hr.relieving.letter.email", {"campus_code": "blr"}),
+            "head@jdinstitute.edu.in",
+        )
+
+    def test_campus_without_principal_falls_back(self):
+        self.assertEqual(
+            resolve_reply_to("hr.relieving.letter.email", {"campus_code": "GOA"}),
+            "principal-fallback@jdinstitute.edu.in",
+        )
+        self.assertEqual(
+            resolve_reply_to("hr.relieving.letter.email"),
+            "principal-fallback@jdinstitute.edu.in",
+        )
+
+    def test_explicit_approver_still_wins(self):
+        self.assertEqual(
+            resolve_reply_to("hr.relieving.letter.email",
+                             {"reply_to": "l1@jdinstitute.edu.in", "campus_code": "BLR"}),
+            "l1@jdinstitute.edu.in",
+        )

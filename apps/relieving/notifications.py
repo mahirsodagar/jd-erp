@@ -92,10 +92,17 @@ def _send(*, template: str, application, to: str, cc: str, subject: str,
     )
 
     # Reply-To = the approver handling this application (L1), unless
-    # the mail is addressed to them — then the next in the chain.
+    # the mail is addressed to them — then the next in the chain. With
+    # no approver left, the policy falls back to the Principal of the
+    # employee's campus (token PRINCIPAL reads campus_code).
+    from apps.notifications.reply_to import campus_code_of
+
     approvers = _approver_emails(application)
     handler = next((a for a in approvers if a.lower() != to.lower()), "")
-    reply_to = resolve_reply_to(template, {"reply_to": handler})
+    reply_to = resolve_reply_to(template, {
+        "reply_to": handler,
+        "campus_code": campus_code_of(getattr(application, "employee", None)),
+    })
 
     try:
         ok, detail = send_email(

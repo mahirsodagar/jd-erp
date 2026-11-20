@@ -95,3 +95,40 @@ class ApplicationAcknowledgementTests(RequiredFixture):
         (m,) = _office(mail.outbox)
         self.assertEqual(m.to, ["acknowledgement.bengaluru@jdinstitute.edu.in"])
         self.assertEqual(m.cc, ["ops@jdinstitute.edu.in"])
+
+    def _assign_counsellor(self, email="priya@jdinstitute.edu.in"):
+        from django.contrib.auth import get_user_model
+
+        user = get_user_model().objects.create_user(
+            username="priya", password="x", email=email,
+        )
+        self.lead.assign_to = user
+        self.lead.save(update_fields=["assign_to"])
+        return user
+
+    @override_settings(OPERATIONS_INBOX="ops@jdinstitute.edu.in")
+    def test_lead_counsellor_is_cced_on_office_copy(self):
+        self._assign_counsellor()
+        self.client.post(self.url, self.payload())
+        (m,) = _office(mail.outbox)
+        self.assertEqual(m.to, ["acknowledgement.bengaluru@jdinstitute.edu.in"])
+        self.assertEqual(m.cc, ["ops@jdinstitute.edu.in",
+                                "priya@jdinstitute.edu.in"])
+        # Replies still go to the campus admissions inbox, not the counsellor.
+        self.assertEqual(m.reply_to, ["acknowledgement.bengaluru@jdinstitute.edu.in"])
+        # The student copy is untouched.
+        (s,) = _student(mail.outbox)
+        self.assertEqual(s.cc, [])
+
+    @override_settings(EMAIL_DEFAULT_REPLY_TO="webmaster@dkul.in")
+    def test_counsellor_gets_office_copy_when_campus_has_no_inbox(self):
+        self.campus.code = "HYD"
+        self.campus.save(update_fields=["code"])
+        self._assign_counsellor()
+        self.client.post(self.url, self.payload())
+        self.assertEqual(len(mail.outbox), 2)
+        (m,) = _office(mail.outbox)
+        self.assertEqual(m.to, ["priya@jdinstitute.edu.in"])
+        self.assertEqual(m.cc, [])
+        self.assertEqual(m.reply_to, ["webmaster@dkul.in"])
+        self.assertTrue(m.attachments)

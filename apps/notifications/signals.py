@@ -71,6 +71,8 @@ def _outcome_handlers(lead, fu):
 def on_followup_saved(sender, instance, created, **kwargs):
     if not created or not instance.outcome_category:
         return
+    from apps.leads.send_links import _reply_context
+
     from .services import queue_notification
 
     for tmpl, recipient, fire_at, cc in _outcome_handlers(instance.lead, instance):
@@ -84,6 +86,9 @@ def on_followup_saved(sender, instance, created, **kwargs):
             "campus": instance.lead.campus.name if instance.lead.campus else "",
             "outcome": instance.outcome_category,
             "disposition": instance.outcome_disposition,
+            # Reply-To: assigned counsellor, else campus admissions inbox,
+            # else default (policy CAMPUS_ADMISSIONS).
+            **_reply_context(instance.lead),
         }
         queue_notification(
             template_key=tmpl, recipient=recipient, cc=cc,
@@ -96,10 +101,15 @@ def on_lead_created(sender, instance, created, **kwargs):
     """When a fresh lead lands, queue the welcome WA + brochure email."""
     if not created:
         return
+    from apps.leads.send_links import _reply_context
+
     from .services import queue_notification
     ctx = {
         "name": instance.name, "email": instance.email, "phone": instance.phone,
         "program": instance.program.name if instance.program else "",
+        # Reply-To: assigned counsellor, else campus admissions inbox,
+        # else default (policy CAMPUS_ADMISSIONS).
+        **_reply_context(instance),
     }
     if instance.email:
         queue_notification(

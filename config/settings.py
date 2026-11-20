@@ -672,8 +672,16 @@ DAILY_REPORT_FREEZE_GRACE_DAYS = env.int("DAILY_REPORT_FREEZE_GRACE_DAYS", defau
 # certain triggers (spec: fee receipt → +Accounts, admission filled →
 # +Operations, relieving → Ops/Principal/VP/Academic Manager). Blank =
 # not wired; the caller skips that recipient rather than erroring.
-ACCOUNTS_INBOX = env("ACCOUNTS_INBOX", default="")
-OPERATIONS_INBOX = env("OPERATIONS_INBOX", default="")
+# Client 2026-11-20: Accounts and Operations are the same operations
+# mailbox.
+ACCOUNTS_INBOX = env("ACCOUNTS_INBOX", default="operations@jdinstitute.edu.in")
+OPERATIONS_INBOX = env("OPERATIONS_INBOX", default="operations@jdinstitute.edu.in")
+# The Principal is NOT a fixed mailbox (client 2026-11-20): it is the
+# active employee holding the PRINCIPAL_DESIGNATION designation at the
+# campus of the mail's context (apps.notifications.reply_to, token
+# PRINCIPAL). PRINCIPAL_INBOX is only the fallback when that campus has
+# no such employee.
+PRINCIPAL_DESIGNATION = env("PRINCIPAL_DESIGNATION", default="Principal")
 PRINCIPAL_INBOX = env("PRINCIPAL_INBOX", default="")
 VICE_PRINCIPAL_INBOX = env("VICE_PRINCIPAL_INBOX", default="")
 ACADEMIC_MANAGER_INBOX = env("ACADEMIC_MANAGER_INBOX", default="")
@@ -683,7 +691,7 @@ ACADEMIC_MANAGER_INBOX = env("ACADEMIC_MANAGER_INBOX", default="")
 # in CC of every mail sent for that purpose, and doubles as Reply-To
 # through EMAIL_REPLY_TO_POLICY. A campus absent / blank here gets no
 # campus copy (the primary recipient still gets the mail). Override per
-# env. Campuses the client listed no inbox for are left blank on purpose.
+# env. All five campuses are covered for all four purposes.
 
 # Purpose: Fee Receipts — receipt PDF to the student, campus in CC.
 FEE_RECEIPT_CAMPUS_INBOXES = {
@@ -701,33 +709,40 @@ APPLICATION_ACK_CAMPUS_INBOXES = {
                default="acknowledgement.bengaluru@jdinstitute.edu.in"),
     "GOA": env("APPLICATION_ACK_INBOX_GOA",
                default="acknowledgement.goa@jdinstitute.edu.in"),
-    "COK": env("APPLICATION_ACK_INBOX_COK", default=""),
-    "VJY": env("APPLICATION_ACK_INBOX_VJY", default=""),
-    "HYD": env("APPLICATION_ACK_INBOX_HYD", default=""),
+    "COK": env("APPLICATION_ACK_INBOX_COK",
+               default="acknowledgement.cochin@jdinstitute.edu.in"),
+    "VJY": env("APPLICATION_ACK_INBOX_VJY",
+               default="acknowledgement.vijaywada@jdinstitute.edu.in"),
+    "HYD": env("APPLICATION_ACK_INBOX_HYD",
+               default="acknowledgement.hyderabad@jdinstitute.edu.in"),
 }
 
-# Purpose: Leaves — employee leave / comp-off mail (application to the
-# manager, decision to the employee) CCs the campus leave inbox of the
-# employee's campus. LEAVES_HR_INBOX (further up) is the fallback for a
-# campus not listed here.
+# Purpose: Leaves — student leave mail (applied → mentor, approved →
+# student) and employee leave / comp-off mail CC the leave inbox of the
+# student's / employee's campus. LEAVES_HR_INBOX (further up) is the
+# fallback for a campus not listed here.
 LEAVE_CAMPUS_INBOXES = {
     "BLR": env("LEAVE_INBOX_BLR", default="leave@jdinstitute.edu.in"),
     "GOA": env("LEAVE_INBOX_GOA", default="leave.goa@jdinstitute.edu.in"),
-    "COK": env("LEAVE_INBOX_COK", default=""),
+    "COK": env("LEAVE_INBOX_COK", default="leave.cochin@jdinstitute.edu.in"),
     "VJY": env("LEAVE_INBOX_VJY", default="leave.vijaywada@jdinstitute.edu.in"),
     "HYD": env("LEAVE_INBOX_HYD", default="leave.hyderabad@jdinstitute.edu.in"),
 }
 
-# Purpose: Undertaking — fee undertaking PDF (sent by staff from the
-# enrollment) to the student with the campus undertaking inbox in CC.
+# Purpose: Fee Payment Schedule (undertaking) — the schedule PDF (sent
+# by staff from the enrollment) to the student with the campus
+# undertaking inbox in CC.
 UNDERTAKING_CAMPUS_INBOXES = {
     "BLR": env("UNDERTAKING_INBOX_BLR",
                default="undertaking.bangalore@jdinstitute.edu.in"),
     "GOA": env("UNDERTAKING_INBOX_GOA",
                default="undertaking.goa@jdinstitute.edu.in"),
-    "COK": env("UNDERTAKING_INBOX_COK", default=""),
-    "VJY": env("UNDERTAKING_INBOX_VJY", default=""),
-    "HYD": env("UNDERTAKING_INBOX_HYD", default=""),
+    "COK": env("UNDERTAKING_INBOX_COK",
+               default="undertaking.cochin@jdinstitute.edu.in"),
+    "VJY": env("UNDERTAKING_INBOX_VJY",
+               default="undertaking.vijaywada@jdinstitute.edu.in"),
+    "HYD": env("UNDERTAKING_INBOX_HYD",
+               default="undertaking.hyderabad@jdinstitute.edu.in"),
 }
 
 # Relieving approval chain: L1–L4 per institute live in the Relieving
@@ -790,7 +805,8 @@ EMAIL_DEFAULT_REPLY_TO = env(
 #   CAMPUS_RECEIPTS     → FEE_RECEIPT_CAMPUS_INBOXES[context.campus_code]
 #   CAMPUS_ADMISSIONS   → APPLICATION_ACK_CAMPUS_INBOXES[context.campus_code]
 #   CAMPUS_UNDERTAKING  → UNDERTAKING_CAMPUS_INBOXES[context.campus_code]
-#   PRINCIPAL           → PRINCIPAL_INBOX
+#   PRINCIPAL           → active employee with the Principal designation
+#                         at context.campus_code, else PRINCIPAL_INBOX
 #   ACCOUNTS            → ACCOUNTS_INBOX
 #   CONTEXT             → context["reply_to"] only (no static fallback)
 # A caller can always pass `reply_to` in the context (counsellor,
@@ -814,6 +830,7 @@ EMAIL_REPLY_TO_POLICY = {
     "cold_drip_60":                  "CAMPUS_ADMISSIONS",
     "cold_drip_90":                  "CAMPUS_ADMISSIONS",
     "enrolled_confirmation":         "CAMPUS_ADMISSIONS",
+    "manager_overdue_hot_lead":      "CAMPUS_ADMISSIONS",
 
     # Admissions — application ack / office copy / undertaking.
     "admissions.application_submitted.email": "CAMPUS_ADMISSIONS",
