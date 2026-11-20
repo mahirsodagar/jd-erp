@@ -42,6 +42,20 @@ class DocumentRequestListView(APIView):
             qs = qs.filter(doc_type=v)
         if v := request.query_params.get("student"):
             qs = qs.filter(student_id=v)
+        # Campus / program sit on the student; batch lives on the
+        # enrollment (any enrollment in it counts — same rule as the
+        # Students list and student leaves).
+        if v := request.query_params.get("campus"):
+            qs = qs.filter(student__campus_id=v)
+        if v := request.query_params.get("program"):
+            qs = qs.filter(student__program_id=v)
+        if v := request.query_params.get("batch"):
+            from django.db.models import Exists, OuterRef
+
+            from apps.admissions.models import Enrollment
+            qs = qs.filter(Exists(Enrollment.objects.filter(
+                student=OuterRef("student_id"), batch_id=v,
+            )))
         return Response(
             DocumentRequestSerializer(qs, many=True,
                                       context={"request": request}).data

@@ -92,6 +92,16 @@ class StudentListView(APIView):
             )
         if wants_csv(request):
             return self._csv(qs, request.user)
+        # `?page=` opts into a paginated envelope (Students list page).
+        # Without it the flat, 500-capped list stays for the pickers
+        # (fees, marks, enrolments…) that load students into a dropdown.
+        if params.get("page"):
+            from apps.common.pagination import StandardPagination
+            paginator = StandardPagination()
+            page = paginator.paginate_queryset(
+                qs.order_by("-created_on", "-id"), request, view=self)
+            return paginator.get_paginated_response(
+                StudentListSerializer(page, many=True).data)
         return Response(StudentListSerializer(qs[:500], many=True).data)
 
     # Legacy JD_ERP "Student Data.csv". Columns marked sensitive are

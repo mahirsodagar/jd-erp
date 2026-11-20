@@ -439,7 +439,9 @@ class CounsellorListCreateView(APIView):
     def get(self, request):
         if not _has_perm(request, "leads.pool.view"):
             return _denied()
-        qs = _counsellor_qs()
+        # Newest counsellor first on the page. Rotation itself keeps
+        # Meta.ordering (sort_order, id) — see services.py.
+        qs = _counsellor_qs().order_by("-created_at", "-id")
         if request.query_params.get("active") == "1":
             qs = qs.filter(is_active=True)
         return Response(CounsellorSerializer(qs, many=True).data)

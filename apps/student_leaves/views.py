@@ -52,6 +52,25 @@ def _mentor_emails(user) -> list[str]:
     return emails
 
 
+def _apply_student_filters(qs, params):
+    """Campus / program / batch narrowing shared by the mentor console
+    and the report. Campus and program sit on the student; batch lives
+    on the enrollment, so any enrollment in that batch counts (same rule
+    as the Students list)."""
+    if v := params.get("campus"):
+        qs = qs.filter(student__campus_id=v)
+    if v := params.get("program"):
+        qs = qs.filter(student__program_id=v)
+    if v := params.get("batch"):
+        from django.db.models import Exists, OuterRef
+
+        from apps.admissions.models import Enrollment
+        qs = qs.filter(Exists(Enrollment.objects.filter(
+            student=OuterRef("student_id"), batch_id=v,
+        )))
+    return qs
+
+
 class StudentLeaveListView(APIView):
     """Mentor console (default): leaves whose batch mentor is the current
     user. ``?scope=all`` returns every leave for staff holding
@@ -80,6 +99,7 @@ class StudentLeaveListView(APIView):
             qs = qs.filter(status=v)
         if v := request.query_params.get("student"):
             qs = qs.filter(student_id=v)
+        qs = _apply_student_filters(qs, request.query_params)
         return Response(StudentLeaveApplicationSerializer(qs, many=True).data)
 
 
@@ -105,8 +125,7 @@ class StudentLeaveReportView(APIView):
         params = request.query_params
         if v := params.get("status"):
             qs = qs.filter(status=v)
-        if v := params.get("campus"):
-            qs = qs.filter(student__campus_id=v)
+        qs = _apply_student_filters(qs, params)
         return Response(StudentLeaveApplicationSerializer(qs[:5000], many=True).data)
 
 

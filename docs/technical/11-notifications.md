@@ -270,7 +270,7 @@ Whatsapp-Project-Key: <XIRCLS_WHATSAPP_PROJECT_KEY>  # Settings → Projects →
 | `leads/signals` (via `notifications/signals.py`) | `lead_welcome_email`, `lead_welcome_wa` on lead create; the full outcome drip on follow-up create |
 | `leads/send_links.py` | `lead.application_link.{sms,wa,email}`, `lead.fee_link.{sms,wa,email}`, `lead.welcome.email` |
 | `fees/notifications.py` | `fees.installment_paid_{student,parent}.sms` (signal), `fees.installment_due_*` (cron), `fees.bulk_reminder.sms` (command) |
-| `academics/attendance_service.py` | `student_absent_email`, `parent_absent_email`, `student_absent_wa`, `attendance.{student,parent}_absent_v2.sms` |
+| `academics/attendance_service.py` | `parent_absent_email`, `student_absent_wa`, `attendance.{student,parent}_absent_v2.sms` |
 | `admissions/services_portal_email.py` | `student.portal_credentials.email` |
 | `relieving`, `tasks`, `leaves` | Internal SMTP triggers |
 

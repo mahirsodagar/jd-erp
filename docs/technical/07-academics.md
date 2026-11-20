@@ -95,7 +95,7 @@ right key can call the service directly.
 Needs `academics.attendance.notify_absent`. For each ABSENT row it queues, with
 context `{name, subject, date, slot, campus, batch}`:
 
-- `student_absent_email` → student email
+- (no email to the student — removed 2026-11-20 on client request)
 - `parent_absent_email` → father's and mother's email (mother only if different)
 - `student_absent_wa` → student mobile
 - `attendance.student_absent_v2.sms` → student mobile

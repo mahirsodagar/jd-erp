@@ -199,12 +199,10 @@ def notify_absent_students(slot: ScheduleSlot) -> int:
             "campus": slot.batch.campus.name,
             "batch": slot.batch.name,
         }
-        if s.student_email:
-            queue_notification(
-                template_key="student_absent_email",
-                recipient=s.student_email, context=ctx, related=a,
-            )
-            n += 1
+        # No email to the student for an absence (client decision,
+        # 2026-11-20) — they get WhatsApp + SMS below; email goes to
+        # parents only. The `student_absent_email` template stays seeded
+        # so old dispatch-log rows still resolve.
         if s.father_email:
             queue_notification(
                 template_key="parent_absent_email",
