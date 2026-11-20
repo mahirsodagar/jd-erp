@@ -104,7 +104,7 @@ class BatchDownloadTests(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res["Content-Type"], "application/pdf")
         self.assertTrue(res.content.startswith(b"%PDF"))
-        self.assertIn("JD-2", res["Content-Disposition"])
+        self.assertIn("Shortage_of_Attendance.pdf", res["Content-Disposition"])
 
     def test_no_letter_above_threshold(self):
         self.assertEqual(self._letter(student=self.good.pk).status_code, 400)

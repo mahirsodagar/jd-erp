@@ -10,8 +10,9 @@ from apps.notifications.services import _looks_html, _render
 
 
 @override_settings(
-    EMAIL_DEFAULT_REPLY_TO="admin.a@jdinstitute.edu.in",
+    EMAIL_DEFAULT_REPLY_TO="webmaster@dkul.in",
     LEAVES_HR_INBOX="leave@jdinstitute.edu.in",
+    LEAVE_CAMPUS_INBOXES={"GOA": "leave.goa@jdinstitute.edu.in", "COK": ""},
     PRINCIPAL_INBOX="principal@jdinstitute.edu.in",
     FEE_RECEIPT_CAMPUS_INBOXES={"BLR": "dkul.receipts@jdinstitute.edu.in", "HYD": ""},
     APPLICATION_ACK_CAMPUS_INBOXES={"BLR": "acknowledgement.bengaluru@jdinstitute.edu.in"},
@@ -35,6 +36,14 @@ class ResolveReplyToTests(SimpleTestCase):
     def test_department_token(self):
         self.assertEqual(resolve_reply_to("leaves.application_employee.email"),
                          "leave@jdinstitute.edu.in")
+        # Leave is campus-wise (client list 2026-11-20): the campus inbox
+        # when one is set, the HR fallback otherwise.
+        self.assertEqual(
+            resolve_reply_to("leaves.application_employee.email", {"campus_code": "goa"}),
+            "leave.goa@jdinstitute.edu.in")
+        self.assertEqual(
+            resolve_reply_to("leaves.application_employee.email", {"campus_code": "COK"}),
+            "leave@jdinstitute.edu.in")
         self.assertEqual(resolve_reply_to("hr.relieving.letter.email"),
                          "principal@jdinstitute.edu.in")
 
@@ -45,14 +54,14 @@ class ResolveReplyToTests(SimpleTestCase):
                          "acknowledgement.bengaluru@jdinstitute.edu.in")
         # Campus with no inbox → default.
         self.assertEqual(resolve_reply_to("fees.receipt.email", {"campus_code": "HYD"}),
-                         "admin.a@jdinstitute.edu.in")
+                         "webmaster@dkul.in")
 
     def test_literal_address_and_fallbacks(self):
         self.assertEqual(resolve_reply_to("some.literal.email"), "desk@example.com")
         self.assertEqual(resolve_reply_to("student_leaves.applied.email"),
-                         "admin.a@jdinstitute.edu.in")
-        self.assertEqual(resolve_reply_to("unknown.key"), "admin.a@jdinstitute.edu.in")
-        self.assertEqual(resolve_reply_to(""), "admin.a@jdinstitute.edu.in")
+                         "webmaster@dkul.in")
+        self.assertEqual(resolve_reply_to("unknown.key"), "webmaster@dkul.in")
+        self.assertEqual(resolve_reply_to(""), "webmaster@dkul.in")
 
 
 class RenderTests(SimpleTestCase):
@@ -95,7 +104,7 @@ class RenderTests(SimpleTestCase):
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
     DEFAULT_FROM_EMAIL="no-reply@dkul.in",
     DEFAULT_FROM_NAME="JD Institute",
-    EMAIL_DEFAULT_REPLY_TO="admin.a@jdinstitute.edu.in",
+    EMAIL_DEFAULT_REPLY_TO="webmaster@dkul.in",
 )
 class SendEmailTests(TestCase):
     def test_from_is_always_the_noreply_sender(self):
@@ -104,7 +113,7 @@ class SendEmailTests(TestCase):
         self.assertTrue(ok, detail)
         m = mail.outbox[0]
         self.assertEqual(m.from_email, "JD Institute <no-reply@dkul.in>")
-        self.assertEqual(m.reply_to, ["admin.a@jdinstitute.edu.in"])
+        self.assertEqual(m.reply_to, ["webmaster@dkul.in"])
 
     @override_settings(DEFAULT_FROM_EMAIL="JD Communications <no-reply@dkul.in>")
     def test_display_name_in_setting_is_kept(self):
@@ -141,7 +150,7 @@ class SendEmailTests(TestCase):
 @override_settings(
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
     DEFAULT_FROM_EMAIL="no-reply@dkul.in",
-    EMAIL_DEFAULT_REPLY_TO="admin.a@jdinstitute.edu.in",
+    EMAIL_DEFAULT_REPLY_TO="webmaster@dkul.in",
 )
 class ClientHtmlTemplateTests(TestCase):
     """The client's ex-MSG91 HTML (apps/notifications/email_html/) is the

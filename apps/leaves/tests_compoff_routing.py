@@ -88,6 +88,22 @@ class CompOffRoutingTests(TestCase):
         r = self._client(far_user).get("/api/leaves/manager-options/")
         self.assertEqual([m["email"] for m in r.json()["managers"]], [])
 
+    @override_settings(
+        LEAVE_CAMPUS_INBOXES={"MAIN": "leave.main@jdinstitute.edu.in"},
+        EMAIL_REPLY_TO_POLICY={
+            "leaves.compoff_application_employee.email": "HR_LEAVE",
+        },
+    )
+    def test_copies_the_campus_leave_inbox_when_one_is_set(self):
+        """Client list 2026-11-20: the leave inbox is campus-wise; the
+        employee's campus decides which one is in CC (and Reply-To)."""
+        r = self._apply(self.user, cc_emails="peer@jdinstitute.edu.in")
+        self.assertEqual(r.status_code, 201, r.content)
+        msg = mail.outbox[-1]
+        self.assertEqual(msg.cc, ["peer@jdinstitute.edu.in",
+                                  "leave.main@jdinstitute.edu.in"])
+        self.assertEqual(msg.reply_to, ["leave.main@jdinstitute.edu.in"])
+
     def test_defaults_to_reporting_manager_and_copies_hr(self):
         r = self._apply(self.user, cc_emails="peer@jdinstitute.edu.in")
         self.assertEqual(r.status_code, 201, r.content)
@@ -116,7 +132,8 @@ class CompOffRoutingTests(TestCase):
         ok = self._client(self.other_user).patch(
             f"{URL}{co_id}/decision/", {"status": 2}, format="json")
         self.assertEqual(ok.status_code, 200, ok.content)
-        self.assertEqual(mail.outbox[-1].cc, [self.other.email_primary])
+        # Decision mail: the deciding manager + the leave inbox in CC.
+        self.assertEqual(mail.outbox[-1].cc, [self.other.email_primary, HR_INBOX])
 
     def test_manager_change_does_not_reroute_pending(self):
         co_id = self._apply(self.user).json()["id"]

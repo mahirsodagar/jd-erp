@@ -205,6 +205,9 @@ SIMPLE_JWT = {
 
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
 CORS_ALLOW_CREDENTIALS = True
+# The web app reads the server-chosen download filename (public receipt
+# page has no payer name of its own); browsers hide the header otherwise.
+CORS_EXPOSE_HEADERS = ["Content-Disposition"]
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
 
 
@@ -675,36 +678,56 @@ PRINCIPAL_INBOX = env("PRINCIPAL_INBOX", default="")
 VICE_PRINCIPAL_INBOX = env("VICE_PRINCIPAL_INBOX", default="")
 ACADEMIC_MANAGER_INBOX = env("ACADEMIC_MANAGER_INBOX", default="")
 
-# Fee receipt PDF is emailed to the student with the campus receipts
-# inbox in CC, keyed on `Campus.code`. A campus absent / blank here gets
-# no campus copy (the student copy still goes). Override per env.
+# Campus-wise CC inboxes (client list, 2026-11-20). Each map is keyed
+# on `Campus.code` (BLR, GOA, COK, VJY, HYD); the matching inbox is put
+# in CC of every mail sent for that purpose, and doubles as Reply-To
+# through EMAIL_REPLY_TO_POLICY. A campus absent / blank here gets no
+# campus copy (the primary recipient still gets the mail). Override per
+# env. Campuses the client listed no inbox for are left blank on purpose.
+
+# Purpose: Fee Receipts — receipt PDF to the student, campus in CC.
 FEE_RECEIPT_CAMPUS_INBOXES = {
     "BLR": env("FEE_RECEIPT_INBOX_BLR", default="dkul.receipts@jdinstitute.edu.in"),
     "GOA": env("FEE_RECEIPT_INBOX_GOA", default="dkul.goareceipts@jdinstitute.edu.in"),
-    "HYD": env("FEE_RECEIPT_INBOX_HYD", default=""),
-    "VJY": env("FEE_RECEIPT_INBOX_VJY", default=""),
+    "COK": env("FEE_RECEIPT_INBOX_COK", default="dkul.cochinreceipts@jdinstitute.edu.in"),
+    "VJY": env("FEE_RECEIPT_INBOX_VJY", default="dkul.vijaywadareceipts@jdinstitute.edu.in"),
+    "HYD": env("FEE_RECEIPT_INBOX_HYD", default="dkul.hyderabadreceipts@jdinstitute.edu.in"),
 }
 
-# Application form acknowledgement (PDF of the submitted form) goes to
-# the student with the campus inbox in CC, keyed on `Campus.code`.
+# Purpose: Acknowledgement — application form PDF (office copy) to the
+# campus acknowledgement inbox; student copy replies there too.
 APPLICATION_ACK_CAMPUS_INBOXES = {
     "BLR": env("APPLICATION_ACK_INBOX_BLR",
                default="acknowledgement.bengaluru@jdinstitute.edu.in"),
     "GOA": env("APPLICATION_ACK_INBOX_GOA",
                default="acknowledgement.goa@jdinstitute.edu.in"),
-    "HYD": env("APPLICATION_ACK_INBOX_HYD", default=""),
+    "COK": env("APPLICATION_ACK_INBOX_COK", default=""),
     "VJY": env("APPLICATION_ACK_INBOX_VJY", default=""),
+    "HYD": env("APPLICATION_ACK_INBOX_HYD", default=""),
 }
 
-# Fee undertaking PDF (sent by staff from the enrollment) goes to the
-# student with the campus undertaking inbox in CC, keyed on `Campus.code`.
+# Purpose: Leaves — employee leave / comp-off mail (application to the
+# manager, decision to the employee) CCs the campus leave inbox of the
+# employee's campus. LEAVES_HR_INBOX (further up) is the fallback for a
+# campus not listed here.
+LEAVE_CAMPUS_INBOXES = {
+    "BLR": env("LEAVE_INBOX_BLR", default="leave@jdinstitute.edu.in"),
+    "GOA": env("LEAVE_INBOX_GOA", default="leave.goa@jdinstitute.edu.in"),
+    "COK": env("LEAVE_INBOX_COK", default=""),
+    "VJY": env("LEAVE_INBOX_VJY", default="leave.vijaywada@jdinstitute.edu.in"),
+    "HYD": env("LEAVE_INBOX_HYD", default="leave.hyderabad@jdinstitute.edu.in"),
+}
+
+# Purpose: Undertaking — fee undertaking PDF (sent by staff from the
+# enrollment) to the student with the campus undertaking inbox in CC.
 UNDERTAKING_CAMPUS_INBOXES = {
     "BLR": env("UNDERTAKING_INBOX_BLR",
                default="undertaking.bangalore@jdinstitute.edu.in"),
     "GOA": env("UNDERTAKING_INBOX_GOA",
                default="undertaking.goa@jdinstitute.edu.in"),
-    "HYD": env("UNDERTAKING_INBOX_HYD", default=""),
+    "COK": env("UNDERTAKING_INBOX_COK", default=""),
     "VJY": env("UNDERTAKING_INBOX_VJY", default=""),
+    "HYD": env("UNDERTAKING_INBOX_HYD", default=""),
 }
 
 # Relieving approval chain: L1–L4 per institute live in the Relieving
@@ -753,16 +776,17 @@ DEFAULT_FROM_NAME = env("DEFAULT_FROM_NAME", default="JD Institute")
 SERVER_EMAIL = DEFAULT_FROM_EMAIL
 
 # Reply-To fallback for every mail with no specific handler (client
-# decision 2026-11-18: use the jdinstitute.edu.in admin inbox for now;
-# a dedicated enquiries inbox can replace it later via env).
+# decision 2026-11-20: webmaster@dkul.in; replaced the interim
+# admin.a@jdinstitute.edu.in). Overridable via env.
 EMAIL_DEFAULT_REPLY_TO = env(
-    "EMAIL_DEFAULT_REPLY_TO", default="admin.a@jdinstitute.edu.in",
+    "EMAIL_DEFAULT_REPLY_TO", default="webmaster@dkul.in",
 )
 
 # trigger template_key → who handles replies. Values are either a
 # literal address or one of these tokens (resolved against the inbox
 # settings + the send context):
-#   HR_LEAVE            → LEAVES_HR_INBOX (leave / comp-off department)
+#   HR_LEAVE            → LEAVE_CAMPUS_INBOXES[context.campus_code],
+#                         else LEAVES_HR_INBOX (leave / comp-off dept.)
 #   CAMPUS_RECEIPTS     → FEE_RECEIPT_CAMPUS_INBOXES[context.campus_code]
 #   CAMPUS_ADMISSIONS   → APPLICATION_ACK_CAMPUS_INBOXES[context.campus_code]
 #   CAMPUS_UNDERTAKING  → UNDERTAKING_CAMPUS_INBOXES[context.campus_code]

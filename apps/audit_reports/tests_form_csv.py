@@ -54,7 +54,7 @@ class FormResponsesCsvTests(TestCase):
     def test_one_row_per_submission_one_column_per_question(self):
         r = self._csv(self.auditor)
         self.assertEqual(r.status_code, 200, r.content)
-        self.assertIn("Lab Safety _ Q3 - Responses.csv", r["Content-Disposition"])
+        self.assertIn("Lab_Safety_Q3_-_Responses.csv", r["Content-Disposition"])
         body = r.content.decode("utf-8-sig")
         rows = list(csv.reader(io.StringIO(body)))
         self.assertEqual(rows[0], ["Sr No", "Submitted by", "Emp code", "Submitted on",

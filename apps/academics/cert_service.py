@@ -146,6 +146,14 @@ def build_snapshot(*, student, enrollment, cert_type: str) -> dict:
             "application_form_id": student.application_form_id,
             "registration_number": student.registration_number or "",
             "dob": str(student.dob) if student.dob else "",
+            "gender": student.gender or "",
+        },
+        # Permanent address — the Bonafide letter quotes it verbatim.
+        "address": {
+            "line": " ".join((student.permanent_address or "").split()),
+            "city": student.permanent_city.name if student.permanent_city_id else "",
+            "state": student.permanent_state.name if student.permanent_state_id else "",
+            "pincode": student.permanent_pincode or "",
         },
         "institute": {
             "name": student.institute.name,
@@ -162,6 +170,14 @@ def build_snapshot(*, student, enrollment, cert_type: str) -> dict:
             "program": enrollment.program.name,
             "batch": enrollment.batch.name,
             "academic_year": enrollment.academic_year.code,
+            "academic_year_full": enrollment.academic_year.full_name or "",
+            # Program affiliation — the Course Completion letter quotes it.
+            "university": (enrollment.program.university.name
+                           if enrollment.program.university_id else ""),
+            "degree": (enrollment.program.degree.name
+                       if enrollment.program.degree_id else ""),
+            "degree_type": enrollment.program.degree_type or "",
+            "id_card_affiliation": enrollment.program.id_card_affiliation or "",
             "status": enrollment.get_status_display(),
             "entry_date": str(enrollment.entry_date) if enrollment.entry_date else "",
         }
@@ -348,6 +364,14 @@ def render_certificate_pdf(certificate: Certificate) -> bytes:
         # generic certificate layout.
         from .no_dues_pdf import render_no_dues_pdf
         return render_no_dues_pdf(certificate)
+    if certificate.type == Certificate.Type.BONAFIDE:
+        # Client's Bookman letter template (bonafide_pdf.py).
+        from .bonafide_pdf import render_bonafide_pdf
+        return render_bonafide_pdf(certificate)
+    if certificate.type == Certificate.Type.COMPLETION:
+        # Client's "CCC UG/PG" letter template (completion_pdf.py).
+        from .completion_pdf import render_completion_pdf
+        return render_completion_pdf(certificate)
 
     snap = certificate.snapshot or {}
     student = snap.get("student", {})

@@ -48,7 +48,7 @@ class EmployeeIdCardTests(TestCase):
         r = c.get(f"/api/employees/{self.jdift_emp.id}/id-card.pdf")
         self.assertEqual(r.status_code, 200, r.content[:200])
         self.assertEqual(r["Content-Type"], "application/pdf")
-        self.assertIn("id-card-JUGAL.pdf", r["Content-Disposition"])
+        self.assertIn("Jugal_ID_Card.pdf", r["Content-Disposition"])
 
     def test_endpoint_needs_the_id_card_key(self):
         c = APIClient()

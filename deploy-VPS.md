@@ -301,7 +301,7 @@ test-jd-mail you@example.com --template student.portal_credentials.email
 ```
 
 Replies land per trigger via Reply-To (`EMAIL_REPLY_TO_POLICY`); the
-fallback is `EMAIL_DEFAULT_REPLY_TO` (admin.a@jdinstitute.edu.in).
+fallback is `EMAIL_DEFAULT_REPLY_TO` (webmaster@dkul.in).
 
 ---
 

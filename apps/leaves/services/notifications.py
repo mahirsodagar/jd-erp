@@ -2,9 +2,11 @@
 
 Every send is recorded in `EmailDispatchLog` *and* handed to the real
 transport: `apps.notifications.email.send_email` (ZeptoMail, From
-no-reply@dkul.in). Replies go to the leave department
-(`LEAVES_HR_INBOX`, policy token HR_LEAVE) — the address is used only
-as Reply-To, never as the sender.
+no-reply@dkul.in). Every leave / comp-off mail CCs the leave inbox of
+the employee's campus (`LEAVE_CAMPUS_INBOXES`, client list 2026-11-20,
+`LEAVES_HR_INBOX` as fallback) and replies go there too (policy token
+HR_LEAVE) — the address is used only as CC / Reply-To, never as the
+sender.
 
 A row therefore reflects what actually happened:
   sent   — the transport accepted the message,
@@ -24,6 +26,36 @@ from apps.notifications.models import InAppNotification
 
 
 HR_INBOX = getattr(settings, "LEAVES_HR_INBOX", "leave@jdinstitute.edu.in")
+
+
+def leave_inbox_for(employee) -> str:
+    """The leave inbox CC'd on this employee's leave / comp-off mail: the
+    campus leave inbox (settings LEAVE_CAMPUS_INBOXES, keyed on
+    `Campus.code` — client list 2026-11-20), else LEAVES_HR_INBOX."""
+    from apps.notifications.reply_to import campus_code_of, leave_inbox_for_code
+
+    return leave_inbox_for_code(campus_code_of(employee)) or HR_INBOX
+
+
+def _campus_context(employee, **extra) -> dict:
+    """Send context carrying the employee's campus so the Reply-To policy
+    (token HR_LEAVE) lands on the same campus inbox as the CC."""
+    from apps.notifications.reply_to import campus_code_of
+
+    return {"campus_code": campus_code_of(employee), **extra}
+
+
+def _cc(*parts: str) -> str:
+    """Comma-joined CC list, blanks dropped, duplicates (case-insensitive)
+    collapsed, order kept."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for part in parts:
+        for addr in _split_emails(part):
+            if addr.lower() not in seen:
+                seen.add(addr.lower())
+                out.append(addr)
+    return ", ".join(out)
 
 # Trigger keys registered in settings.EMAIL_REPLY_TO_POLICY (HR_LEAVE).
 TPL_LEAVE_APPLIED = "leaves.application_employee.email"
@@ -94,7 +126,6 @@ def notify_leave_applied(application) -> None:
               f"{application.to_date} ({application.count} day(s))."),
         link="/leaves/team", exclude_user=emp.user_account,
     )
-    cc_list = _split_emails(application.cc_emails) + [HR_INBOX]
     body = (
         f"{emp.full_name} ({emp.emp_code}) has applied for "
         f"{application.leave_type.name}.\n"
@@ -106,16 +137,17 @@ def notify_leave_applied(application) -> None:
     send_email_now(
         template=TPL_LEAVE_APPLIED,
         to=application.manager_email,
-        cc=", ".join(cc_list),
+        cc=_cc(application.cc_emails, leave_inbox_for(emp)),
         subject=f"Leave application — {emp.full_name} ({application.from_date})",
         body=body,
         application=application,
-        context={
-            "employee_id": emp.id, "leave_type": application.leave_type.code,
-            "from_date": str(application.from_date),
-            "to_date": str(application.to_date),
-            "count": str(application.count),
-        },
+        context=_campus_context(
+            emp,
+            employee_id=emp.id, leave_type=application.leave_type.code,
+            from_date=str(application.from_date),
+            to_date=str(application.to_date),
+            count=str(application.count),
+        ),
     )
 
 
@@ -133,7 +165,7 @@ def notify_leave_decision(application) -> None:
     send_email_now(
         template=TPL_LEAVE_DECISION,
         to=emp.email_primary,
-        cc=application.manager_email,
+        cc=_cc(application.manager_email, leave_inbox_for(emp)),
         subject=f"Leave {decision} — {application.from_date}",
         body=(
             f"Your leave application ({application.from_date} → "
@@ -141,7 +173,7 @@ def notify_leave_decision(application) -> None:
             f"Remarks: {application.approver_remarks or '(none)'}"
         ),
         application=application,
-        context={"decision": decision},
+        context=_campus_context(emp, decision=decision),
     )
 
 
@@ -154,11 +186,13 @@ def notify_compoff_applied(compoff) -> None:
         body=f"Worked on {compoff.worked_date}, earning {compoff.count} day(s).",
         link="/leaves/comp-off", exclude_user=emp.user_account,
     )
-    cc_list = _split_emails(compoff.cc_emails) + [HR_INBOX]
+    inbox = leave_inbox_for(emp)
+    to = compoff.manager_email or inbox
     send_email_now(
         template=TPL_COMPOFF_APPLIED,
-        to=compoff.manager_email or HR_INBOX,
-        cc=", ".join(cc_list),
+        to=to,
+        # No manager on file → the inbox is already the To; don't CC it too.
+        cc=_cc(compoff.cc_emails, inbox if to != inbox else ""),
         subject=f"Comp-off application — {emp.full_name} ({compoff.worked_date})",
         body=(
             f"{emp.full_name} ({emp.emp_code}) has applied for comp-off.\n"
@@ -168,6 +202,7 @@ def notify_compoff_applied(compoff) -> None:
             f"Reason: {compoff.reason}"
         ),
         compoff=compoff,
+        context=_campus_context(emp),
     )
 
 
@@ -184,11 +219,12 @@ def notify_compoff_decision(compoff) -> None:
     send_email_now(
         template=TPL_COMPOFF_DECISION,
         to=emp.email_primary,
-        cc=compoff.manager_email,
+        cc=_cc(compoff.manager_email, leave_inbox_for(emp)),
         subject=f"Comp-off {decision} — {compoff.worked_date}",
         body=(
             f"Your comp-off for {compoff.worked_date} has been {decision}.\n"
             f"Remarks: {compoff.approver_remarks or '(none)'}"
         ),
         compoff=compoff,
+        context=_campus_context(emp, decision=decision),
     )

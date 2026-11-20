@@ -35,6 +35,7 @@ from .services import (
 from .services_handbook import send_handbook_email
 from .services_idcard import render_id_card
 from .services_undertaking import render_undertaking_pdf, send_undertaking
+from apps.common.filenames import content_disposition
 
 
 # --- HR-facing student endpoints ---------------------------------------
@@ -248,9 +249,9 @@ class StudentIdCardView(APIView):
         self.check_object_permissions(request, student)
         pdf = render_id_card(student)
         resp = HttpResponse(pdf, content_type="application/pdf")
-        name = (student.registration_number or student.application_form_id
-                or student.pk)
-        resp["Content-Disposition"] = f'inline; filename="id-card-{name}.pdf"'
+        name = (student.student_name or student.registration_number
+                or student.application_form_id or student.pk)
+        resp["Content-Disposition"] = content_disposition([name, "ID Card"], ".pdf", inline=True)
         return resp
 
 
@@ -579,8 +580,10 @@ class EnrollmentUndertakingPdfView(_UndertakingMixin, APIView):
             ),
         )
         resp = HttpResponse(pdf, content_type="application/pdf")
-        name = enrollment.student.application_form_id or enrollment.id
-        resp["Content-Disposition"] = f'inline; filename="fee-payment-schedule-{name}.pdf"'
+        name = (enrollment.student.student_name
+                or enrollment.student.application_form_id or enrollment.id)
+        resp["Content-Disposition"] = content_disposition(
+            [name, "Fee Payment Schedule"], ".pdf", inline=True)
         return resp
 
 

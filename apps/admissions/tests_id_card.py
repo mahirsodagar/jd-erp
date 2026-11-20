@@ -184,7 +184,7 @@ class IdCardTests(TestCase):
         r = c.get(url)
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r["Content-Type"], "application/pdf")
-        self.assertIn("id-card-", r["Content-Disposition"])
+        self.assertIn("_ID_Card.pdf", r["Content-Disposition"])
 
     def test_batch_endpoint(self):
         self._student("A", self.jdsd, self.p_jdsd, self.b_jdsd)
@@ -203,4 +203,4 @@ class IdCardTests(TestCase):
         r = c.get(url)
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r["Content-Type"], "application/pdf")
-        self.assertIn("id-cards.pdf", r["Content-Disposition"])
+        self.assertIn("_ID_Cards.pdf", r["Content-Disposition"])

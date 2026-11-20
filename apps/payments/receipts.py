@@ -75,7 +75,18 @@ def receipt_pdf_for_request(pr: PaymentRequest) -> tuple[bytes, str] | None:
     return None
 
 
-def pdf_response(pdf: bytes, receipt_no: str) -> HttpResponse:
+def payer_name(pr: PaymentRequest) -> str:
+    """Student or lead name the receipt file is named after."""
+    if pr.student_id:
+        return pr.student.student_name
+    if pr.lead_id:
+        return pr.lead.name
+    return ""
+
+
+def pdf_response(pdf: bytes, receipt_no: str, payer: str = "") -> HttpResponse:
+    from apps.common.filenames import content_disposition
+
     resp = HttpResponse(pdf, content_type="application/pdf")
-    resp["Content-Disposition"] = f'attachment; filename="{receipt_no}.pdf"'
+    resp["Content-Disposition"] = content_disposition([payer, receipt_no], ".pdf")
     return resp

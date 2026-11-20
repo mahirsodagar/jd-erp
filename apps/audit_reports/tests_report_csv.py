@@ -92,7 +92,7 @@ class ReportCsvTests(TestCase):
         r = c.get(reverse("student-feedback-list-create"), {"output": "csv"})
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r["Content-Type"], "text/csv; charset=utf-8")
-        self.assertIn('filename="Student Feedback.csv"', r["Content-Disposition"])
+        self.assertIn('filename="Student_Feedback.csv"', r["Content-Disposition"])
         rows = _rows(r)
         self.assertEqual(rows[0][:4], ["Date", "Type", "Student", "Form No"])
         self.assertEqual(len(rows), 3)
@@ -117,7 +117,7 @@ class ReportCsvTests(TestCase):
         c.force_authenticate(self.admin)
         r = c.get(reverse("course-end-list-create"), {"output": "csv"})
         self.assertEqual(r.status_code, 200)
-        self.assertIn('filename="Module End Reports.csv"', r["Content-Disposition"])
+        self.assertIn('filename="Module_End_Reports.csv"', r["Content-Disposition"])
         rows = _rows(r)
         self.assertEqual(rows[0][:5],
                          ["Completed on", "Program", "Batch", "Subject", "Instructor"])
@@ -134,7 +134,7 @@ class ReportCsvTests(TestCase):
         c.force_authenticate(self.admin)
         r = c.get(reverse("zero-hour-list-create"), {"output": "csv", "page_size": 1})
         self.assertEqual(r.status_code, 200)
-        self.assertIn('filename="0-Hour Reports.csv"', r["Content-Disposition"])
+        self.assertIn('filename="0-Hour_Reports.csv"', r["Content-Disposition"])
         rows = _rows(r)
         self.assertEqual(rows[0][:5], ["Date", "Campus", "Program", "Class / Batch", "Mentor"])
         self.assertEqual(len(rows), 3)  # page_size ignored for the download
@@ -150,7 +150,7 @@ class ReportCsvTests(TestCase):
         c.force_authenticate(self.admin)
         r = c.get(reverse("self-appraisal-list-create"), {"output": "csv"})
         self.assertEqual(r.status_code, 200)
-        self.assertIn('filename="Faculty Feedback.csv"', r["Content-Disposition"])
+        self.assertIn('filename="Faculty_Feedback.csv"', r["Content-Disposition"])
         rows = _rows(r)
         self.assertEqual(rows[0][:4], ["Emp Code", "Faculty", "Year", "Quarter"])
         self.assertEqual([row[0] for row in rows[1:]], ["E1", "E2"])  # newest year first

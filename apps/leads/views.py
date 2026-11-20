@@ -32,6 +32,7 @@ from .serializers import (
 from .services import (
     change_status, create_lead, eligible_counsellors, has_recent_outcome,
 )
+from apps.common.filenames import content_disposition
 
 
 # --- Lead list/create ---------------------------------------------------
@@ -154,9 +155,8 @@ class LeadApplicationFeeReceiptPdfView(APIView):
                             status=http.HTTP_404_NOT_FOUND)
         pdf = render_application_fee_receipt(lead)
         resp = HttpResponse(pdf, content_type="application/pdf")
-        resp["Content-Disposition"] = (
-            f'attachment; filename="{lead.application_fee_receipt_no}.pdf"'
-        )
+        resp["Content-Disposition"] = content_disposition(
+            [lead.name, lead.application_fee_receipt_no], ".pdf")
         return resp
 
 

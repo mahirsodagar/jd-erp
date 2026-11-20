@@ -14,6 +14,7 @@ from apps.master.models import Batch
 from . import attendance_reports as reports
 from . import shortage_letter
 from .permissions import has_perm
+from apps.common.filenames import content_disposition
 
 
 def _can(user) -> bool:
@@ -167,10 +168,11 @@ class ShortageLetterView(APIView):
         pdf = shortage_letter.render_shortage_letters(
             batch=batch, subjects=subjects, rows=rows, as_of=as_of,
             from_date=from_date, summary=student is None)
-        name = (f"shortage-of-attendance-{rows[0]['application_form_id'] or student}.pdf"
-                if student else f"shortage-of-attendance-{batch.pk}.pdf")
+        who = ((rows[0].get("name") or rows[0]["application_form_id"] or student)
+               if student else batch.name)
         resp = HttpResponse(pdf, content_type="application/pdf")
-        resp["Content-Disposition"] = f'attachment; filename="{name}"'
+        resp["Content-Disposition"] = content_disposition(
+            [who, "Shortage of Attendance"], ".pdf")
         return resp
 
 

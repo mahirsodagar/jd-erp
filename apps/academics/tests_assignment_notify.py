@@ -20,7 +20,7 @@ from apps.master.models import (
 @override_settings(
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
     DEFAULT_FROM_EMAIL="no-reply@dkul.in",
-    EMAIL_DEFAULT_REPLY_TO="admin.a@jdinstitute.edu.in",
+    EMAIL_DEFAULT_REPLY_TO="webmaster@dkul.in",
 )
 class AssignmentNotifyTests(TestCase):
     @classmethod
@@ -100,7 +100,7 @@ class AssignmentNotifyTests(TestCase):
 
     def test_no_faculty_falls_back_to_default_reply_to(self):
         an.send_assignment_assigned(self._assignment())
-        self.assertEqual(mail.outbox[0].reply_to, ["admin.a@jdinstitute.edu.in"])
+        self.assertEqual(mail.outbox[0].reply_to, ["webmaster@dkul.in"])
 
     def _post(self, published):
         c = APIClient()

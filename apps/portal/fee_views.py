@@ -37,6 +37,7 @@ from apps.payments.services import (
 )
 
 from .permissions import IsStudentOrParent
+from apps.common.filenames import content_disposition
 
 ZERO = Decimal("0.00")
 
@@ -316,5 +317,6 @@ class ReceiptPdfView(APIView):
         except FeeReceipt.DoesNotExist as e:
             raise Http404 from e
         resp = HttpResponse(render_receipt_pdf(r), content_type="application/pdf")
-        resp["Content-Disposition"] = f'attachment; filename="{r.receipt_no}.pdf"'
+        resp["Content-Disposition"] = content_disposition(
+            [r.enrollment.student.student_name, r.receipt_no], ".pdf")
         return resp

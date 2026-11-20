@@ -61,7 +61,7 @@ class ListCsvExportTests(TestCase):
     def test_student_data_csv(self):
         r = self.client.get("/api/admissions/students/?output=csv")
         self.assertEqual(r.status_code, 200)
-        self.assertIn('filename="Student Data.csv"', r["Content-Disposition"])
+        self.assertIn('filename="Student_Data.csv"', r["Content-Disposition"])
         rows = _read(r)
         head = rows[0]
         self.assertEqual(head[:3], ["SL NO", "Student ID", "Registration No"])
@@ -90,7 +90,7 @@ class ListCsvExportTests(TestCase):
     def test_lead_master_csv(self):
         r = self.client.get("/api/leads/?output=csv")
         self.assertEqual(r.status_code, 200)
-        self.assertIn('filename="Lead Master.csv"', r["Content-Disposition"])
+        self.assertIn('filename="Lead_Master.csv"', r["Content-Disposition"])
         rows = _read(r)
         head = rows[0]
         self.assertEqual(head[:4], ["Sl no", "Created on", "Assigned To", "Name"])

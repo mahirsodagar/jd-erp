@@ -20,7 +20,7 @@ NEW_PW = "Temp#Pass2026"
 @override_settings(
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
     DEFAULT_FROM_EMAIL="no-reply@dkul.in",
-    EMAIL_DEFAULT_REPLY_TO="admin.a@jdinstitute.edu.in",
+    EMAIL_DEFAULT_REPLY_TO="webmaster@dkul.in",
 )
 class AdminResetEmailTests(TestCase):
     @classmethod
@@ -59,7 +59,7 @@ class AdminResetEmailTests(TestCase):
         self.assertEqual(m.to, ["fac1@example.com"])
         self.assertIn("no-reply@dkul.in", m.from_email)
         # Account mails have no handler → default Reply-To.
-        self.assertEqual(m.reply_to, ["admin.a@jdinstitute.edu.in"])
+        self.assertEqual(m.reply_to, ["webmaster@dkul.in"])
         for needle in ("Ann Rao", "fac1", NEW_PW):
             self.assertIn(needle, m.body)
 

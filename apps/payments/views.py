@@ -390,7 +390,7 @@ class PaymentRequestReceiptPdfView(APIView):
     def get(self, request, pk):
         from django.http import Http404
 
-        from .receipts import pdf_response, receipt_pdf_for_request
+        from .receipts import payer_name, pdf_response, receipt_pdf_for_request
 
         pr = (
             PaymentRequest.objects
@@ -405,7 +405,7 @@ class PaymentRequestReceiptPdfView(APIView):
         if found is None:
             return Response({"detail": "No receipt yet — the payment is not settled."},
                             status=http.HTTP_404_NOT_FOUND)
-        return pdf_response(*found)
+        return pdf_response(*found, payer=payer_name(pr))
 
 
 class PublicPaymentReceiptView(APIView):
@@ -421,7 +421,7 @@ class PublicPaymentReceiptView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request, token):
-        from .receipts import pdf_response, receipt_pdf_for_request
+        from .receipts import payer_name, pdf_response, receipt_pdf_for_request
 
         pr = (
             PaymentRequest.objects
@@ -434,7 +434,7 @@ class PublicPaymentReceiptView(APIView):
         if found is None:
             return Response({"detail": "No receipt is available for this payment."},
                             status=http.HTTP_404_NOT_FOUND)
-        return pdf_response(*found)
+        return pdf_response(*found, payer=payer_name(pr))
 
 
 class SmartGatewayStatusView(APIView):

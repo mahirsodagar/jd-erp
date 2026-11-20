@@ -38,6 +38,7 @@ from .services.pdf import render_receipt_pdf
 from .services.receipt_email import send_receipt_email
 from .services.registration import ensure_registration_installment
 from .services.receipt_no import generate_receipt_no
+from apps.common.filenames import content_disposition
 
 
 # --- Installments ------------------------------------------------------
@@ -418,7 +419,8 @@ class FeeReceiptPdfView(APIView):
         self.check_object_permissions(request, r)
         pdf = render_receipt_pdf(r)
         resp = HttpResponse(pdf, content_type="application/pdf")
-        resp["Content-Disposition"] = f'inline; filename="{r.receipt_no}.pdf"'
+        resp["Content-Disposition"] = content_disposition(
+            [r.enrollment.student.student_name, r.receipt_no], ".pdf", inline=True)
         return resp
 
 
@@ -746,5 +748,6 @@ class FeesMeReceiptPdfView(_StudentMixin, APIView):
             raise Http404 from e
         pdf = render_receipt_pdf(r)
         resp = HttpResponse(pdf, content_type="application/pdf")
-        resp["Content-Disposition"] = f'inline; filename="{r.receipt_no}.pdf"'
+        resp["Content-Disposition"] = content_disposition(
+            [r.enrollment.student.student_name, r.receipt_no], ".pdf", inline=True)
         return resp

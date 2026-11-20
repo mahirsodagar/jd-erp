@@ -57,6 +57,7 @@ from .services import (
     bulk_publish_weekly, bulk_publish_weekly_grid,
     create_slot, detect_conflicts,
 )
+from apps.common.filenames import content_disposition
 
 
 def _forced(request, user) -> bool:
@@ -1353,9 +1354,10 @@ def _transcript_pdf_response(student, kind: str) -> HttpResponse:
     else:
         pdf, stem = render_transcript_pdf(student), "academic-transcript"
     resp = HttpResponse(pdf, content_type="application/pdf")
-    name = (student.registration_number or student.application_form_id
-            or student.pk)
-    resp["Content-Disposition"] = f'inline; filename="{stem}-{name}.pdf"'
+    label = "Marks Card" if stem == "marks-card" else "Academic Transcript"
+    name = (student.student_name or student.registration_number
+            or student.application_form_id or student.pk)
+    resp["Content-Disposition"] = content_disposition([name, label], ".pdf", inline=True)
     return resp
 
 
@@ -1674,9 +1676,8 @@ class CertificatePdfView(APIView):
             )
         pdf = render_certificate_pdf(cert)
         resp = HttpResponse(pdf, content_type="application/pdf")
-        resp["Content-Disposition"] = (
-            f'inline; filename="{cert.certificate_no}.pdf"'
-        )
+        resp["Content-Disposition"] = content_disposition(
+            [cert.student.student_name, cert.get_type_display()], ".pdf", inline=True)
         return resp
 
 

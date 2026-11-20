@@ -5,7 +5,8 @@ the Email block in config/settings.py). Replies must still land with
 whoever handles that kind of mail, so the dispatcher sets the Reply-To
 header per trigger:
 
-    leave / comp-off          → the leave department inbox
+    leave / comp-off          → the campus leave inbox (LEAVE_CAMPUS_INBOXES
+                                by the employee's campus), else LEAVES_HR_INBOX
     fee receipts / fee links  → the campus receipts inbox
     application / lead mail   → the assigned counsellor, else the campus
                                 admissions inbox
@@ -53,10 +54,19 @@ def campus_code_of(obj) -> str:
     return (getattr(campus, "code", "") or "") if campus is not None else ""
 
 
+def leave_inbox_for_code(campus_code: str) -> str:
+    """The leave department inbox for a campus (LEAVE_CAMPUS_INBOXES,
+    client list 2026-11-20), falling back to LEAVES_HR_INBOX."""
+    return (
+        _campus_inbox("LEAVE_CAMPUS_INBOXES", campus_code)
+        or (getattr(settings, "LEAVES_HR_INBOX", "") or "").strip()
+    )
+
+
 def _from_token(token: str, context: dict) -> str:
     campus_code = (context.get("campus_code") or "")
     if token == "HR_LEAVE":
-        return (getattr(settings, "LEAVES_HR_INBOX", "") or "").strip()
+        return leave_inbox_for_code(campus_code)
     if token == "CAMPUS_RECEIPTS":
         return _campus_inbox("FEE_RECEIPT_CAMPUS_INBOXES", campus_code)
     if token == "CAMPUS_ADMISSIONS":

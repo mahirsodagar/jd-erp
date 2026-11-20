@@ -40,6 +40,7 @@ from .serializers import (
 from .services import (
     generate_emp_code, make_thumbnail, provision_portal_user, regenerate_qr,
 )
+from apps.common.filenames import content_disposition
 
 User = get_user_model()
 
@@ -613,7 +614,8 @@ class EmployeeIdCardView(APIView):
         self.check_object_permissions(request, emp)
         pdf = render_id_card(emp)
         resp = HttpResponse(pdf, content_type="application/pdf")
-        resp["Content-Disposition"] = f'inline; filename="id-card-{emp.emp_code}.pdf"'
+        resp["Content-Disposition"] = content_disposition(
+            [emp.full_name or emp.emp_code, "ID Card"], ".pdf", inline=True)
         return resp
 
 

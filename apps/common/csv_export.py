@@ -13,6 +13,8 @@ from datetime import date, datetime
 from django.http import HttpResponse
 from django.utils import timezone
 
+from apps.common.filenames import content_disposition
+
 
 def wants_csv(request) -> bool:
     return (request.query_params.get("output") or "").lower() == "csv"
@@ -32,7 +34,8 @@ def fmt_date(value) -> str:
 def csv_response(filename: str, header, rows) -> HttpResponse:
     """`rows` may be any iterable (a generator over `qs.iterator()` is fine)."""
     resp = HttpResponse(content_type="text/csv; charset=utf-8")
-    resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+    # Same scheme as every other download: spaces → "_", unsafe chars dropped.
+    resp["Content-Disposition"] = content_disposition([filename], ".csv")
     resp.write("﻿")
     w = csv.writer(resp)
     w.writerow(header)

@@ -290,7 +290,7 @@ class ApplicationPdfTests(_LeadFixture):
         r = self.api.get(reverse("portal-application-pdf"))
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r["Content-Type"], "application/pdf")
-        self.assertIn(self.student.application_form_id, r["Content-Disposition"])
+        self.assertIn("Application_Form.pdf", r["Content-Disposition"])
         self.assertTrue(r.content.startswith(b"%PDF"))
 
     def test_portal_payload_carries_terms_and_consent(self):

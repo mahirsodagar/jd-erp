@@ -1,4 +1,4 @@
-"""Employees → Download CSV ("Employee Master.csv").
+"""Employees → Download CSV ("Employee_Master.csv").
 
 Every matching employee in one file, honouring the list's filters and
 campus scoping — the on-screen list is paginated, the export is not.
@@ -51,7 +51,7 @@ class EmployeeCsvExportTests(TestCase):
         client.force_authenticate(user)
         r = client.get(f"/api/employees/?output=csv{query}")
         self.assertEqual(r.status_code, 200, r.content)
-        self.assertIn("Employee Master.csv", r["Content-Disposition"])
+        self.assertIn("Employee_Master.csv", r["Content-Disposition"])
         text = r.content.decode("utf-8-sig")
         return list(csv.DictReader(io.StringIO(text)))
 

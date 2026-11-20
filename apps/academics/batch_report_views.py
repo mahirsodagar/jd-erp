@@ -26,6 +26,7 @@ from apps.master.models import Batch
 
 from . import batch_report as reports
 from .permissions import has_perm
+from apps.common.filenames import content_disposition
 
 
 def _can_view(user) -> bool:
@@ -154,9 +155,9 @@ class BatchPhotosView(APIView):
         if not _in_scope(request.user, batch):
             raise Http404
         data, _ = reports.batch_photos_zip(batch)
-        name = reports._slug(batch.short_name or batch.name) or f"batch-{batch.pk}"
+        name = batch.name or batch.short_name or f"batch-{batch.pk}"
         resp = HttpResponse(data, content_type="application/zip")
-        resp["Content-Disposition"] = f'attachment; filename="{name}-photos.zip"'
+        resp["Content-Disposition"] = content_disposition([name, "Photos"], ".zip")
         return resp
 
 
@@ -177,7 +178,7 @@ class BatchIdCardsView(APIView):
         if not _in_scope(request.user, batch):
             raise Http404
         data, _ = render_batch_id_cards(batch)
-        name = reports._slug(batch.short_name or batch.name) or f"batch-{batch.pk}"
+        name = batch.name or batch.short_name or f"batch-{batch.pk}"
         resp = HttpResponse(data, content_type="application/pdf")
-        resp["Content-Disposition"] = f'attachment; filename="{name}-id-cards.pdf"'
+        resp["Content-Disposition"] = content_disposition([name, "ID Cards"], ".pdf")
         return resp

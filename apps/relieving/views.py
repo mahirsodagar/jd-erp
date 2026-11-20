@@ -21,6 +21,7 @@ from .serializers import (
     SubmitRelievingSerializer, WithdrawSerializer,
 )
 from . import notifications, services
+from apps.common.filenames import content_disposition
 
 
 def _emp_of(user) -> Employee | None:
@@ -510,9 +511,8 @@ class RelievingLetterPdfView(APIView):
             return app
         pdf = render_relieving_letter(app)
         resp = HttpResponse(pdf, content_type="application/pdf")
-        resp["Content-Disposition"] = (
-            f'inline; filename="{app.relieving_letter_no}.pdf"'
-        )
+        resp["Content-Disposition"] = content_disposition(
+            [app.employee.full_name, "Relieving Letter"], ".pdf", inline=True)
         return resp
 
 
@@ -525,7 +525,6 @@ class ExperienceLetterPdfView(APIView):
             return app
         pdf = render_experience_letter(app)
         resp = HttpResponse(pdf, content_type="application/pdf")
-        resp["Content-Disposition"] = (
-            f'inline; filename="{app.experience_letter_no}.pdf"'
-        )
+        resp["Content-Disposition"] = content_disposition(
+            [app.employee.full_name, "Experience Letter"], ".pdf", inline=True)
         return resp

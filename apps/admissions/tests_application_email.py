@@ -77,7 +77,7 @@ class ApplicationAcknowledgementTests(RequiredFixture):
                          "acknowledgement.goa@jdinstitute.edu.in")
         self.assertEqual(campus_inbox_for(Campus(code="HYD")), "")
 
-    @override_settings(EMAIL_DEFAULT_REPLY_TO="admin.a@jdinstitute.edu.in")
+    @override_settings(EMAIL_DEFAULT_REPLY_TO="webmaster@dkul.in")
     def test_campus_without_inbox_still_mails_the_student(self):
         self.campus.code = "HYD"
         self.campus.save(update_fields=["code"])
@@ -87,7 +87,7 @@ class ApplicationAcknowledgementTests(RequiredFixture):
         (s,) = _student(mail.outbox)
         self.assertEqual(s.to, ["asha@example.com"])
         # No campus inbox → the default Reply-To.
-        self.assertEqual(s.reply_to, ["admin.a@jdinstitute.edu.in"])
+        self.assertEqual(s.reply_to, ["webmaster@dkul.in"])
 
     @override_settings(OPERATIONS_INBOX="ops@jdinstitute.edu.in")
     def test_operations_inbox_is_cced_on_office_copy(self):

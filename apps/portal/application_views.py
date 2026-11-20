@@ -18,6 +18,7 @@ from apps.admissions.models import Student, StudentDocument
 from apps.admissions.services_application_pdf import render_application_pdf
 
 from .permissions import IsStudentOrParent
+from apps.common.filenames import content_disposition
 
 #: Human labels for the coded columns, taken from the model's own
 #: choices so a new option can never silently render as its code.
@@ -178,8 +179,8 @@ class ApplicationFormPdfView(APIView):
         pdf = render_application_pdf(student)
 
         response = HttpResponse(pdf, content_type="application/pdf")
-        name = student.application_form_id or f"student-{student.pk}"
-        response["Content-Disposition"] = (
-            f'inline; filename="application-{name}.pdf"'
-        )
+        name = (student.student_name or student.application_form_id
+                or f"student-{student.pk}")
+        response["Content-Disposition"] = content_disposition(
+            [name, "Application Form"], ".pdf", inline=True)
         return response
