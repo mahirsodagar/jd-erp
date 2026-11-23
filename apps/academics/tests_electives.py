@@ -59,7 +59,6 @@ class ElectiveSchedulingTests(TestCase):
         )
         cls.slot = TimeSlot.objects.create(
             label="Slot 1", start_time=time(9, 0), end_time=time(10, 0),
-            academic_year=cls.year,
         )
         cls.core = Subject.objects.create(name="Core Studio", code="CORE")
         cls.elec_a = Subject.objects.create(
@@ -139,7 +138,6 @@ class ElectiveRosterTests(TestCase):
         )
         cls.ts = TimeSlot.objects.create(
             label="Slot 1", start_time=time(9, 0), end_time=time(10, 0),
-            academic_year=cls.year,
         )
         cls.core = Subject.objects.create(name="Core", code="CORE")
         cls.elective = Subject.objects.create(

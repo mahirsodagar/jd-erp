@@ -328,14 +328,11 @@ class ClassroomSerializer(serializers.ModelSerializer):
 
 
 class TimeSlotSerializer(serializers.ModelSerializer):
-    academic_year_code = serializers.CharField(source="academic_year.code", read_only=True)
-
     class Meta:
         model = TimeSlot
         fields = ["id", "label", "start_time", "end_time",
-                  "academic_year", "academic_year_code",
                   "is_active", "sort_order"]
-        read_only_fields = ["id", "academic_year_code"]
+        read_only_fields = ["id"]
 
     def validate(self, attrs):
         start = attrs.get("start_time") or getattr(self.instance, "start_time", None)

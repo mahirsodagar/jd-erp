@@ -614,22 +614,20 @@ class Classroom(models.Model):
 
 
 class TimeSlot(models.Model):
-    """Reusable time blocks for scheduling, per academic year (timings
-    can shift year-to-year)."""
+    """Reusable time blocks for scheduling, shared across academic
+    years. They were per-year until 2026-11-23; the client did not want
+    to re-create the same slots every year, and the timetable pages
+    now offer every active slot regardless of the year picked."""
 
-    label = models.CharField(max_length=40, help_text="e.g. Slot 1, Forenoon")
+    label = models.CharField(max_length=40, unique=True,
+                             help_text="e.g. Slot 1, Forenoon")
     start_time = models.TimeField()
     end_time = models.TimeField()
-    academic_year = models.ForeignKey(
-        "master.AcademicYear", on_delete=models.PROTECT,
-        related_name="time_slots",
-    )
     is_active = models.BooleanField(default=True)
     sort_order = models.PositiveSmallIntegerField(default=100)
 
     class Meta:
-        ordering = ("academic_year", "sort_order", "start_time")
-        unique_together = (("label", "academic_year"),)
+        ordering = ("sort_order", "start_time")
 
     def __str__(self):
         # `start_time` / `end_time` may be a `datetime.time` (loaded

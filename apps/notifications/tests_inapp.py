@@ -141,7 +141,7 @@ class BellHooksTests(TestCase):
         batch = Batch.objects.create(name="BD-1", program=program,
                                      campus=self.emp.campus, academic_year=year)
         ts = TimeSlot.objects.create(label="Slot 1", start_time=time(9, 0),
-                                     end_time=time(10, 0), academic_year=year)
+                                     end_time=time(10, 0))
         subject = Subject.objects.create(name="Core Studio", code="CORE")
         stu_user = User.objects.create_user(username="stu", email="s@e.com", password="x")
         student = Student.objects.create(

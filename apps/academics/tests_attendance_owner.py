@@ -50,11 +50,9 @@ class AttendanceOwnerTests(TestCase):
         )
         ts1 = TimeSlot.objects.create(
             label="Slot 1", start_time=time(9, 0), end_time=time(10, 0),
-            academic_year=year,
         )
         ts2 = TimeSlot.objects.create(
             label="Slot 2", start_time=time(10, 0), end_time=time(11, 0),
-            academic_year=year,
         )
         subject = Subject.objects.create(name="Core", code="CORE")
         cls.owner = make_faculty(

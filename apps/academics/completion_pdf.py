@@ -83,7 +83,10 @@ DEFAULT_CONFIG = DocumentConfig()
 
 # Exact bounding boxes from the source PDF (pt).
 IMAGE_SLOTS: Dict[str, Dict[str, float]] = {
-    "logo": {"x": 440.25, "y": 57.65, "w": 63.75, "h": 108.75},
+    # The template box (x 440.25, w 63.75) was drawn for a portrait mark;
+    # the institute logos are landscape (~2.5:1) and came out ~25pt tall,
+    # so the slot is widened to 110pt with the same right edge (504pt).
+    "logo": {"x": 394.00, "y": 57.65, "w": 110.00, "h": 44.00},
     "signature": {"x": 77.25, "y": 641.39, "w": 84.00, "h": 48.00},
     "seal": {"x": 334.50, "y": 656.88, "w": 164.25, "h": 98.00},
 }

@@ -673,9 +673,9 @@ class TimeSlotListCreateView(_ListCreateBase):
     perm_base = "master.timeslot"
 
     def get(self, request):
-        qs = TimeSlot.objects.select_related("academic_year")
-        if v := request.query_params.get("academic_year"):
-            qs = qs.filter(academic_year_id=v)
+        # `academic_year` used to be a filter here; slots are shared
+        # across years now, so the param is accepted and ignored.
+        qs = TimeSlot.objects.all()
         if request.query_params.get("active") == "1":
             qs = qs.filter(is_active=True)
         return Response(TimeSlotSerializer(qs, many=True).data)

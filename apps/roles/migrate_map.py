@@ -24,7 +24,12 @@ RULES: dict[str, tuple[str, ...]] = {
     # --- Module 1: Dashboard -------------------------------------------
     # Sessions and the My Work feed are self-service, so every role that
     # had any access at all keeps them (see EVERY_ROLE below).
-    "dashboard.sessions.view_all": ("academics.schedule.view_all",),
+    #
+    # `dashboard.sessions.view_all` is deliberately NOT backfilled any
+    # more. It used to key off `academics.schedule.view_all`, which put
+    # it on the baseline Faculty role and showed every login everyone's
+    # sessions (roles.0006 takes it off again). Grant it from the Roles
+    # page to admin roles only.
     # The count tile used to ride on the strip's key; roles that saw it
     # keep it until an admin unticks it.
     "dashboard.sessions_count.view": ("dashboard.sessions.view",),

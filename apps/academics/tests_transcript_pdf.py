@@ -55,7 +55,6 @@ class TranscriptPdfTests(TestCase):
         )
         ts = TimeSlot.objects.create(
             label="Slot 1", start_time=time(9, 0), end_time=time(10, 0),
-            academic_year=year,
         )
         cls.core = Subject.objects.create(name="Core", code="CORE", program=program)
         cls.draw = Subject.objects.create(name="Drawing", code="DRAW", program=program)

@@ -26,10 +26,9 @@ class ClassroomAdmin(admin.ModelAdmin):
 
 @admin.register(TimeSlot)
 class TimeSlotAdmin(admin.ModelAdmin):
-    list_display = ("label", "start_time", "end_time", "academic_year", "is_active")
-    list_filter = ("academic_year", "is_active")
+    list_display = ("label", "start_time", "end_time", "is_active", "sort_order")
+    list_filter = ("is_active",)
     search_fields = ("label",)
-    autocomplete_fields = ("academic_year",)
 
 
 @admin.register(FeeTemplate)
