@@ -8,8 +8,10 @@ header per trigger:
     leave / comp-off          → the campus leave inbox (LEAVE_CAMPUS_INBOXES
                                 by the employee's campus), else LEAVES_HR_INBOX
     fee receipts / fee links  → the campus receipts inbox
-    application / lead mail   → the assigned counsellor, else the campus
-                                admissions inbox
+    lead / CRM mail           → the assigned counsellor, else the campus
+                                admissions inbox (ADMISSIONS_CAMPUS_INBOXES),
+                                else the campus acknowledgement inbox
+    application ack mail      → the campus acknowledgement inbox
     relieving                 → the approver handling the application,
                                 else the Principal of the employee's campus
                                 (active employee with the Principal
@@ -24,7 +26,7 @@ Resolution order:
   1. ``context["reply_to"]`` — an explicit handler chosen by the caller
      (counsellor, reporting manager, faculty…). Always wins.
   2. ``settings.EMAIL_REPLY_TO_POLICY[template_key]`` — a token
-     (HR_LEAVE, CAMPUS_RECEIPTS, CAMPUS_ADMISSIONS, CAMPUS_UNDERTAKING,
+     (HR_LEAVE, CAMPUS_RECEIPTS, CAMPUS_LEADS, CAMPUS_ADMISSIONS, CAMPUS_UNDERTAKING,
      PRINCIPAL, ACCOUNTS, CONTEXT) or a literal address. Campus tokens
      read ``context["campus_code"]``.
   3. ``settings.EMAIL_DEFAULT_REPLY_TO``.
@@ -65,6 +67,16 @@ def leave_inbox_for_code(campus_code: str) -> str:
     )
 
 
+def admissions_inbox_for_code(campus_code: str) -> str:
+    """The admissions / counselling inbox of a campus for lead & CRM
+    mail (ADMISSIONS_CAMPUS_INBOXES, client list 2026-11-21), falling
+    back to that campus's acknowledgement inbox."""
+    return (
+        _campus_inbox("ADMISSIONS_CAMPUS_INBOXES", campus_code)
+        or _campus_inbox("APPLICATION_ACK_CAMPUS_INBOXES", campus_code)
+    )
+
+
 def principal_inbox_for_code(campus_code: str) -> str:
     """The Principal of a campus (client 2026-11-20): the primary email
     of the active employee whose designation is PRINCIPAL_DESIGNATION
@@ -94,6 +106,8 @@ def _from_token(token: str, context: dict) -> str:
         return leave_inbox_for_code(campus_code)
     if token == "CAMPUS_RECEIPTS":
         return _campus_inbox("FEE_RECEIPT_CAMPUS_INBOXES", campus_code)
+    if token == "CAMPUS_LEADS":
+        return admissions_inbox_for_code(campus_code)
     if token == "CAMPUS_ADMISSIONS":
         return _campus_inbox("APPLICATION_ACK_CAMPUS_INBOXES", campus_code)
     if token == "CAMPUS_UNDERTAKING":

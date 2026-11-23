@@ -8,9 +8,12 @@ from rest_framework.views import APIView
 
 from .models import Task
 from .serializers import (
-    CompleteTaskSerializer, TaskCreateSerializer, TaskSerializer,
+    CompleteTaskSerializer, LateStatusSerializer, TaskCreateSerializer,
+    TaskSerializer,
 )
-from .services import notify_task_assigned, notify_task_completed
+from .services import (
+    notify_task_assigned, notify_task_completed, notify_task_late_status,
+)
 
 
 def _has_perm(user, key: str) -> bool:
@@ -36,12 +39,19 @@ class TaskListCreateView(APIView):
     def get(self, request):
         qs = _scope_for(request.user)
 
-        # ?status=pending|completed (default returns both, newest first)
+        # ?status=pending|completed|incomplete|overdue (default: all).
+        # "pending" means every OPEN task — Pending, Incomplete and
+        # Overdue — so a task the assignee flagged late stays on the
+        # Pending tab and the dashboard until it is completed.
         s = request.query_params.get("status")
         if s == "pending":
-            qs = qs.filter(status=Task.Status.PENDING)
+            qs = qs.exclude(status=Task.Status.COMPLETED)
         elif s == "completed":
             qs = qs.filter(status=Task.Status.COMPLETED)
+        elif s == "incomplete":
+            qs = qs.filter(status=Task.Status.INCOMPLETE)
+        elif s == "overdue":
+            qs = qs.filter(status=Task.Status.OVERDUE)
 
         # ?scope=mine_created | mine_assigned filters the user's own slice.
         scope = request.query_params.get("scope")
@@ -178,6 +188,47 @@ class TaskCompleteView(APIView):
         ])
         try:
             notify_task_completed(task=task)
+        except Exception:
+            pass
+        return Response(TaskSerializer(task, context={"request": request}).data)
+
+
+class TaskLateStatusView(APIView):
+    """Assignee records an open task whose end date has passed as
+    Incomplete or Overdue (client request 2026-11-21). Remarks are
+    required, like completing. The task stays open: it can still be
+    completed later, or switched between the two late statuses."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            task = Task.objects.select_related(
+                "assignee", "created_by",
+            ).get(pk=pk)
+        except Task.DoesNotExist as e:
+            raise Http404 from e
+
+        if task.assignee_id != request.user.id and not request.user.is_superuser:
+            return Response({"detail": "Only the assignee can update this task's status."},
+                            status=http.HTTP_403_FORBIDDEN)
+        if task.status == Task.Status.COMPLETED:
+            return Response({"detail": "Task is already completed."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        if task.end_date >= timezone.localdate():
+            return Response(
+                {"detail": "Incomplete / Overdue can only be set after the "
+                           "task's end date has passed."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+
+        s = LateStatusSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        task.assignee_remarks = s.validated_data["assignee_remarks"]
+        task.status = int(s.validated_data["status"])
+        task.save(update_fields=["assignee_remarks", "status", "updated_at"])
+        try:
+            notify_task_late_status(task=task)
         except Exception:
             pass
         return Response(TaskSerializer(task, context={"request": request}).data)

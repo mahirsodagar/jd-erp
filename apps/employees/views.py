@@ -202,6 +202,18 @@ def _apply_filters(qs, params):
         qs = qs.filter(gender=v)
     if v := params.get("nationality"):
         qs = qs.filter(nationality=v)
+    if params.get("teaching") in ("1", "true", "True"):
+        # Teaching staff for the timetable pickers: employees whose
+        # DESIGNATION is one of settings.TIMETABLE_FACULTY_DESIGNATIONS
+        # ("Faculty" only — client 2026-11-21). Login roles are no use
+        # here: every employee holds the baseline Faculty role.
+        from django.conf import settings
+        from django.db.models import Q
+        match = Q()
+        for n in getattr(settings, "TIMETABLE_FACULTY_DESIGNATIONS", []) or []:
+            if n.strip():
+                match |= Q(designation__name__iexact=n.strip())
+        qs = qs.filter(match) if match else qs.none()
     if v := params.get("roles"):
         # Comma-separated login-role names (case-insensitive), e.g.
         # "Faculty,HOD" — employees whose linked user holds any of them.

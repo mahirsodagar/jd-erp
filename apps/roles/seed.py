@@ -317,7 +317,9 @@ CATALOGUE = [
     # rights over their OWN slot (view roster, mark, freeze) without
     # holding any of these keys.
     ("academics", "academics.attendance.view_roster", "See a slot's attendance roster"),
-    ("academics", "academics.attendance.mark", "Mark attendance for any slot"),
+    ("academics", "academics.attendance.mark",
+     "Mark attendance for ANY slot (admin override — the assigned faculty "
+     "can always mark their own class without this; do not give to Faculty / HOD)"),
     ("academics", "academics.attendance.edit_frozen", "Edit attendance after it is frozen"),
     ("academics", "academics.attendance.notify_absent", "(Legacy) Absence alerts now go out automatically after marking"),
     ("academics", "academics.attendance.freeze", "Freeze and unfreeze attendance"),

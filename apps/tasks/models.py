@@ -6,11 +6,20 @@ class Task(models.Model):
     """Lightweight to-do mirrored from JD_ERP's `task_master`. A task
     has one creator and one assignee; both can see the task. The
     assignee writes a free-text `assignee_remarks` while working and
-    flips the status to COMPLETED when done."""
+    flips the status to COMPLETED when done.
+
+    Once the end date has passed, the assignee may instead record the
+    task as INCOMPLETE or OVERDUE (client request 2026-11-21) — both are
+    still "open" (not completed) and stay editable."""
 
     class Status(models.IntegerChoices):
         PENDING = 0, "Pending"
         COMPLETED = 1, "Completed"
+        INCOMPLETE = 2, "Incomplete"
+        OVERDUE = 3, "Overdue"
+
+    # Statuses an assignee may pick for a task whose end date has passed.
+    LATE_STATUSES = (2, 3)
 
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
@@ -57,6 +66,10 @@ class Task(models.Model):
                 name="uniq_task_name_per_assignee",
             ),
         ]
+
+    @property
+    def is_open(self) -> bool:
+        return self.status != self.Status.COMPLETED
 
     def __str__(self):
         return f"#{self.id} {self.name} → {self.assignee_id}"

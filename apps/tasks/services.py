@@ -53,6 +53,22 @@ def notify_task_assigned(*, task: Task) -> None:
         )
 
 
+def notify_task_late_status(*, task: Task) -> None:
+    """Bell only, to the creator: the assignee flagged an overdue task as
+    Incomplete / Overdue. No email — it is a progress note, not closure."""
+    assignee_name = (
+        task.assignee.full_name or task.assignee.username
+    )
+    label = Task.Status(task.status).label
+    notify(
+        [task.created_by], kind=InAppNotification.Kind.TASK,
+        title=f"Task {label.lower()}: {task.name}",
+        body=f"{assignee_name} marked it {label.lower()}. "
+             f"{task.assignee_remarks}".strip(),
+        link="/tasks", exclude_user=task.assignee,
+    )
+
+
 def notify_task_completed(*, task: Task) -> None:
     """Best-effort bell + email to the creator when the assignee completes it."""
     assignee_name = (

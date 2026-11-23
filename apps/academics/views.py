@@ -397,6 +397,11 @@ class MyTimetableView(APIView):
     - If the user is linked to a Student → returns slots for any of
       that student's active enrollment batches.
     - Otherwise returns an empty list.
+
+    Only SCHEDULED slots unless `?status=any` (every status) or
+    `?status=<STATUS>`. The dashboard's Today's Sessions strip reads this
+    endpoint so a faculty member only ever sees their own classes — the
+    filter is enforced here, not in the browser.
     """
     permission_classes = [IsAuthenticated]
 
@@ -408,7 +413,10 @@ class MyTimetableView(APIView):
 
         qs = ScheduleSlot.objects.select_related(
             "batch", "batch__campus", "subject", "instructor", "classroom", "time_slot",
-        ).filter(status=ScheduleSlot.Status.SCHEDULED)
+        )
+        status_param = (params.get("status") or "").strip().upper()
+        if status_param != "ANY":
+            qs = qs.filter(status=status_param or ScheduleSlot.Status.SCHEDULED)
         if from_date:
             qs = qs.filter(date__gte=from_date)
         if to_date:
@@ -470,7 +478,10 @@ class ConflictCheckView(APIView):
 # === G.2 — Attendance ================================================
 
 def _can_mark_attendance(user, slot: ScheduleSlot) -> bool:
-    """Instructor of the slot can mark; otherwise need the perm."""
+    """Only the faculty member assigned to the slot (`slot.instructor`)
+    may mark it. `academics.attendance.mark` is the admin override for
+    corrections — it is deliberately NOT part of the Faculty / HOD
+    roles (roles.0005), so another faculty member is refused."""
     if user.is_superuser:
         return True
     emp = getattr(user, "employee", None)
@@ -532,6 +543,10 @@ class AttendanceRosterView(APIView):
             "window_open": attendance_window_open(slot),
             "unlocked": slot.attendance_unlocked,
             "remarks": slot.notes,
+            # Whether THIS user may write the register (assigned faculty
+            # or admin override). A view_roster-only reader gets False
+            # and the UI locks the register instead of failing on save.
+            "can_mark": _can_mark_attendance(request.user, slot),
             "roster": rows,
         })
 

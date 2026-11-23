@@ -682,6 +682,13 @@ OPERATIONS_INBOX = env("OPERATIONS_INBOX", default="operations@jdinstitute.edu.i
 # PRINCIPAL). PRINCIPAL_INBOX is only the fallback when that campus has
 # no such employee.
 PRINCIPAL_DESIGNATION = env("PRINCIPAL_DESIGNATION", default="Principal")
+# Designation names (case-insensitive, exact) that count as teaching
+# staff for the timetable's Faculty pickers (`/api/employees/?teaching=1`).
+# Client 2026-11-21: only "Faculty". Add e.g. "Assistant Professor" or
+# "Visiting Faculty" here if those must be schedulable too.
+TIMETABLE_FACULTY_DESIGNATIONS = env.list(
+    "TIMETABLE_FACULTY_DESIGNATIONS", default=["Faculty"],
+)
 PRINCIPAL_INBOX = env("PRINCIPAL_INBOX", default="")
 VICE_PRINCIPAL_INBOX = env("VICE_PRINCIPAL_INBOX", default="")
 ACADEMIC_MANAGER_INBOX = env("ACADEMIC_MANAGER_INBOX", default="")
@@ -715,6 +722,20 @@ APPLICATION_ACK_CAMPUS_INBOXES = {
                default="acknowledgement.vijaywada@jdinstitute.edu.in"),
     "HYD": env("APPLICATION_ACK_INBOX_HYD",
                default="acknowledgement.hyderabad@jdinstitute.edu.in"),
+}
+
+# Purpose: Admissions / counselling — the campus admissions inbox that
+# handles replies to lead & CRM mail (application / fee / exam links,
+# welcome, drips…) when the lead has no counsellor (client list,
+# 2026-11-21). A campus left blank here falls back to its
+# acknowledgement inbox above. Bengaluru was not on the client's list.
+ADMISSIONS_CAMPUS_INBOXES = {
+    "BLR": env("ADMISSIONS_INBOX_BLR", default=""),
+    "GOA": env("ADMISSIONS_INBOX_GOA", default="goa@jdinstitute.edu.in"),
+    "COK": env("ADMISSIONS_INBOX_COK",
+               default="marketing.cochin@jdinstitute.edu.in"),
+    "VJY": env("ADMISSIONS_INBOX_VJY", default="vijayawada@jdinstitute.edu.in"),
+    "HYD": env("ADMISSIONS_INBOX_HYD", default="hyderabad@jdinstitute.edu.in"),
 }
 
 # Purpose: Leaves — student leave mail (applied → mentor, approved →
@@ -803,6 +824,8 @@ EMAIL_DEFAULT_REPLY_TO = env(
 #   HR_LEAVE            → LEAVE_CAMPUS_INBOXES[context.campus_code],
 #                         else LEAVES_HR_INBOX (leave / comp-off dept.)
 #   CAMPUS_RECEIPTS     → FEE_RECEIPT_CAMPUS_INBOXES[context.campus_code]
+#   CAMPUS_LEADS        → ADMISSIONS_CAMPUS_INBOXES[context.campus_code],
+#                         else APPLICATION_ACK_CAMPUS_INBOXES[...] (lead/CRM)
 #   CAMPUS_ADMISSIONS   → APPLICATION_ACK_CAMPUS_INBOXES[context.campus_code]
 #   CAMPUS_UNDERTAKING  → UNDERTAKING_CAMPUS_INBOXES[context.campus_code]
 #   PRINCIPAL           → active employee with the Principal designation
@@ -814,23 +837,24 @@ EMAIL_DEFAULT_REPLY_TO = env(
 # resolves blank falls back to EMAIL_DEFAULT_REPLY_TO.
 EMAIL_REPLY_TO_POLICY = {
     # Leads / CRM — the assigned counsellor (passed in context by
-    # apps/leads/send_links.py); campus admissions inbox otherwise.
-    "lead.application_link.email":   "CAMPUS_ADMISSIONS",
-    "lead.fee_link.email":           "CAMPUS_ADMISSIONS",
-    "lead.entrance_exam_link.email": "CAMPUS_ADMISSIONS",
-    "lead.welcome.email":            "CAMPUS_ADMISSIONS",
-    "lead.inactive.email":           "CAMPUS_ADMISSIONS",
-    "lead.non_responsive.email":     "CAMPUS_ADMISSIONS",
-    "lead_welcome_email":            "CAMPUS_ADMISSIONS",
-    "hot_why_join_jd":               "CAMPUS_ADMISSIONS",
-    "campus_visit_confirmation":     "CAMPUS_ADMISSIONS",
-    "post_visit_thanks":             "CAMPUS_ADMISSIONS",
-    "not_answered_closing_soon":     "CAMPUS_ADMISSIONS",
-    "cold_drip_30":                  "CAMPUS_ADMISSIONS",
-    "cold_drip_60":                  "CAMPUS_ADMISSIONS",
-    "cold_drip_90":                  "CAMPUS_ADMISSIONS",
-    "enrolled_confirmation":         "CAMPUS_ADMISSIONS",
-    "manager_overdue_hot_lead":      "CAMPUS_ADMISSIONS",
+    # apps/leads/send_links.py); campus admissions inbox
+    # (ADMISSIONS_CAMPUS_INBOXES, else the ack inbox) otherwise.
+    "lead.application_link.email":   "CAMPUS_LEADS",
+    "lead.fee_link.email":           "CAMPUS_LEADS",
+    "lead.entrance_exam_link.email": "CAMPUS_LEADS",
+    "lead.welcome.email":            "CAMPUS_LEADS",
+    "lead.inactive.email":           "CAMPUS_LEADS",
+    "lead.non_responsive.email":     "CAMPUS_LEADS",
+    "lead_welcome_email":            "CAMPUS_LEADS",
+    "hot_why_join_jd":               "CAMPUS_LEADS",
+    "campus_visit_confirmation":     "CAMPUS_LEADS",
+    "post_visit_thanks":             "CAMPUS_LEADS",
+    "not_answered_closing_soon":     "CAMPUS_LEADS",
+    "cold_drip_30":                  "CAMPUS_LEADS",
+    "cold_drip_60":                  "CAMPUS_LEADS",
+    "cold_drip_90":                  "CAMPUS_LEADS",
+    "enrolled_confirmation":         "CAMPUS_LEADS",
+    "manager_overdue_hot_lead":      "CAMPUS_LEADS",
 
     # Admissions — application ack / office copy / undertaking.
     "admissions.application_submitted.email": "CAMPUS_ADMISSIONS",

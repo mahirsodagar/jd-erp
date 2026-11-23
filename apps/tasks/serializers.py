@@ -90,3 +90,14 @@ class CompleteTaskSerializer(serializers.Serializer):
     to be non-empty before calling this; we re-validate server-side."""
 
     assignee_remarks = serializers.CharField(min_length=1, max_length=4000)
+
+
+class LateStatusSerializer(serializers.Serializer):
+    """Assignee records an overdue task as Incomplete or Overdue, with a
+    note explaining why (same remarks rule as completing)."""
+
+    status = serializers.ChoiceField(choices=[
+        (Task.Status.INCOMPLETE, "Incomplete"),
+        (Task.Status.OVERDUE, "Overdue"),
+    ])
+    assignee_remarks = serializers.CharField(min_length=1, max_length=4000)

@@ -58,6 +58,12 @@ class StudentDetailSerializer(serializers.ModelSerializer):
         read_only=True, default="",
     )
     photo_url = serializers.SerializerMethodField()
+    # Display names for the linkage ids on the detail page's Record card
+    # (ids alone meant nothing to staff — client 2026-11-21).
+    user_account_name = serializers.SerializerMethodField()
+    lead_origin_name = serializers.CharField(
+        source="lead_origin.name", read_only=True, default="",
+    )
     portal_username = serializers.SerializerMethodField()
     portal_password = serializers.SerializerMethodField()
     is_dropout = serializers.SerializerMethodField()
@@ -88,7 +94,8 @@ class StudentDetailSerializer(serializers.ModelSerializer):
             "student_email", "father_email", "mother_email", "institute_email",
             "father_occupation", "mother_occupation",
             "photo", "photo_url",
-            "user_account", "parent_user_account", "lead_origin",
+            "user_account", "user_account_name",
+            "parent_user_account", "lead_origin", "lead_origin_name",
             "portal_username", "portal_password",
             "application_fee_paid_at", "application_fee_amount",
             "application_fee_mode", "application_fee_ref",
@@ -98,7 +105,8 @@ class StudentDetailSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id", "application_form_id",
-            "user_account", "parent_user_account", "lead_origin",
+            "user_account", "user_account_name",
+            "parent_user_account", "lead_origin", "lead_origin_name",
             "portal_username", "portal_password", "is_dropout",
             "registration_payment",
             "applicant_fees",
@@ -165,6 +173,12 @@ class StudentDetailSerializer(serializers.ModelSerializer):
     def get_applicant_fees(self, obj):
         from apps.payments.applicant_fees import fee_page_for
         return fee_page_for(obj)
+
+    def get_user_account_name(self, obj):
+        if not obj.user_account_id:
+            return ""
+        u = obj.user_account
+        return (u.full_name or "").strip() or u.username
 
     def get_portal_username(self, obj):
         # Only surface to staff — students shouldn't see their own row

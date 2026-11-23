@@ -16,12 +16,13 @@ User = get_user_model()
 @override_settings(
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
     EMAIL_DEFAULT_REPLY_TO="webmaster@dkul.in",
+    ADMISSIONS_CAMPUS_INBOXES={"MAIN": "main@jdinstitute.edu.in"},
     APPLICATION_ACK_CAMPUS_INBOXES={"MAIN": "acknowledgement.main@jdinstitute.edu.in"},
     EMAIL_REPLY_TO_POLICY={
-        "lead_welcome_email": "CAMPUS_ADMISSIONS",
-        "hot_why_join_jd": "CAMPUS_ADMISSIONS",
-        "cold_drip_30": "CAMPUS_ADMISSIONS",
-        "manager_overdue_hot_lead": "CAMPUS_ADMISSIONS",
+        "lead_welcome_email": "CAMPUS_LEADS",
+        "hot_why_join_jd": "CAMPUS_LEADS",
+        "cold_drip_30": "CAMPUS_LEADS",
+        "manager_overdue_hot_lead": "CAMPUS_LEADS",
     },
 )
 class LeadAutomationReplyToTests(TestCase):
@@ -72,7 +73,11 @@ class LeadAutomationReplyToTests(TestCase):
         sched = ScheduledNotification.objects.get(template_key="cold_drip_30")
         self.assertEqual(sched.context["reply_to"], "")
         self.assertEqual(resolve_reply_to("cold_drip_30", sched.context),
-                         "acknowledgement.main@jdinstitute.edu.in")
+                         "main@jdinstitute.edu.in")
+        # A campus with no admissions inbox uses its acknowledgement inbox.
+        with override_settings(ADMISSIONS_CAMPUS_INBOXES={"MAIN": ""}):
+            self.assertEqual(resolve_reply_to("cold_drip_30", sched.context),
+                             "acknowledgement.main@jdinstitute.edu.in")
 
     def test_escalation_mail_replies_to_the_counsellor(self):
         from apps.leads.send_links import _reply_context
@@ -85,5 +90,5 @@ class LeadAutomationReplyToTests(TestCase):
         lead.assign_to = None
         self.assertEqual(
             resolve_reply_to("manager_overdue_hot_lead", _reply_context(lead)),
-            "acknowledgement.main@jdinstitute.edu.in",
+            "main@jdinstitute.edu.in",
         )
