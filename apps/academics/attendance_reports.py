@@ -68,7 +68,8 @@ def activity_report(**filters) -> list[dict]:
     the Instructor Module Log (same shape)."""
     qs = (_slot_qs(**filters)
           .select_related("batch", "batch__campus", "batch__program",
-                          "subject", "instructor", "time_slot", "created_by")
+                          "subject", "instructor", "time_slot", "classroom",
+                          "created_by")
           .annotate(
               marked=Count("attendance_entries"),
               present=Count("attendance_entries",
@@ -81,6 +82,8 @@ def activity_report(**filters) -> list[dict]:
             "slot_id": s.id,
             "date": str(s.date),
             "time_slot": s.time_slot.label,
+            # Room is optional on a slot; blank when none was booked.
+            "classroom": s.classroom.name if s.classroom_id else "",
             "subject": f"{s.subject.name} ({s.subject.code})",
             "instructor": s.instructor.full_name,
             "updated": s.marked > 0,

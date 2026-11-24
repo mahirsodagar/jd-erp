@@ -36,6 +36,29 @@ class EmployeeIdCardTests(TestCase):
         role.permissions.add(view_perm)
         cls.viewer.roles.add(role)
 
+    def test_address_block_comes_from_the_centre(self):
+        from apps.employees.services_idcard import StaffCardData
+
+        # Nothing on file -> the reference Bengaluru block.
+        self.assertEqual(StaffCardData(self.jdift_emp).address_lines[0],
+                         "No.18, Edward House,")
+        campus = self.jdift_emp.campus
+        campus.address = "Plot 7, Jubilee Hills\nHyderabad - 500 033"
+        campus.phone = "040 2355 0007"
+        campus.save()
+        self.jdift_emp.refresh_from_db()
+        self.jdsd_emp.refresh_from_db()
+        self.assertEqual(StaffCardData(self.jdift_emp).address_lines, (
+            "Plot 7, Jubilee Hills", "Hyderabad - 500 033",
+            "Contact : 040 2355 0007",
+        ))
+        self.assertEqual(StaffCardData(self.jdsd_emp).address_lines, (
+            "PLOT 7, JUBILEE HILLS", "HYDERABAD - 500 033",
+            "040 2355 0007", "www.jdsd.in",
+        ))
+        for emp in (self.jdift_emp, self.jdsd_emp):
+            self.assertTrue(render_id_card(emp).startswith(b"%PDF"))
+
     def test_each_institute_renders_a_two_page_pdf(self):
         for emp in (self.jdift_emp, self.jdsd_emp):
             pdf = render_id_card(emp)

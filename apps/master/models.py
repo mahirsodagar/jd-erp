@@ -197,6 +197,23 @@ class Campus(models.Model):
     code = models.CharField(max_length=20, unique=True, help_text="Short code, e.g. BLR, GOA.")
     city = models.CharField(max_length=80, blank=True)
     state = models.CharField(max_length=80, blank=True)
+    # Printed on the back of student and staff ID cards (client,
+    # 2026-11-24: every centre's card must carry that centre's address).
+    # One line per row of the card; blank falls back to the Bengaluru
+    # block the 2026 reference cards were printed with.
+    address = models.TextField(
+        blank=True,
+        help_text="Centre address as printed on ID cards, one line per row "
+                  "(2-3 short lines). Blank prints the head-office address.",
+    )
+    phone = models.CharField(
+        max_length=40, blank=True,
+        help_text="Centre contact number printed on ID cards.",
+    )
+    phone_alt = models.CharField(
+        max_length=40, blank=True,
+        help_text="Second contact number (staff cards print both).",
+    )
     image = models.ImageField(
         upload_to="campus/images/", blank=True, null=True,
         help_text="Shown on the dashboard campus cards (PHP `campus_img`).",

@@ -153,14 +153,17 @@ class UserListCreateView(APIView):
         elif params.get("active") == "0":
             qs = qs.filter(is_active=False)
 
-        return Response(UserSerializer(qs, many=True).data)
+        return Response(
+            UserSerializer(qs, many=True, context={"request": request}).data
+        )
 
     def post(self, request):
         serializer = UserCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
         return Response(
-            UserSerializer(user).data, status=status.HTTP_201_CREATED
+            UserSerializer(user, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
         )
 
 
@@ -194,7 +197,9 @@ class UserDetailView(APIView):
         return [IsAuthenticated(), HasPerm()]
 
     def get(self, request, pk):
-        return Response(UserSerializer(User.objects.get(pk=pk)).data)
+        return Response(UserSerializer(
+            User.objects.get(pk=pk), context={"request": request},
+        ).data)
 
     def patch(self, request, pk):
         user = User.objects.get(pk=pk)
@@ -215,7 +220,7 @@ class UserDetailView(APIView):
         serializer = UserUpdateSerializer(user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response(UserSerializer(user).data)
+        return Response(UserSerializer(user, context={"request": request}).data)
 
     def delete(self, request, pk):
         user = User.objects.get(pk=pk)

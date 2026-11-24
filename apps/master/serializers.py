@@ -22,6 +22,7 @@ class CampusSerializer(serializers.ModelSerializer):
             "id", "name", "code",
             "institutes", "institute_names",
             "city", "state",
+            "address", "phone", "phone_alt",
             "image", "image_url",
             "is_active", "program_count", "created_at", "updated_at",
         ]

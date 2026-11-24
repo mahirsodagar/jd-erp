@@ -33,6 +33,21 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     date_joined = models.DateTimeField(default=timezone.now)
 
+    # Plain-text copy of the CURRENT password, shown on Admin -> Users to
+    # holders of `accounts.user.reset_password` (client decision
+    # 2026-11-24, the same stance as `Student.portal_password`). Every
+    # path that sets a password writes it: the manager on create,
+    # `apps.admissions.services.sync_portal_password` on admin reset,
+    # self-change, forgot-password and portal change. Blank until the
+    # first reset after accounts.0004 — hashes cannot be read back.
+    visible_password = models.CharField(
+        max_length=128, blank=True,
+        help_text="Plain-text copy of the current password, kept so "
+                  "Admin -> Users can show it (client decision 2026-11-24). "
+                  "Written by every path that sets a password; blank until "
+                  "the first reset after this field was added.",
+    )
+
     USERNAME_FIELD = "username"
     EMAIL_FIELD = "email"
     REQUIRED_FIELDS = ["email"]

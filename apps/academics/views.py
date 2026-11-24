@@ -1,4 +1,4 @@
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.http import Http404, HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -436,6 +436,57 @@ class MyTimetableView(APIView):
             return Response(ScheduleSlotSerializer(qs, many=True).data)
 
         return Response([])
+
+
+class MyTimetableSummaryView(APIView):
+    """Counts of the requesting employee's own classes, for the dashboard
+    "Total Classes" tile (ported from the legacy PHP dashboard, which
+    counted every `timetable_pub` row for the instructor).
+
+    `total` is every class ever assigned to the caller that was not
+    cancelled; `completed` / `scheduled` split it by status; `today` is
+    the non-cancelled count for today; `cancelled` is reported
+    separately. Pass `from` / `to` (ISO dates) to restrict the range.
+    Students and users without an Employee get all zeros.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        params = request.query_params
+        from_date = parse_date(params.get("from") or "")
+        to_date = parse_date(params.get("to") or "")
+
+        emp = getattr(request.user, "employee", None)
+        zero = {"total": 0, "scheduled": 0, "completed": 0,
+                "cancelled": 0, "today": 0}
+        if emp is None:
+            return Response(zero)
+
+        qs = ScheduleSlot.objects.filter(instructor=emp)
+        if from_date:
+            qs = qs.filter(date__gte=from_date)
+        if to_date:
+            qs = qs.filter(date__lte=to_date)
+
+        by_status = {
+            row["status"]: row["n"]
+            for row in qs.values("status").annotate(n=Count("id"))
+        }
+        scheduled = by_status.get(ScheduleSlot.Status.SCHEDULED, 0)
+        completed = by_status.get(ScheduleSlot.Status.COMPLETED, 0)
+        cancelled = by_status.get(ScheduleSlot.Status.CANCELLED, 0)
+        today = (
+            qs.filter(date=timezone.localdate())
+            .exclude(status=ScheduleSlot.Status.CANCELLED)
+            .count()
+        )
+        return Response({
+            "total": scheduled + completed,
+            "scheduled": scheduled,
+            "completed": completed,
+            "cancelled": cancelled,
+            "today": today,
+        })
 
 
 # --- Conflict-check (dry-run) ----------------------------------------

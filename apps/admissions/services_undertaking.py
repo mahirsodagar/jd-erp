@@ -342,9 +342,10 @@ def render_undertaking_pdf(
 
     # No signature boxes since 2026-11-17: the schedule is issued like the
     # receipt, not countersigned, so the policy page closes with a rule.
-    # Pass the institute so the ID-card replacement fee matches the
-    # receipt (JDSD Rs.1000; JDIFT Rs.500) — without it the default
-    # Rs.500 printed for everyone.
+    # Pass the institute so the late-payment penalty and ID-card lines
+    # match every fee receipt for the same institute (see
+    # apps.common.program_policies) — without it the generic wording
+    # prints.
     draw_policy_page(
         pdf, policy_for(getattr(program, "degree_type", ""),
                         institute=institute),

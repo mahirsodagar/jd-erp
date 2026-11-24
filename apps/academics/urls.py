@@ -58,6 +58,7 @@ from .views import (
     MyAttendanceView,
     MyCertificatesView,
     MyMarksCardPdfView,
+    MyTimetableSummaryView,
     MyTimetableView,
     MyTranscriptPdfView,
     MyTranscriptView,
@@ -86,6 +87,8 @@ urlpatterns = [
     path("schedule/bulk-weekly-grid/", WeeklyGridPublishView.as_view(), name="schedule-bulk-weekly-grid"),
     path("schedule/conflict-check/", ConflictCheckView.as_view(), name="schedule-conflict-check"),
     path("timetable/me/", MyTimetableView.as_view(), name="timetable-me"),
+    path("timetable/me/summary/", MyTimetableSummaryView.as_view(),
+         name="timetable-me-summary"),
 
     # G.2 — Attendance
     path("schedule/<int:pk>/attendance/", AttendanceRosterView.as_view(),

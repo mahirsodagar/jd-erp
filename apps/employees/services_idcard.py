@@ -15,10 +15,11 @@ with the logo, a large photo, the name set vertically on the left edge
 and the designation + department vertically on the right edge; the back
 has the mark, address, the ID, the rules and the principal's signature.
 
-Address, phone and website are the printed ones, hardcoded like the
-student card — NOT `Institute.address` / `.phone`. Logos, the "Since
-1988" mark, the principal's signature and the Avenir stand-in fonts are
-shared with the student card (admissions/idcard_assets).
+The address block comes from the employee's CENTRE (`Campus.address` /
+`.phone` / `.phone_alt`), like the student card, with the Bengaluru
+reference block as the fallback — NOT `Institute.address` / `.phone`.
+Logos, the "Since 1988" mark, the principal's signature and the Avenir
+stand-in fonts are shared with the student card (admissions/idcard_assets).
 """
 
 from __future__ import annotations
@@ -37,12 +38,18 @@ CARD_H = 85.0
 #: Near-black of the JDIFT staff card front.
 JDIFT_BLACK = (33, 31, 32)
 
-#: Printed on the JDIFT staff card back, verbatim from the reference.
+#: Printed on the JDIFT staff card back of the reference; the fallback
+#: for a centre with no address on file.
 JDIFT_ADDRESS = (
     "No.18, Edward House,",
     "Brigade Road, Bengaluru - 560 001.",
 )
 JDIFT_OFFICE_CONTACTS = ("+91 99450 31100", "+91 94803 23232")
+JDIFT_FALLBACK_BLOCK = (
+    *JDIFT_ADDRESS,
+    f"Contact : {JDIFT_OFFICE_CONTACTS[0]}",
+    JDIFT_OFFICE_CONTACTS[1],
+)
 
 
 def _lib():
@@ -94,6 +101,15 @@ class StaffCardData:
     @property
     def guardian_contact(self) -> str:
         return self.employee.mobile_alternate or ""
+
+    @property
+    def address_lines(self) -> tuple[str, ...]:
+        """Back-of-card contact block from the employee's centre."""
+        lib = _lib()
+        campus = self.employee.campus
+        if self.institute_code == "JDSD":
+            return lib.contact_block(campus, "JDSD", fallback=lib.JDSD_ADDRESS)
+        return lib.contact_block(campus, "JDIFT", fallback=JDIFT_FALLBACK_BLOCK)
 
     def photo_bytes(self) -> bytes | None:
         photo = self.employee.photo
@@ -233,15 +249,15 @@ def _jdift_back(pdf: FPDF, d: StaffCardData) -> None:
 
     y += 2.0
     pdf.set_font("Helvetica", "B", 7.0)
-    lines = (
-        *JDIFT_ADDRESS,
-        f"Contact : {JDIFT_OFFICE_CONTACTS[0]}",
-        JDIFT_OFFICE_CONTACTS[1],
-    )
+    # Five rows at most (3 address + 2 phones) fit above the rule at 50.
+    lines = d.address_lines
+    pitch = min(4.1, (49.0 - y) / max(len(lines), 1))
     for line in lines:
         pdf.set_xy(3, y)
-        pdf.cell(48, 3.5, line, align="C")
-        y += 4.1
+        lib._fit_size(pdf, safe(line), 48, 7.0)
+        pdf.cell(48, 3.5, safe(line), align="C")
+        y += pitch
+    pdf.set_font("Helvetica", "B", 7.0)
 
     lib._hrule(pdf, 50.0, x0=0, x1=CARD_W, width=0.35)
 
@@ -303,14 +319,7 @@ def _jdsd_back(pdf: FPDF, d: StaffCardData) -> None:
     pdf.set_text_color(*lib.JDSD_PINK)
     pdf.set_xy(16.4, 5.6)
     pdf.cell(35, 3.4, "JD SCHOOL OF DESIGN")
-    pdf.set_font("AvenirM", "", 5.7)
-    pdf.set_text_color(*lib.JDSD_GREY)
-    y = 9.4
-    for line in lib.JDSD_ADDRESS:
-        pdf.set_xy(16.4, y)
-        pdf.cell(35, 2.6, line)
-        y += 2.55
-    lib._hrule(pdf, 21.0, x0=5.0, x1=CARD_W - 5.0, width=0.3, color=lib.JDSD_GREY)
+    lib._jdsd_address(pdf, d.address_lines)
 
     lib._centred(pdf, 24.0, f"ID : {d.emp_code}", 8.6, family="AvenirM",
                  color=lib.JDSD_PINK)

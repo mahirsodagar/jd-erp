@@ -9,9 +9,12 @@ Avenir-set design with the vertical name beside the photo, the program
 and the affiliation line, and the address block on the back.
 
 Everything printed is measured off the two reference PDFs (Aishwarya /
-Aiysha, Nov 2026). Address, phone and website are the printed ones —
-deliberately NOT `Institute.address` / `.phone`, which hold the
-letterhead address (Swan House) and the admissions mobile.
+Aiysha, Nov 2026). The address block on the back comes from the
+student's CENTRE (`Campus.address` / `.phone` / `.phone_alt`, client
+rule 2026-11-24: each centre's card carries its own address); a campus
+with nothing on file prints the Bengaluru block the reference cards were
+printed with. Deliberately NOT `Institute.address` / `.phone`, which
+hold the letterhead address (Swan House) and the admissions mobile.
 
 Fonts: the JDIFT card is Arial Bold, for which fpdf2's built-in
 Helvetica-Bold is metric-compatible. The JDSD card is Avenir, which is
@@ -43,7 +46,8 @@ JDIFT_MAGENTA = (192, 40, 124)
 JDSD_PINK = (227, 28, 95)
 JDSD_GREY = (70, 70, 70)
 
-#: Printed on the cards, verbatim from the reference set.
+#: Printed on the reference cards; the fallback for a campus with no
+#: address on file.
 JDIFT_ADDRESS = (
     "No.18, Edward House,",
     "Brigade Road, Bangalore - 560 001.",
@@ -55,6 +59,41 @@ JDSD_ADDRESS = (
     "+91 80 2559 4142",
     "www.jdsd.in",
 )
+JDSD_WEBSITE = "www.jdsd.in"
+
+
+def campus_address_lines(campus, *, limit: int = 3) -> list[str]:
+    """`Campus.address` split into its rows, blanks dropped, at most
+    `limit` of them (the card has fixed room)."""
+    text = (getattr(campus, "address", "") or "").strip()
+    return [ln.strip() for ln in text.splitlines() if ln.strip()][:limit]
+
+
+def contact_block(campus, institute_code: str, *, fallback: tuple[str, ...],
+                  address_lines: int = 3) -> tuple[str, ...]:
+    """The address / phone block printed on the back of a card, built
+    from the centre; `fallback` when the centre has no address on file.
+
+    JDSD cards set the address in capitals and close with the website;
+    JDIFT cards print it as typed with a "Contact :" phone line. A second
+    number prints on its own line on both when the centre has one.
+    """
+    lines = campus_address_lines(campus, limit=address_lines)
+    if not lines:
+        return fallback
+    phone = (getattr(campus, "phone", "") or "").strip()
+    alt = (getattr(campus, "phone_alt", "") or "").strip()
+    if institute_code == "JDSD":
+        out = [ln.upper() for ln in lines]
+        out += [p for p in (phone, alt) if p]
+        out.append(JDSD_WEBSITE)
+        return tuple(out)
+    out = list(lines)
+    if phone:
+        out.append(f"Contact : {phone}")
+    if alt:
+        out.append(alt)
+    return tuple(out)
 
 RULES = (
     "Identity card must be carried for all official duties in & outside "
@@ -114,7 +153,26 @@ class CardData:
 
     @property
     def affiliation(self) -> str:
-        return (self.program.id_card_affiliation if self.program else "") or ""
+        """The line under the program on the JDSD card: the program's own
+        `id_card_affiliation` wording when set, else "Affiliated to
+        <university>" from the program's university (client, 2026-11-24:
+        JDSD cards must name the university). JD-certified programs have
+        neither and print nothing."""
+        if not self.program:
+            return ""
+        if self.program.id_card_affiliation:
+            return self.program.id_card_affiliation
+        university = self.program.university
+        return f"Affiliated to {university.name}" if university else ""
+
+    @property
+    def address_lines(self) -> tuple[str, ...]:
+        """Back-of-card contact block from the student's centre."""
+        if self.institute_code == "JDSD":
+            return contact_block(self.campus, "JDSD", fallback=JDSD_ADDRESS)
+        # The JDIFT back has room for four short rows above the rule.
+        return contact_block(self.campus, "JDIFT", fallback=JDIFT_ADDRESS,
+                             address_lines=2)
 
     @property
     def valid_till(self) -> date | None:
@@ -316,10 +374,16 @@ def _jdift_back(pdf: FPDF, d: CardData) -> None:
     pdf.set_xy(2, y)
     pdf.cell(CARD_W - 4, 3.4, safe(f"Blood Group : {d.blood_group}"), align="C")
     y += 3.5
-    for line in JDIFT_ADDRESS:
+    # The block must end above the rule at 19.5 whatever the centre's
+    # address runs to, so the row pitch tightens for a longer block.
+    lines = d.address_lines
+    pitch = min(3.2, 11.0 / max(len(lines), 1))
+    for line in lines:
         pdf.set_xy(2, y)
+        _fit_size(pdf, safe(line), CARD_W - 4, 8.2)
         pdf.cell(CARD_W - 4, 3.0, safe(line), align="C")
-        y += 3.2
+        y += pitch
+    pdf.set_font("Helvetica", "B", 8.2)
     _hrule(pdf, 19.5, x0=0, x1=CARD_W, width=0.8)
 
     pdf.set_font("Helvetica", "B", 6.8)
@@ -370,6 +434,23 @@ def _jdsd_front(pdf: FPDF, d: CardData) -> None:
     _hrule(pdf, 81.0, x0=4.3, x1=CARD_W - 4.3, width=0.3, color=JDSD_GREY)
 
 
+def _jdsd_address(pdf: FPDF, lines: tuple[str, ...]) -> None:
+    """The small grey address block beside the mark on the JDSD back,
+    closed by the rule at 21 mm. Shared with the staff card. The row
+    pitch tightens for a longer block so it never crosses the rule."""
+    pdf.set_font("AvenirM", "", 5.7)
+    pdf.set_text_color(*JDSD_GREY)
+    y = 9.4
+    pitch = min(2.55, 11.4 / max(len(lines), 1))
+    for line in lines:
+        pdf.set_xy(16.4, y)
+        _fit_size(pdf, line, 35, 5.7, min_size=4.0)
+        pdf.cell(35, 2.6, line)
+        y += pitch
+    pdf.set_font("AvenirM", "", 5.7)
+    _hrule(pdf, 21.0, x0=5.0, x1=CARD_W - 5.0, width=0.3, color=JDSD_GREY)
+
+
 def _jdsd_back(pdf: FPDF, d: CardData) -> None:
     pdf.add_page()
     pdf.image(str(_ASSETS / "jdsd-mark.png"), x=5.3, y=5.9, w=9.0)
@@ -377,14 +458,7 @@ def _jdsd_back(pdf: FPDF, d: CardData) -> None:
     pdf.set_text_color(*JDSD_PINK)
     pdf.set_xy(16.4, 5.6)
     pdf.cell(35, 3.4, "JD SCHOOL OF DESIGN")
-    pdf.set_font("AvenirM", "", 5.7)
-    pdf.set_text_color(*JDSD_GREY)
-    y = 9.4
-    for line in JDSD_ADDRESS:
-        pdf.set_xy(16.4, y)
-        pdf.cell(35, 2.6, line)
-        y += 2.55
-    _hrule(pdf, 21.0, x0=5.0, x1=CARD_W - 5.0, width=0.3, color=JDSD_GREY)
+    _jdsd_address(pdf, d.address_lines)
 
     valid = _mon_year(d.valid_till).upper()
     rows = (
@@ -449,7 +523,7 @@ def render_batch_id_cards(batch) -> tuple[bytes, int]:
         .select_related(
             "student", "student__campus", "student__institute",
             "student__program", "program", "program__institute",
-            "campus", "batch", "batch__academic_year",
+            "program__university", "campus", "batch", "batch__academic_year",
         )
         .order_by("student__student_name")
     )

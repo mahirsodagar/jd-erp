@@ -64,6 +64,7 @@ class UserSerializer(serializers.ModelSerializer):
     employee_id = serializers.SerializerMethodField()
     is_relieving_approver = serializers.SerializerMethodField()
     is_reporting_manager = serializers.SerializerMethodField()
+    visible_password = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -75,13 +76,31 @@ class UserSerializer(serializers.ModelSerializer):
             "campuses",
             "date_joined", "last_login",
             "roles", "permissions", "modules",
+            "visible_password",
         ]
         read_only_fields = [
             "id", "is_superuser", "date_joined", "last_login",
             "roles", "permissions", "modules",
             "campuses", "is_student", "is_parent", "is_employee",
             "employee_id", "is_relieving_approver", "is_reporting_manager",
+            "visible_password",
         ]
+
+    def get_visible_password(self, obj):
+        """The plain-text copy, only for callers who could set it anyway
+        (`accounts.user.reset_password`, or a superuser). Everyone else,
+        including the user reading their own profile, gets "". Needs the
+        request in the serializer context; without one it stays hidden."""
+        from .permissions import has_perm
+
+        request = self.context.get("request")
+        viewer = getattr(request, "user", None)
+        if viewer is None or not viewer.is_authenticated:
+            return ""
+        if not (viewer.is_superuser
+                or has_perm(viewer, "accounts.user.reset_password")):
+            return ""
+        return obj.visible_password or ""
 
     def get_is_reporting_manager(self, obj):
         """True when at least one employee reports to this user (L1), or

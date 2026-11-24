@@ -934,6 +934,7 @@ def provision_student_portal_credentials(*, student: Student) -> dict:
     else:
         user = student.user_account
         user.set_password(temp_password)
+        user.visible_password = temp_password
         # Keep the user's username, primary email + display name aligned
         # with the latest institute email and student name. Legacy users
         # (created before "username = institute email") get migrated to
@@ -942,7 +943,8 @@ def provision_student_portal_credentials(*, student: Student) -> dict:
             user.username = username
         user.email = student.institute_email
         user.full_name = student.student_name
-        user.save(update_fields=["password", "username", "email", "full_name"])
+        user.save(update_fields=["password", "visible_password", "username",
+                                 "email", "full_name"])
 
     # Plain-text copy kept on the student row so staff can read it back
     # from the student page without resetting again.
@@ -959,18 +961,20 @@ def provision_student_portal_credentials(*, student: Student) -> dict:
 
 
 def sync_portal_password(user, plain_password: str) -> bool:
-    """Mirror a freshly-set password onto `Student.portal_password` when
-    `user` is a student portal account, so the staff-facing student page
-    always shows the password that currently works.
+    """Mirror a freshly-set password onto the staff-readable copies:
+    `User.visible_password` for EVERY account (Admin -> Users shows it,
+    client decision 2026-11-24) and `Student.portal_password` when `user`
+    is a student portal account (the student page shows that one).
 
     Call this right after `user.set_password(...)` from every path that
     rotates a password (student self-service, admin reset, forgot-password
-    link, staff change-password). Parent accounts and staff accounts have
-    no plain-text copy and are left untouched. Returns True if a student
-    row was updated.
+    link, staff change-password). Returns True if a student row was
+    updated.
     """
     if user is None or not plain_password:
         return False
+    User.objects.filter(pk=user.pk).update(visible_password=plain_password)
+    user.visible_password = plain_password
     updated = Student.objects.filter(user_account=user).exclude(
         portal_password=plain_password,
     ).update(portal_password=plain_password)

@@ -84,22 +84,52 @@ class PolicyPageTests(TestCase):
             self.assertNotIn(("h2", "AGREEMENT"), receipt)
             self.assertEqual(len(full) - len(receipt), 2)
 
-    def test_id_card_replacement_fee_per_institute(self):
-        """JD School of Design prints Rs.1000; JD Institute and anything
-        unknown keep the legacy Rs.500."""
-        def fee_line(doc):
-            return next(b for b in doc if b[:2] == ("li", "ID Cards:"))[2]
+    @staticmethod
+    def _line(doc, lead):
+        return next(b for b in doc if b[:2] == ("li", lead))[2]
 
-        self.assertIn("Rs.500.", fee_line(policy_for("Diploma")))
-        self.assertIn("Rs.500.", fee_line(policy_for("B.Sc", institute="JDIFT")))
-        self.assertIn("Rs.1000.", fee_line(policy_for("B.Sc", institute="JDSD")))
-        self.assertIn("Rs.1000.", fee_line(policy_for("Diploma", institute="jdsd")))
-        jdsd = Institute(code="JDSD", name="JD School of Design")
-        self.assertIn("Rs.1000.", fee_line(
-            policy_for("B.Sc", institute=jdsd, agreement=False)))
-        self.assertIn("Rs.500.", fee_line(policy_for("B.Sc", institute=None)))
-        # The module-level documents are never mutated by the swap.
-        self.assertIn("Rs.500.", fee_line(policy_for("B.Sc")))
+    def test_id_card_line_matches_the_2026_terms(self):
+        """Both institutes' signed 2026 terms: Rs.500 fine per instance,
+        Rs.1000 for a replacement card. Same figures whatever the degree
+        type, and for an institute we don't know."""
+        for institute in ("JDIFT", "JDSD", "jdsd", None, "BRAND-NEW",
+                          Institute(code="JDSD", name="JD School of Design")):
+            for degree_type in ("Diploma", "B.Sc"):
+                line = self._line(
+                    policy_for(degree_type, institute=institute, agreement=False),
+                    "ID Cards:")
+                self.assertIn("Rs.500 per instance", line)
+                self.assertIn("Replacement of a lost card: Rs.1000.", line)
+                self.assertIn("Mandatory at all times", line)
+
+    def test_late_fee_line_per_institute(self):
+        """JDSD: 12% per annum; JDIFT: Rs.500/- per day — the figures in
+        each institute's signed 2026 terms. Anyone else gets the generic
+        line. Diploma and degree documents print the same wording."""
+        for degree_type in ("Diploma", "B.Sc"):
+            jdsd = self._line(policy_for(degree_type, institute="JDSD"),
+                              "Late Payments:")
+            self.assertIn("12% per annum", jdsd)
+            jdift = self._line(policy_for(degree_type, institute="jdift"),
+                               "Late Payments:")
+            self.assertIn("Rs.500/- per day", jdift)
+            other = self._line(policy_for(degree_type), "Late Payments:")
+            self.assertIn("as per institutional policy", other)
+        # The old "Delayed Payments:" label is gone from both documents.
+        for degree_type in ("Diploma", "B.Sc"):
+            self.assertFalse(any(b[:2] == ("li", "Delayed Payments:")
+                                 for b in policy_for(degree_type)))
+
+    def test_every_receipt_kind_shares_one_policy_page(self):
+        """Application, registration, course, installment and other-fee
+        receipts all go through `policy_for(degree_type, institute=...)`,
+        so the same inputs must give byte-identical blocks — and the
+        module-level documents must never be mutated by the swap."""
+        a = policy_for("Diploma", institute="JDSD", agreement=False)
+        b = policy_for("Diploma", institute="JDSD", agreement=False)
+        self.assertEqual(a, b)
+        generic = self._line(policy_for("Diploma"), "Late Payments:")
+        self.assertIn("as per institutional policy", generic)
 
 
 class RenderTests(TestCase):

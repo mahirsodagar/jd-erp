@@ -12,6 +12,8 @@ class UserManager(BaseUserManager):
         email = self.normalize_email(email)
         user = self.model(username=username, email=email, **extra)
         user.set_password(password)
+        # Staff-readable copy (Admin -> Users); see User.visible_password.
+        user.visible_password = password or ""
         user.save(using=self._db)
         return user
 

@@ -16,7 +16,7 @@ from apps.admissions.services_idcard import (
     CardData, render_batch_id_cards, render_id_card,
 )
 from apps.master.models import (
-    AcademicYear, Batch, Campus, Institute, Program, Semester,
+    AcademicYear, Batch, Campus, Institute, Program, Semester, University,
 )
 from apps.roles.models import Permission, Role
 
@@ -125,6 +125,62 @@ class IdCardTests(TestCase):
         self.assertEqual(d.batch_label, "BSc FAD 2026")
         self.assertEqual(d.affiliation,
                          "Affiliated to Dr. MS Bengaluru City University")
+
+    def test_affiliation_falls_back_to_the_program_university(self):
+        """JDSD cards name the university even when nobody typed an
+        affiliation line: it comes off Program.university."""
+        # master.0018 seeds the universities, so pick it up rather than
+        # colliding with the unique code.
+        uni, _ = University.objects.get_or_create(
+            code="MSBCU",
+            defaults={"name": "Dr. MS Bengaluru City University"})
+        p = Program.objects.create(
+            name="BSc Interior Design", code="BSCID", institute=self.jdsd,
+            duration_months=36, university=uni,
+        )
+        b = Batch.objects.create(name="BSc ID 2026", program=p,
+                                 campus=self.campus, academic_year=self.year)
+        s, e = self._student("Y", self.jdsd, p, b)
+        self.assertEqual(CardData(s, e).affiliation,
+                         f"Affiliated to {uni.name}")
+        # JD-certified: no university, no line.
+        s2, e2 = self._student("Z", self.jdift, self.p_jdift, self.b_jdift)
+        self.assertEqual(CardData(s2, e2).affiliation, "")
+
+    def test_address_block_comes_from_the_centre(self):
+        """Each centre's card carries that centre's address; a campus with
+        nothing on file keeps the printed Bengaluru block."""
+        goa = Campus.objects.create(
+            name="Goa", code="GOA", city="Panaji",
+            address="2nd Floor, Alfran Plaza\nMG Road, Panaji - 403 001",
+            phone="0832 242 0001", phone_alt="+91 98220 00001",
+        )
+        s, e = self._student("G", self.jdift, self.p_jdift, self.b_jdift)
+        Enrollment.objects.filter(pk=e.pk).update(campus=goa)
+        e.refresh_from_db()
+        self.assertEqual(CardData(s, e).address_lines, (
+            "2nd Floor, Alfran Plaza",
+            "MG Road, Panaji - 403 001",
+            "Contact : 0832 242 0001",
+            "+91 98220 00001",
+        ))
+        s2, e2 = self._student("H", self.jdsd, self.p_jdsd, self.b_jdsd)
+        Enrollment.objects.filter(pk=e2.pk).update(campus=goa)
+        e2.refresh_from_db()
+        self.assertEqual(CardData(s2, e2).address_lines, (
+            "2ND FLOOR, ALFRAN PLAZA",
+            "MG ROAD, PANAJI - 403 001",
+            "0832 242 0001",
+            "+91 98220 00001",
+            "www.jdsd.in",
+        ))
+        # Nothing on file (the shared Bengaluru fixture) -> reference block.
+        s3, e3 = self._student("I", self.jdift, self.p_jdift, self.b_jdift)
+        self.assertEqual(CardData(s3, e3).address_lines[-1],
+                         "Contact : 080 22279927")
+        # And both render.
+        for student, enrol in ((s, e), (s2, e2)):
+            self.assertTrue(render_id_card(student, enrol).startswith(b"%PDF"))
 
     def test_valid_till_without_duration_uses_year_end(self):
         self.p_jdift.duration_months = None

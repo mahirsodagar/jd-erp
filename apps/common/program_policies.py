@@ -34,17 +34,55 @@ signature boxes), exactly as the paper receipt does.
 
 from __future__ import annotations
 
-# ID-card replacement fee per institute code. JD Institute keeps the
-# legacy Rs.500; JD School of Design charges Rs.1000 (finance, 2026-11).
-ID_CARD_REPLACEMENT_FEE = {"JDIFT": 500, "JDSD": 1000}
-_DEFAULT_ID_CARD_FEE = 500
+# --- Institute-specific lines ----------------------------------------
+#
+# The penalty and ID-card figures come from the signed 2026 terms
+# (`apps.admissions.application_terms`): JDSD "FEES, ACADEMIC RULES,
+# STUDENT REGULATIONS AND UNDERTAKING" §1 and §3, JDIFT "RULES &
+# REGULATIONS, FEE POLICY AND STUDENT UNDERTAKING" §A and §C. Every fee
+# receipt — application, registration, course, installment, other fee —
+# and the fee payment schedule print the SAME line for an institute, so
+# a student never reads one penalty on the registration receipt and
+# another on an installment receipt. Keep these in step with the terms.
+
+#: Late-payment wording per institute code.
+LATE_FEE_WORDING = {
+    "JDSD": ("Delayed fee payments will incur a late fee of 12% per annum "
+             "on the overdue amount, calculated from the due date until the "
+             "date of payment. Bank charges actually incurred on a "
+             "dishonoured cheque are payable by the student."),
+    "JDIFT": ("Fees not remitted on or before the due date attract a late "
+              "payment penalty of Rs.500/- per day, calculated from the date "
+              "on which the respective instalment falls due. Bank charges "
+              "actually incurred on a dishonoured cheque are payable by the "
+              "student."),
+}
+_DEFAULT_LATE_FEE = ("Delayed fee payments will incur penalties as per "
+                     "institutional policy.")
+
+#: Fine for not wearing / producing the ID card, per instance. Both 2026
+#: documents carry the same figure.
+ID_CARD_FINE = 500
+#: Replacement fee for a lost ID card per institute code. Both 2026
+#: documents say Rs.1000 (the pre-2026 JD Institute figure was Rs.500).
+ID_CARD_REPLACEMENT_FEE = {"JDIFT": 1000, "JDSD": 1000}
+_DEFAULT_ID_CARD_FEE = 1000
 
 
-def _id_card_line(fee: int) -> tuple:
+def _late_fee_line(wording: str) -> tuple:
+    return ("li", "Late Payments:", wording)
+
+
+def _id_card_line(fee: int, fine: int = ID_CARD_FINE) -> tuple:
     return ("li", "ID Cards:",
-            f"Mandatory at all times. Replacement fee: Rs.{fee}.")
+            "Mandatory at all times on campus, including class hours, "
+            "breaks, visits, examinations and institute events. Failure to "
+            f"wear or produce the card attracts a fine of Rs.{fine} per "
+            f"instance. Replacement of a lost card: Rs.{fee}. Cards are "
+            "non-transferable; misuse is treated as serious misconduct.")
 
 
+_LATE_FEE_LINE = _late_fee_line(_DEFAULT_LATE_FEE)
 _ID_CARD_LINE = _id_card_line(_DEFAULT_ID_CARD_FEE)
 
 _SHARED_ADDITIONAL = [
@@ -74,7 +112,7 @@ DIPLOMA = [
      "All fees are strictly non-refundable and non-transferable under any "
      "circumstances."),
     ("li", "Certificates:", "Issued only upon successful completion of the course."),
-    ("li", "Delayed Payments:", "Will incur penalties as per institutional policy."),
+    _LATE_FEE_LINE,
     ("li", "Repeats:",
      "Students repeating a semester/subject must pay separate examination fees."),
     ("li", "Course Fees Include:",
@@ -124,8 +162,7 @@ DEGREE = [
     ("li", "Rejected Applications:",
      "If the university rejects a student's application, they may opt for "
      "an alternate course at JD Institute."),
-    ("li", "Late Payments:",
-     "Delayed fee payments will incur penalties as per institutional policy."),
+    _LATE_FEE_LINE,
     ("li", "Course Fee Includes:",
      "Tuition, library access, and laboratory usage for the academic year."),
     ("li", "Examination Fees:", "Paid separately by the student."),
@@ -188,13 +225,18 @@ def policy_for(degree_type: str | None, *, agreement: bool = True,
 
     `agreement=False` drops the AGREEMENT clause — the receipt variant,
     which nobody signs. `institute` (an `Institute` or its code) swaps in
-    that institute's ID-card replacement fee; without it the default
-    Rs.500 prints."""
+    that institute's late-payment penalty and ID-card figures from the
+    signed 2026 terms; without it (or for an institute without its own
+    terms) the generic "as per institutional policy" line prints.
+
+    The module-level documents are never mutated: a fresh list is
+    returned every call."""
     doc = DIPLOMA if is_diploma(degree_type) else DEGREE
     if not agreement:
         doc = [b for b in doc if b not in _AGREEMENT]
-    code = institute if isinstance(institute, str) else getattr(institute, "code", "")
-    fee = ID_CARD_REPLACEMENT_FEE.get((code or "").upper(), _DEFAULT_ID_CARD_FEE)
-    if fee != _DEFAULT_ID_CARD_FEE:
-        doc = [_id_card_line(fee) if b == _ID_CARD_LINE else b for b in doc]
-    return doc
+    code = (institute if isinstance(institute, str)
+            else getattr(institute, "code", "") or "").upper()
+    late_fee = _late_fee_line(LATE_FEE_WORDING.get(code, _DEFAULT_LATE_FEE))
+    id_card = _id_card_line(ID_CARD_REPLACEMENT_FEE.get(code, _DEFAULT_ID_CARD_FEE))
+    swaps = {_LATE_FEE_LINE: late_fee, _ID_CARD_LINE: id_card}
+    return [swaps.get(b, b) for b in doc]
