@@ -10,22 +10,20 @@ Ports of the two printed documents the legacy PHP ERP produced from
   the A-F grade system and the scrutiny / principal signature block.
 - `academic_report.php`      -> **Marks Card** ("Student Academic
   Record"): institute, student number + photo, name, program, batch,
-  academic year, one Course / Grade table across every subject, the
-  attendance %, then the A+ .. F grade system with comments.
+  academic year, one Course / Grade table across every subject, then
+  the A+ .. F grade system with comments.
 
 Both score a subject on its marks alone (client rule 2026-11-24)::
 
     score = round((ia + ea) / (ia_max + ea_max) * 100)
 
-Attendance is NOT part of the score any more — the legacy PHP folded
-present / total into a 40 / 40 / 20 composite, which the client dropped.
-Instead each subject row prints the student's attendance in that
-subject as a percentage (across every class marked, not just the
-semester), and the Marks Card also prints the overall percentage. A
-subject with no IA or no EA on file grades "NA"; a subject with no
-attendance on file still grades, and its attendance prints as "—". The
-two documents use *different* grade bands (below); that is deliberate
-and matches the originals.
+Attendance is NOT part of the score — the legacy PHP folded present /
+total into a 40 / 40 / 20 composite, which the client dropped. From
+2026-11-24 to 2026-11-25 each row also printed an attendance %, and
+the client then asked for that column to go too: neither document
+mentions attendance any more. A subject with no IA or no EA on file
+grades "NA". The two documents use *different* grade bands (below);
+that is deliberate and matches the originals.
 
 Only PUBLISHED marks appear. These are official documents handed to
 the student, so a draft sheet never prints.
@@ -36,13 +34,11 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
-from django.db.models import Count, Q
 from fpdf import FPDF
 
 from apps.common.pdf_theme import logo_path, safe
 
-from .attendance_reports import PRESENT_LIKE
-from .models import Attendance, MarksEntry
+from .models import MarksEntry
 
 _ASSETS = Path(__file__).resolve().parent / "transcript_assets"
 #: The legacy documents carried the JD Institute logo regardless of
@@ -83,22 +79,6 @@ MARKS_CARD_SCALE = (
 
 # --- Scoring ------------------------------------------------------------
 
-def _attendance_by_subject(student) -> dict[int, tuple[int, int]]:
-    """{subject_id: (present, total)} over every class marked for the
-    student, the way the legacy query grouped `attendance_master`."""
-    rows = (
-        Attendance.objects
-        .filter(student=student)
-        .values("schedule_slot__subject_id")
-        .annotate(
-            present=Count("id", filter=Q(status__in=PRESENT_LIKE)),
-            total=Count("id"),
-        )
-    )
-    return {r["schedule_slot__subject_id"]: (r["present"], r["total"])
-            for r in rows}
-
-
 def marks_score(entry: MarksEntry) -> int | None:
     """IA + EA as a percentage of IA max + EA max, rounded half up; None
     when either mark is missing or the maxima are zero. Attendance plays
@@ -110,11 +90,6 @@ def marks_score(entry: MarksEntry) -> int | None:
         return None
     score = (float(entry.ia_marks) + float(entry.ea_marks)) / max_total * 100
     return int(score + 0.5) if score >= 0 else -int(-score + 0.5)
-
-
-def attendance_pct(present: int, total: int) -> int | None:
-    """Whole-number percentage, or None when nothing is on file."""
-    return int(present / total * 100 + 0.5) if total else None
 
 
 def grade_for(score: int | None, scale) -> str:
@@ -133,27 +108,16 @@ def _graded_entries(student, *, only_published: bool):
           .order_by("semester__number", "subject__code"))
     if only_published:
         qs = qs.filter(published=True)
-    att = _attendance_by_subject(student)
-    out = []
-    for m in qs:
-        present, total = att.get(m.subject_id, (0, 0))
-        out.append((m, marks_score(m), present, total))
-    return out
+    return [(m, marks_score(m)) for m in qs]
 
 
-def _row(m: MarksEntry, score: int | None, present: int, total: int,
-         scale) -> dict:
+def _row(m: MarksEntry, score: int | None, scale) -> dict:
     return {
         "subject_code": m.subject.code,
         "subject_name": m.subject.name,
         "score": score,
         "grade": grade_for(score, scale),
-        "attendance_pct": attendance_pct(present, total),
     }
-
-
-def _pct_text(pct: int | None) -> str:
-    return f"{pct}%" if pct is not None else "—"
 
 
 # --- Document data ------------------------------------------------------
@@ -189,8 +153,7 @@ def _context(student) -> dict:
 def transcript_document(student, *, only_published: bool = True) -> dict:
     ctx = _context(student)
     by_sem: dict[int, dict] = {}
-    for m, score, present, total in _graded_entries(
-            student, only_published=only_published):
+    for m, score in _graded_entries(student, only_published=only_published):
         sem = m.semester
         bucket = by_sem.setdefault(sem.id, {
             "semester_id": sem.id,
@@ -198,7 +161,7 @@ def transcript_document(student, *, only_published: bool = True) -> dict:
             "semester_name": sem.name,
             "rows": [],
         })
-        bucket["rows"].append(_row(m, score, present, total, TRANSCRIPT_SCALE))
+        bucket["rows"].append(_row(m, score, TRANSCRIPT_SCALE))
     ctx["semesters"] = sorted(by_sem.values(),
                               key=lambda b: b["semester_number"])
     return ctx
@@ -206,20 +169,10 @@ def transcript_document(student, *, only_published: bool = True) -> dict:
 
 def marks_card_document(student, *, only_published: bool = True) -> dict:
     ctx = _context(student)
-    rows = []
-    tot_present = tot_total = 0
-    seen_subjects: set[int] = set()
-    for m, score, present, total in _graded_entries(
-            student, only_published=only_published):
-        # Attendance is per subject across every semester, so a subject
-        # that appears in two semesters must count once in the overall.
-        if m.subject_id not in seen_subjects:
-            seen_subjects.add(m.subject_id)
-            tot_present += present
-            tot_total += total
-        rows.append(_row(m, score, present, total, MARKS_CARD_SCALE))
-    ctx["rows"] = rows
-    ctx["attendance_pct"] = attendance_pct(tot_present, tot_total)
+    ctx["rows"] = [
+        _row(m, score, MARKS_CARD_SCALE)
+        for m, score in _graded_entries(student, only_published=only_published)
+    ]
     return ctx
 
 
@@ -476,8 +429,8 @@ def _t_table_height(rows: int) -> float:
 
 def _t_semester_table(pdf: FPDF, title: str, rows, x: float, y: float,
                       width: float) -> float:
-    code_w, att_w, grade_w = 36.0, 24.0, 22.0
-    course_w = width - code_w - att_w - grade_w
+    code_w, grade_w = 36.0, 28.0
+    course_w = width - code_w - grade_w
     pdf.set_draw_color(0, 0, 0)
     pdf.set_line_width(0.2)
     pdf.set_fill_color(*T_NAVY)
@@ -493,18 +446,16 @@ def _t_semester_table(pdf: FPDF, title: str, rows, x: float, y: float,
     pdf.set_xy(x, y)
     pdf.cell(code_w, 7, "Subject code", border=1, fill=True)
     pdf.cell(course_w, 7, "Course", border=1, fill=True)
-    pdf.cell(att_w, 7, "Attendance", border=1, fill=True, align="C")
     pdf.cell(grade_w, 7, "Grade", border=1, fill=True, align="C")
     y += 7
 
     pdf.set_text_color(*T_TEXT)
     pdf.set_font("Helvetica", "", 7.6)
-    for code, course, attendance, grade in rows:
+    for code, course, grade in rows:
         pdf.set_xy(x, y)
         pdf.cell(code_w, _T_ROW_H, _fit(pdf, safe(code), code_w), border=1)
         pdf.cell(course_w, _T_ROW_H, _fit(pdf, safe(course), course_w),
                  border=1)
-        pdf.cell(att_w, _T_ROW_H, safe(attendance), border=1, align="C")
         pdf.cell(grade_w, _T_ROW_H, safe(grade), border=1, align="C")
         y += _T_ROW_H
     return y
@@ -610,8 +561,7 @@ def render_transcript_pdf(student, *, only_published: bool = True) -> bytes:
             y = _T_CONT_TOP
         y = _t_semester_table(
             pdf, f"SEMESTER {sem['semester_number']}",
-            [(r["subject_code"], r["subject_name"],
-              _pct_text(r["attendance_pct"]), r["grade"])
+            [(r["subject_code"], r["subject_name"], r["grade"])
              for r in sem["rows"]],
             _T_TABLE_X, y, _T_TABLE_W,
         ) + 6
@@ -671,11 +621,10 @@ def render_marks_card_pdf(student, *, only_published: bool = True) -> bytes:
     _labelled(pdf, "Academic Year: ", doc["academic_year"], width=text_w)
     pdf.set_y(max(pdf.get_y(), photo_y + photo_h) + 6)
 
-    headers = [("Course", 120, "L"), ("Attendance", 30, "C"), ("Grade", 30, "C")]
+    headers = [("Course", 140, "L"), ("Grade", 40, "C")]
     if doc["rows"]:
         _table(pdf, headers,
-               [[r["subject_name"], _pct_text(r["attendance_pct"]), r["grade"]]
-                for r in doc["rows"]])
+               [[r["subject_name"], r["grade"]] for r in doc["rows"]])
     else:
         pdf.set_font("Helvetica", "I", 11)
         pdf.set_text_color(90, 90, 90)
@@ -683,18 +632,14 @@ def render_marks_card_pdf(student, *, only_published: bool = True) -> bytes:
                  new_x="LMARGIN", new_y="NEXT")
     pdf.ln(6)
 
-    # Current GPA ..... Attendance (legacy printed GPA as N/A).
+    # Current GPA / Cumulative GPA (legacy printed both as N/A). The
+    # overall attendance that used to sit on this line was dropped with
+    # the column (client, 2026-11-25).
     pdf.set_font("Helvetica", "", 11)
     pdf.set_text_color(*LABEL_BLUE)
     pdf.cell(28, 6, "Current GPA: ")
     pdf.set_text_color(0, 0, 0)
-    pdf.cell(62, 6, "N/A")
-    pdf.set_text_color(*LABEL_BLUE)
-    pdf.cell(26, 6, "Attendance: ")
-    pdf.set_text_color(200, 0, 0)
-    att = doc["attendance_pct"]
-    pdf.cell(0, 6, f"{att}%" if att is not None else "N/A",
-             new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, "N/A", new_x="LMARGIN", new_y="NEXT")
     pdf.set_text_color(*LABEL_BLUE)
     pdf.cell(34, 6, "Cumulative GPA: ")
     pdf.set_text_color(0, 0, 0)

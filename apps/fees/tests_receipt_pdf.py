@@ -17,7 +17,9 @@ from django.test import TestCase
 from apps.admissions.models import Enrollment, Student
 from apps.common.program_policies import policy_for
 from apps.fees.models import FeeReceipt
-from apps.fees.services.pdf import amount_in_words, render_receipt_pdf
+from apps.fees.services.pdf import (
+    amount_in_words, issued_by_label, render_receipt_pdf,
+)
 from apps.fees.services.receipt_no import generate_receipt_no
 from apps.master.models import (
     AcademicYear, Batch, Campus, Institute, Program, Semester,
@@ -130,6 +132,52 @@ class PolicyPageTests(TestCase):
         self.assertEqual(a, b)
         generic = self._line(policy_for("Diploma"), "Late Payments:")
         self.assertIn("as per institutional policy", generic)
+
+
+class IssuedByTests(TestCase):
+    """Every receipt names an issuer: the cashier when a staff member
+    recorded it, the institute's accounts office otherwise (gateway
+    settlements and registration / application receipts have no human
+    behind them). Client request, 2026-11-25."""
+
+    def test_cashier_name_when_recorded_by_staff(self):
+        from django.contrib.auth import get_user_model
+        user = get_user_model().objects.create_user(
+            username="cashier1", email="c1@example.com", password="x",
+            full_name="Priya Nair",
+        )
+        base = _fixture()
+        r = _receipt(base, received_by=user)
+        self.assertEqual(issued_by_label(r), "Priya Nair")
+
+    def test_username_when_no_full_name(self):
+        from django.contrib.auth import get_user_model
+        user = get_user_model().objects.create_user(
+            username="cashier2", email="c2@example.com", password="x",
+        )
+        r = _receipt(_fixture(), received_by=user)
+        self.assertEqual(issued_by_label(r), "cashier2")
+
+    def test_accounts_office_fallback_for_online_receipts(self):
+        base = _fixture()
+        r = _receipt(base, received_by=None)
+        label = issued_by_label(r)
+        self.assertTrue(label.startswith("Accounts Office, "), label)
+        self.assertIn(base.student.institute.name, label)
+        # And the serializer the Fee Reports export reads says the same.
+        from apps.fees.serializers import FeeReceiptDetailSerializer
+        self.assertEqual(FeeReceiptDetailSerializer(r).data["received_by_name"], label)
+
+    def test_duck_typed_receipts_get_a_label_too(self):
+        """Registration / application receipts are plain objects, not
+        FeeReceipt rows; they must not blow up on missing attributes."""
+        from types import SimpleNamespace
+        inst = SimpleNamespace(name="JD School of Design")
+        r = SimpleNamespace(
+            received_by_id=None, received_by=None,
+            enrollment=SimpleNamespace(student=SimpleNamespace(institute=inst)),
+        )
+        self.assertEqual(issued_by_label(r), "Accounts Office, JD School of Design")
 
 
 class RenderTests(TestCase):

@@ -306,11 +306,13 @@ class StudentMeDocumentsView(APIView):
 
     def get(self, request):
         student = self._self(request)
-        return Response(StudentDocumentSerializer(student.documents.all(), many=True).data)
+        return Response(StudentDocumentSerializer(
+            student.documents.all(), many=True, context={"request": request},
+        ).data)
 
     def post(self, request):
         student = self._self(request)
-        s = StudentDocumentSerializer(data=request.data)
+        s = StudentDocumentSerializer(data=request.data, context={"request": request})
         s.is_valid(raise_exception=True)
         s.save(uploaded_by=request.user, student=student)
         return Response(s.data, status=http.HTTP_201_CREATED)
@@ -334,13 +336,15 @@ class StudentDocumentsView(APIView):
         student = self._student(request, pk)
         if not has_perm(request.user, "admissions.document.view"):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
-        return Response(StudentDocumentSerializer(student.documents.all(), many=True).data)
+        return Response(StudentDocumentSerializer(
+            student.documents.all(), many=True, context={"request": request},
+        ).data)
 
     def post(self, request, pk):
         student = self._student(request, pk)
         if not has_perm(request.user, "admissions.document.add"):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
-        s = StudentDocumentSerializer(data=request.data)
+        s = StudentDocumentSerializer(data=request.data, context={"request": request})
         s.is_valid(raise_exception=True)
         s.save(uploaded_by=request.user, student=student)
         return Response(s.data, status=http.HTTP_201_CREATED)

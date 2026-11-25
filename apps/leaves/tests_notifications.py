@@ -11,13 +11,20 @@ from apps.leaves.services.notifications import (
 )
 
 
+# The wording comes from the system e-mail template
+# `leaves.application_employee.email`; the caller supplies the variables.
 SEND_KW = dict(
     template=TPL_LEAVE_APPLIED,
     to="manager@jdinstitute.edu.in",
     cc="hr@jdinstitute.edu.in",
-    subject="Leave application — Asha (2026-09-16)",
-    body="Asha has applied for Casual Leave.",
+    context={
+        "Employee_Name": "Asha", "Employee_Code": "JD01",
+        "Leave_Type": "Casual Leave", "From_Date": "16-09-2026",
+        "To_Date": "16-09-2026", "Days": "1", "Session": "Full day",
+        "Reason": "Personal",
+    },
 )
+EXPECTED_SUBJECT = "Leave application — Asha (16-09-2026)"
 
 
 @override_settings(
@@ -35,7 +42,8 @@ class LeaveMailDeliveryTests(TestCase):
         msg = mail.outbox[0]
         self.assertEqual(msg.to, ["manager@jdinstitute.edu.in"])
         self.assertEqual(msg.cc, ["hr@jdinstitute.edu.in"])
-        self.assertEqual(msg.subject, SEND_KW["subject"])
+        self.assertEqual(msg.subject, EXPECTED_SUBJECT)
+        self.assertIn("Asha (JD01) has applied for Casual Leave", msg.body)
         # From is the fixed no-reply sender; replies go to the leave dept.
         self.assertIn("no-reply@dkul.in", msg.from_email)
         self.assertEqual(msg.reply_to, ["leave@jdinstitute.edu.in"])

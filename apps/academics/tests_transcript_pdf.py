@@ -72,8 +72,9 @@ class TranscriptPdfTests(TestCase):
             campus=campus, batch=cls.batch, academic_year=year,
             status=Enrollment.Status.ACTIVE,
         )
-        # 4 of 5 classes present in CORE -> 80% attendance (shown, not
-        # scored: marks are IA + EA only since 2026-11-24).
+        # Attendance on file in CORE / DRAW, none in THEO. It must not
+        # influence the grade nor appear on either document (client,
+        # 2026-11-24 score rule; 2026-11-25 column removed).
         for i, st in enumerate(["PRESENT", "PRESENT", "PRESENT", "LATE", "ABSENT"]):
             slot = ScheduleSlot.objects.create(
                 batch=cls.batch, subject=cls.core, instructor=faculty,
@@ -126,41 +127,38 @@ class TranscriptPdfTests(TestCase):
         self.assertEqual(doc["registration_no"], "AF-1")
         self.assertEqual([s["semester_number"] for s in doc["semesters"]], [1, 2])
         sem1 = {r["subject_code"]: r for r in doc["semesters"][0]["rows"]}
-        # Marks only: 62/80 -> 78 -> C. Attendance rides alongside as a %.
+        # Marks only: 62/80 -> 78 -> C.
         self.assertEqual(sem1["CORE"]["score"], 78)
         self.assertEqual(sem1["CORE"]["grade"], "C")
-        self.assertEqual(sem1["CORE"]["attendance_pct"], 80)
-        # No attendance on file no longer blocks the grade.
+        self.assertNotIn("attendance_pct", sem1["CORE"])
+        # No attendance on file does not block the grade.
         self.assertEqual(sem1["THEO"]["score"], 50)
         self.assertEqual(sem1["THEO"]["grade"], "E")
-        self.assertIsNone(sem1["THEO"]["attendance_pct"])
         self.assertNotIn("DRAW", sem1)  # the draft row is excluded
         sem2 = {r["subject_code"]: r for r in doc["semesters"][1]["rows"]}
         self.assertEqual(sem2["DRAW"]["grade"], "A")
-        self.assertEqual(sem2["DRAW"]["attendance_pct"], 100)
         # A missing IA still grades NA — that is missing marks, not
         # missing attendance.
         self.assertIsNone(sem2["CORE"]["score"])
         self.assertEqual(sem2["CORE"]["grade"], "NA")
 
-    def test_marks_card_document_is_flat_with_attendance(self):
+    def test_marks_card_document_is_flat(self):
         doc = marks_card_document(self.student)
         self.assertEqual(doc["batch_name"], "BD1")
         self.assertEqual(doc["academic_year"], "26-27")
         rows = {(r["subject_code"], r["grade"]) for r in doc["rows"]}
         self.assertEqual(rows, {("CORE", "A"), ("THEO", "C"), ("DRAW", "A+"),
                                 ("CORE", "NA")})
-        # Overall: 4/5 in CORE (counted once although CORE has two rows)
-        # + 1/1 in DRAW, THEO contributes nothing -> 5/6 = 83%
-        self.assertEqual(doc["attendance_pct"], 83)
+        self.assertNotIn("attendance_pct", doc)
 
-    def test_attendance_prints_as_percentage_not_marks(self):
+    def test_no_attendance_on_either_document(self):
+        """Client, 2026-11-25: no attendance column or total anywhere."""
         for pdf in (render_transcript_pdf(self.student),
                     render_marks_card_pdf(self.student)):
             text = _pdf_text(pdf)
-            self.assertIn("Attendance", text)
-            self.assertIn("80%", text)
-            self.assertIn("100%", text)
+            self.assertNotIn("Attendance", text)
+            self.assertNotIn("80%", text)
+            self.assertIn("Grade", text)
 
     def test_pdfs_render(self):
         for pdf in (render_transcript_pdf(self.student),

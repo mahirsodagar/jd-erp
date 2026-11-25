@@ -62,8 +62,16 @@ class PortalDocumentRequestSerializer(serializers.ModelSerializer):
                 if request else obj.attachment.url)
 
 
+# Study Certificate withdrawn on client request (2026-11-25); the enum
+# value stays so existing rows keep their label.
+REQUESTABLE_DOC_TYPES = [
+    (v, label) for v, label in DocumentRequest.DocType.choices
+    if v != DocumentRequest.DocType.STUDY_CERTIFICATE
+]
+
+
 class ApplyDocumentSerializer(serializers.Serializer):
-    doc_type = serializers.ChoiceField(choices=DocumentRequest.DocType.choices)
+    doc_type = serializers.ChoiceField(choices=REQUESTABLE_DOC_TYPES)
     doc_type_other = serializers.CharField(
         required=False, allow_blank=True, max_length=160,
     )

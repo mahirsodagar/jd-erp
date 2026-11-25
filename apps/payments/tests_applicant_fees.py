@@ -252,7 +252,7 @@ class ApplicantFeePageTests(RequiredFixture):
         self.assertTrue(pr.receipt_no.startswith("JDBLR"))
         self.assertEqual(FeeReceipt.objects.count(), 0)
         self.assertEqual(len(mail.outbox), 1)
-        self.assertIn("course fee", mail.outbox[0].body)
+        self.assertIn("Course fee", mail.outbox[0].body)
         self.assertIn(pr.receipt_no, mail.outbox[0].subject)
 
         page = fee_page_for(student)

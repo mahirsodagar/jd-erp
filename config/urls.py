@@ -80,6 +80,8 @@ urlpatterns = [
     path("api/tasks/", include("apps.tasks.urls")),
     path("api/notifications/", include("apps.notifications.urls")),
     path("api/payments/", include("apps.payments.urls")),
+    # System Emails must be registered before the catch-all comms include.
+    path("api/comms/system-emails/", include("apps.notifications.template_urls")),
     path("api/comms/", include("apps.communications.urls")),
 ]
 

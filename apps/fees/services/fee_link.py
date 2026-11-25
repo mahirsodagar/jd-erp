@@ -216,25 +216,20 @@ def fee_type_label(label: str) -> str:
 
 
 def fee_link_context(enrollment, *, label, amount, due_date, url) -> dict:
-    """Context for `fees.fee_link.email`. Carries the client template's
-    names (Student_Name, Course_Name, Fee_type, Payment_Link), the older
-    plain names, and `campus_code` so Reply-To resolves to the campus
-    receipts inbox."""
-    program = enrollment.program
+    """Context for the system e-mail `fees.fee_link.email`: the shared
+    student/program variables plus the client template's Fee_type and
+    Payment_Link; `campus_code` makes Reply-To the campus receipts inbox."""
+    from apps.notifications.context import enrollment_vars
+
     _key, institute_label = _institute_bits(enrollment)
     return {
-        "Student_Name": enrollment.student.student_name,
-        "Course_Name": program.name,
+        **enrollment_vars(enrollment),
+        "Institute_Name": institute_label,
         "Fee_type": fee_type_label(label),
+        "Installment_Label": label,
+        "Amount": _money(amount),
+        "Due_Date": due_date.strftime("%d %b %Y") if due_date else "—",
         "Payment_Link": url,
-        "name": enrollment.student.student_name,
-        "institute": institute_label,
-        "course": program.name,
-        "installment": label,
-        "amount": _money(amount),
-        "due_date": due_date.strftime("%d %b %Y") if due_date else "—",
-        "url": url,
-        "campus_code": getattr(getattr(enrollment, "campus", None), "code", "") or "",
     }
 
 

@@ -141,9 +141,9 @@ def render_no_dues_pdf(certificate) -> bytes:
     pdf.set_font("Helvetica", "", 7.5)
     pdf.set_xy(10, 22)
     issued = certificate.issued_at.strftime("%d-%m-%Y") if certificate.issued_at else ""
-    pdf.cell(190, 5, _safe(
-        f"Certificate No: {certificate.certificate_no}    Date: {issued}"
-    ), align="C")
+    # No certificate number on this sheet (client, 2026-11-25); the
+    # number stays on the record and in the file name.
+    pdf.cell(190, 5, _safe(f"Date: {issued}"), align="C")
 
     pdf.set_font("Helvetica", "", 8.5)
     name = student.get("name") or "_________________________________"
@@ -172,7 +172,7 @@ def render_no_dues_pdf(certificate) -> bytes:
     pdf.set_xy(10, 35)
     pdf.multi_cell(190, 7, _safe(
         f"I {name} have Received the Original Hall Ticket Number {ticket} "
-        "for the University examination"
+        "for the examination"
     ))
 
     y = 255

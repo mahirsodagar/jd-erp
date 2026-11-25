@@ -33,8 +33,10 @@ _DATE_FMT = "%d-%m-%Y"
 
 
 def leave_context(app: StudentLeaveApplication) -> dict:
+    from apps.notifications.context import student_vars
+
     return {
-        "Student_Name": app.student.student_name,
+        **student_vars(app.student),
         "Leave_Start_Date": app.leave_date.strftime(_DATE_FMT),
         "Leave_End_Date": app.leave_edate.strftime(_DATE_FMT),
         "Leave_Count": str(app.days),

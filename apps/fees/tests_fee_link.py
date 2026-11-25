@@ -27,16 +27,16 @@ class SendFeeLinkTests(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        # Migration 0025 seeds the client's HTML; swap in a short text
-        # body so the assertions below can read the rendered values.
-        T.objects.update_or_create(
-            key="fees.fee_link.email",
-            defaults=dict(
-                channel="EMAIL",
-                subject_template="{institute} — Fee payment link",
-                body_template="Dear {Student_Name}, pay {Fee_type} fee for "
-                              "{Course_Name} ({amount}): {Payment_Link}",
-            ),
+        # The code default is the client's HTML; save a short global
+        # customisation (System Emails) so the assertions below can read
+        # the rendered values.
+        from apps.notifications.templating import save_template
+        save_template(
+            key="fees.fee_link.email", institute=None,
+            subject="{{Institute_Name}} — Fee payment link",
+            body_html="<p>Dear {{Student_Name}}, pay {{Fee_type}} fee for "
+                      "{{Course_Name}} ({{Amount}}): {{Payment_Link}}</p>",
+            editor_mode="html",
         )
         cls.jdsd = Institute.objects.create(name="JD School of Design", code="JDSD")
         cls.jdift = Institute.objects.create(name="JD Institute of Fashion Technology", code="JDIFT")

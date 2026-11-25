@@ -189,30 +189,28 @@ class ClientHtmlTemplateTests(TestCase):
         self.assertIn("Apply", m.body)
 
     def test_every_html_file_is_loaded_and_renders(self):
-        """Each file in email_html/ must back its row (a migration loaded
-        it) and render through the dispatcher with no placeholder left."""
-        from apps.notifications import email_html
+        """Each file in email_html/ is the code default of a registered
+        system e-mail and renders through the dispatcher with no
+        placeholder left — whether the caller passes the canonical names
+        or only the client HTML's old names (aliases)."""
+        from apps.notifications import email_html, registry
         from apps.notifications.email_html import load_html
-        from apps.notifications.models import (
-            NotificationDispatchLog, NotificationTemplate,
-        )
-        from apps.notifications.services import (
-            _PLACEHOLDER_RE, queue_notification,
-        )
+        from apps.notifications.models import NotificationDispatchLog
+        from apps.notifications.services import queue_notification
+        from apps.notifications.templating import placeholders
 
         files = sorted(email_html._DIR.glob("*.html"))
         self.assertTrue(files)
         for path in files:
             key = path.name[:-len(".html")]
             with self.subTest(key=key):
-                row = NotificationTemplate.objects.get(key=key)
-                self.assertEqual(row.body_template, load_html(key))
-                body_names = {(m.group(1) or m.group(2))
-                              for m in _PLACEHOLDER_RE.finditer(row.body_template)}
-                subj_names = {(m.group(1) or m.group(2))
-                              for m in _PLACEHOLDER_RE.finditer(row.subject_template)}
-                names = body_names | subj_names
-                ctx = {n: f"V_{n}" for n in names}
+                trig = registry.get(key)
+                self.assertIsNotNone(trig, f"{key} not in registry")
+                self.assertEqual(trig.body(), load_html(key))
+                body_names = placeholders(trig.body())
+                # Old-name-only context for the body, as the shipped HTML
+                # was written for; the subject's canonical names on top.
+                ctx = {n: f"V_{n}" for n in body_names | placeholders(trig.default_subject)}
                 log = queue_notification(template_key=key,
                                          recipient="t@example.com", context=ctx)
                 self.assertEqual(log.status, NotificationDispatchLog.Status.SENT,
@@ -221,11 +219,10 @@ class ClientHtmlTemplateTests(TestCase):
                 html, mime = m.alternatives[0]
                 self.assertEqual(mime, "text/html")
                 self.assertNotIn("{{", html)
+                self.assertNotIn("{{", m.subject)
                 for n in body_names:
                     self.assertIn(f"V_{n}", html)
                     self.assertIn(f"V_{n}", m.body)   # text fallback too
-                for n in subj_names:
-                    self.assertIn(f"V_{n}", m.subject)
 
 
 @override_settings(

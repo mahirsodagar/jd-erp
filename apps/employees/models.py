@@ -125,6 +125,16 @@ class Employee(models.Model):
     department = models.ForeignKey(
         Department, on_delete=models.PROTECT, related_name="employees",
     )
+    # Who appears in every faculty / instructor / mentor picker. Set by
+    # HR regardless of designation — an HOD who also teaches ticks it
+    # (client, 2026-11-25). Defaults on for the Faculty designation at
+    # create time and in migration 0013. The login role "Faculty" is no
+    # use for this: every employee holds it as the baseline.
+    is_teaching = models.BooleanField(
+        default=False,
+        help_text="Teaching staff: listed in timetable, mentor and "
+                  "instructor pickers whatever the designation.",
+    )
     campus = models.ForeignKey(
         "master.Campus", on_delete=models.PROTECT, related_name="employees",
     )

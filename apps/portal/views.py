@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Count, Q, Sum
-from django.http import Http404
+from django.http import FileResponse, Http404
 from django.utils import timezone
 from rest_framework import status as http
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -26,7 +26,9 @@ from apps.admissions.services import sync_portal_password
 from apps.appointments import services as appointment_svc
 from apps.appointments.models import StudentAppointment
 from apps.common.throttles import PasswordChangeThrottle
-from apps.courseware.models import CoursewareMapping, CoursewareTopic
+from apps.courseware.models import (
+    CoursewareAttachment, CoursewareMapping, CoursewareTopic,
+)
 from apps.master.models import Batch, Subject
 from apps.student_leaves import services as leave_svc
 from apps.student_leaves.models import StudentLeaveApplication
@@ -101,11 +103,14 @@ class DashboardView(APIView):
         student = ctx.student
         e = ctx.enrollment
 
-        present = (Attendance.objects
-                   .filter(student=student,
-                           status=Attendance.Status.PRESENT)
-                   .count())
-        total = (Attendance.objects.filter(student=student).count())
+        # Current batch only: a student moved to another batch / program
+        # starts their percentage afresh (client, 2026-11-25).
+        att = Attendance.objects.filter(
+            student=student,
+            schedule_slot__batch=e.batch if e is not None else None,
+        )
+        present = att.filter(status=Attendance.Status.PRESENT).count()
+        total = att.count()
         attendance_pct = round((present / total * 100) if total else 0)
 
         total_assignments = 0
@@ -172,9 +177,12 @@ class AttendanceReportView(APIView):
     permission_classes = [IsStudentOrParent]
 
     def get(self, request):
-        student = request.portal_ctx.student
+        ctx = request.portal_ctx
+        student = ctx.student
+        # Current batch only — see DashboardView.
+        batch = ctx.enrollment.batch if ctx.enrollment is not None else None
         rows = (Attendance.objects
-                .filter(student=student)
+                .filter(student=student, schedule_slot__batch=batch)
                 .select_related("schedule_slot__subject",
                                  "schedule_slot"))
         # group by subject
@@ -409,6 +417,43 @@ class CoursewareListView(APIView):
         return Response(PortalCoursewareTopicSerializer(
             qs, many=True, context={"request": request},
         ).data)
+
+
+class CoursewareAttachmentViewView(APIView):
+    """Stream one courseware file INLINE to the student it is mapped to.
+
+    View-only courseware (client, 2026-11-25): the portal never sees the
+    public /media/ link; this is the only path a student has to the
+    bytes, it needs their login, it is served `inline` (never
+    `attachment`) and marked no-store so nothing lingers in a shared
+    cache. The portal renders it in a viewer with no download control.
+    """
+    permission_classes = [IsStudentOnly]
+
+    def get(self, request, pk):
+        from apps.portal.courseware_files import attachment_kind
+
+        student = request.portal_ctx.student
+        try:
+            att = (CoursewareAttachment.objects
+                   .select_related("topic")
+                   .get(pk=pk, topic__is_published=True,
+                        topic__mappings__student=student))
+        except CoursewareAttachment.DoesNotExist as e:
+            raise Http404 from e
+        if not att.file:
+            raise Http404
+        _kind, content_type = attachment_kind(att.file.name)
+        try:
+            fh = att.file.open("rb")
+        except (FileNotFoundError, OSError, ValueError) as e:
+            raise Http404 from e
+        resp = FileResponse(fh, content_type=content_type, as_attachment=False)
+        # Explicit: inline, never a download prompt.
+        resp["Content-Disposition"] = "inline"
+        resp["Cache-Control"] = "private, no-store"
+        resp["X-Content-Type-Options"] = "nosniff"
+        return resp
 
 
 # --- Tests ---------------------------------------------------------

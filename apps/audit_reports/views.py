@@ -770,7 +770,18 @@ class CourseEndReportListCreateView(APIView):
         if not has_perm(u, "audit.course_end.submit"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
-        s = CourseEndReportSerializer(data=request.data)
+        data = request.data.copy() if hasattr(request.data, "copy") else dict(request.data)
+        # A plain faculty login files for themselves only (client,
+        # 2026-11-25): the instructor is their own employee record,
+        # whatever the body says. HOD / admin (anyone who can see every
+        # report) may file on a colleague's behalf.
+        own = getattr(u, "employee", None)
+        if own is not None and not (
+            has_perm(u, "audit.course_end.view_all")
+            or has_perm(u, "audit.course_end.edit_any")
+        ):
+            data["instructor"] = own.pk
+        s = CourseEndReportSerializer(data=data)
         s.is_valid(raise_exception=True)
         s.save(submitted_by=u)
         return Response(s.data, status=http.HTTP_201_CREATED)

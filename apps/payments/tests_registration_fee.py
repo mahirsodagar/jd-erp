@@ -112,9 +112,11 @@ class RegistrationFeeAtApplicationTests(RequiredFixture):
         self.assertIn(str(pr.token), rp["pay_url"])
 
         # The office acknowledgement copy (with the PDF) carries the
-        # link; the student copy goes out alongside without it.
-        self.assertEqual(len(mail.outbox), 2)
-        office = next(m for m in mail.outbox if m.attachments)
+        # link; the student copy goes out alongside without it. (The
+        # lead fixture also fires the automatic lead welcome mail.)
+        acks = [m for m in mail.outbox if not m.subject.startswith("Welcome")]
+        self.assertEqual(len(acks), 2)
+        office = next(m for m in acks if m.attachments)
         self.assertIn(rp["pay_url"], office.body)
         self.assertIn("Registration fee: Rs. 10,000.00", office.body)
 
@@ -221,7 +223,7 @@ class RegistrationFeeAtApplicationTests(RequiredFixture):
         self.assertEqual(m.to, ["asha@example.com"])
         self.assertEqual(m.cc, ["receipts.blr@jdinstitute.edu.in"])
         self.assertIn(pr.receipt_no, m.subject)
-        self.assertIn("registration fee", m.body)
+        self.assertIn("Registration fee", m.body)
         name, content, mimetype = m.attachments[0]
         self.assertEqual(name, f"{pr.receipt_no}.pdf")
         self.assertEqual(mimetype, "application/pdf")

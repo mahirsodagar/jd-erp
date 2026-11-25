@@ -630,6 +630,12 @@ CATALOGUE = [
     ("comms", "comms.template.manage", "Create, edit and delete email templates"),
     ("comms", "comms.suppression.view", "See the unsubscribe / suppression list"),
     ("comms", "comms.suppression.manage", "Add to and remove from the suppression list"),
+    # System Emails — the wording of every mail the ERP sends (receipts,
+    # links, leave, relieving, credentials…). `view` opens the page and
+    # previews; `manage` edits subject/body/Reply-To/CC, attachments,
+    # the institute header/footer layout, reverts and test-sends.
+    ("comms", "comms.system_email.view", "See the system email templates and preview them"),
+    ("comms", "comms.system_email.manage", "Edit system email templates, attachments and the email layout"),
 ]
 
 

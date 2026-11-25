@@ -87,6 +87,7 @@ class EmployeeListSerializer(serializers.ModelSerializer):
         fields = [
             "id", "emp_code", "full_name",
             "designation", "department", "campus", "campus_id",
+            "is_teaching",
             "email_primary", "mobile_primary",
             "photo_url", "status", "date_of_joining",
         ]
@@ -125,7 +126,7 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
             "employment_type",
             "employment_category", "employment_category_label",
             "date_of_appointment", "date_of_joining",
-            "designation", "designation_name",
+            "designation", "designation_name", "is_teaching",
             "department", "department_name",
             "campus", "campus_name",
             "institute", "institute_name",
@@ -267,7 +268,26 @@ class _EmployeeWriteBase(serializers.ModelSerializer):
         return attrs
 
 
+def default_is_teaching(designation) -> bool:
+    """Faculty-designated staff teach unless HR says otherwise."""
+    from django.conf import settings
+    names = {
+        n.strip().lower()
+        for n in getattr(settings, "TIMETABLE_FACULTY_DESIGNATIONS", ["Faculty"])
+        if n and n.strip()
+    }
+    return bool(designation) and designation.name.strip().lower() in names
+
+
 class EmployeeCreateSerializer(_EmployeeWriteBase):
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        # Not sent by the caller: derive from the designation so a new
+        # Faculty hire lands in the pickers without HR ticking anything.
+        if "is_teaching" not in self.initial_data:
+            attrs["is_teaching"] = default_is_teaching(attrs.get("designation"))
+        return attrs
+
     class Meta:
         model = Employee
         fields = [
@@ -278,6 +298,7 @@ class EmployeeCreateSerializer(_EmployeeWriteBase):
             "employment_type", "employment_category",
             "date_of_appointment", "date_of_joining",
             "designation", "department", "campus", "institute",
+            "is_teaching",
             "reporting_manager_1", "reporting_manager_2",
             "reporting_manager_3", "reporting_manager_4",
             "current_address", "current_city", "current_state",
@@ -308,6 +329,7 @@ class EmployeeUpdateSerializer(_EmployeeWriteBase):
             "employment_type", "employment_category",
             "date_of_appointment", "date_of_joining",
             "designation", "department", "campus", "institute",
+            "is_teaching",
             "reporting_manager_1", "reporting_manager_2",
             "reporting_manager_3", "reporting_manager_4",
             "current_address", "current_city", "current_state",

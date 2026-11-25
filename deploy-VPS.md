@@ -78,6 +78,21 @@ deploy-jd-erp
 > **Anything you change locally must be committed and pushed to `main`
 > first** — the deploy only pulls what's on GitHub.
 
+### 2026-11-25 release — System Emails (template management)
+
+Migrations `notifications.0026` + `0027` create the template tables.
+Two new permission keys (`comms.system_email.view` / `.manage`) must be
+seeded after the deploy — the deploy script does **not** do it:
+
+```bash
+cd /var/www/jd-erp && source venv/bin/activate
+python manage.py migrate_permissions --dry-run   # then without --dry-run
+```
+
+Roles that hold `comms.template.manage` receive `manage`; bulk-email
+managers receive `view`. Nothing else changes until an admin edits a
+template: every mail keeps its previous wording as the code default.
+
 ### Recommended deploy flow (when a migration is involved)
 
 Migrations run against the **production database** (real data). Snapshot

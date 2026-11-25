@@ -25,25 +25,22 @@ application) with the transport's verdict. Delivery never raises — a mail
 failure must not undo an approval or a finalization.
 """
 
-from django.contrib.contenttypes.models import ContentType
-from django.utils import timezone
-
-from apps.notifications.models import NotificationDispatchLog, NotificationTemplate
+from apps.notifications.models import NotificationDispatchLog
 
 from .letters import render_experience_letter, render_relieving_letter
 from .models import RelievingApproval
 
 
-# Keys registered in settings.EMAIL_REPLY_TO_POLICY. Mail leaves From
-# no-reply@dkul.in; replies go to the first approver in the chain (the
-# manager handling the application), else the Principal's inbox.
+# System e-mail keys (apps.notifications.registry; wording editable under
+# Communication → System Emails) also registered in
+# settings.EMAIL_REPLY_TO_POLICY. Mail leaves From no-reply@dkul.in;
+# replies go to the first approver in the chain (the manager handling
+# the application), else the Principal's inbox.
 TPL_APPLICATION = "hr.relieving.application.email"
 TPL_REJECTED = "hr.relieving.application_rejected.email"
 TPL_APPROVED = "hr.relieving.application_approved.email"  # PART_TIME completion
 TPL_RELIEVING_LETTER = "hr.relieving.letter.email"
 TPL_EXPERIENCE_LETTER = "hr.relieving.experience_letter.email"
-
-_FOOTER = "\n\nNote: This is an auto-generated mail. Please do not reply."
 
 
 # --- Plumbing ------------------------------------------------------
@@ -74,50 +71,29 @@ def _join(*groups) -> str:
     return ", ".join(out)
 
 
-def _send(*, template: str, application, to: str, cc: str, subject: str,
-          body: str, attachments=()) -> NotificationDispatchLog:
-    from apps.notifications.email import send_email
-    from apps.notifications.reply_to import resolve_reply_to
+def _send(*, template: str, application, to: str, cc: str, context: dict,
+          attachments=()) -> NotificationDispatchLog:
+    """One relieving mail from its system e-mail template (Communication
+    → System Emails), logged in NotificationDispatchLog."""
+    from apps.notifications.context import employee_vars
+    from apps.notifications.services import send_system_email
 
     # Don't CC the primary recipient.
     cc = _join([c for c in cc.split(",") if c.strip().lower() != to.lower()])
-
-    log = NotificationDispatchLog.objects.create(
-        channel=NotificationTemplate.Channel.EMAIL,
-        template_key=template, recipient=to, cc=cc,
-        subject=subject, body=body,
-        status=NotificationDispatchLog.Status.QUEUED,
-        content_type=ContentType.objects.get_for_model(application),
-        object_id=str(application.pk),
-    )
 
     # Reply-To = the approver handling this application (L1), unless
     # the mail is addressed to them — then the next in the chain. With
     # no approver left, the policy falls back to the Principal of the
     # employee's campus (token PRINCIPAL reads campus_code).
-    from apps.notifications.reply_to import campus_code_of
-
     approvers = _approver_emails(application)
     handler = next((a for a in approvers if a.lower() != to.lower()), "")
-    reply_to = resolve_reply_to(template, {
-        "reply_to": handler,
-        "campus_code": campus_code_of(getattr(application, "employee", None)),
-    })
 
-    try:
-        ok, detail = send_email(
-            recipient=to, cc=cc, subject=subject, body=body,
-            attachments=attachments, reply_to=reply_to,
-        )
-    except Exception as e:  # defensive — send_email already traps SMTP errors
-        ok, detail = False, f"{type(e).__name__}: {e}"
-
-    log.status = (NotificationDispatchLog.Status.SENT if ok
-                  else NotificationDispatchLog.Status.FAILED)
-    log.sent_at = timezone.now() if ok else None
-    log.error = "" if ok else detail
-    log.save(update_fields=["status", "sent_at", "error"])
-    return log
+    emp = getattr(application, "employee", None)
+    return send_system_email(
+        template, recipient=to, cc=cc, related=application,
+        context={**employee_vars(emp), **context, "reply_to": handler},
+        attachments=attachments,
+    )
 
 
 def _safe_send(**kw) -> NotificationDispatchLog | None:
@@ -147,20 +123,16 @@ def notify_submitted(application) -> None:
     approvers = _approver_emails(application)
     if not approvers:
         return
-    doj = emp.date_of_joining
     noun, caption = _kind(application)
     _safe_send(
         template=TPL_APPLICATION, application=application,
         to=approvers[0], cc=_join(approvers[1:]),
-        subject=f"Employee {noun} Application — {emp.full_name} ({emp.emp_code})",
-        body=(
-            f"Employee submitted a {noun.lower()} application.\n\n"
-            f"Employee Name: {emp.full_name} [{emp.emp_code}]\n"
-            f"Date of Join: {f'{doj:%d %b %Y}' if doj else '—'}\n"
-            f"{caption}: {application.last_working_date_requested:%d %b %Y}\n"
-            f"Reason: {application.reason}"
-            + _FOOTER
-        ),
+        context={
+            "Application_Type": noun,
+            "Last_Working_Date": f"{application.last_working_date_requested:%d %b %Y}",
+            "Last_Working_Date_Caption": caption,
+            "Reason": application.reason or "",
+        },
     )
 
 
@@ -173,14 +145,11 @@ def notify_rejected(application) -> None:
     _safe_send(
         template=TPL_REJECTED, application=application,
         to=approvers[0], cc=_join(approvers[1:]),
-        subject=f"Employee {noun} Application Rejected — {emp.full_name}",
-        body=(
-            f"Employee {noun.lower()} application has been rejected.\n\n"
-            f"Employee Name: {emp.full_name} [{emp.emp_code}]\n"
-            f"Rejected at level: {application.rejected_at_level}\n"
-            f"Reason for Rejection: {application.rejection_reason or '(none)'}"
-            + _FOOTER
-        ),
+        context={
+            "Application_Type": noun,
+            "Rejected_Level": str(application.rejected_at_level or ""),
+            "Rejection_Reason": application.rejection_reason or "(none)",
+        },
     )
 
 
@@ -203,15 +172,7 @@ def notify_completed(application) -> None:
         _safe_send(
             template=TPL_APPROVED, application=application,
             to=to, cc=_join(approvers),
-            subject=f"Full-time to Part-time Approved — {emp.full_name} ({emp.emp_code})",
-            body=(
-                f"Dear {emp.full_name},\n\n"
-                "Your application to move from full-time to part-time has "
-                "been approved by all four levels. Your last working date "
-                f"as a full-time employee is {last_day:%d %b %Y}.\n\n"
-                "HR will update your employment record.\n\n"
-                "Regards,\nHR" + _FOOTER
-            ),
+            context={"Last_Working_Date": f"{last_day:%d %b %Y}"},
         )
         return
 
@@ -222,14 +183,11 @@ def notify_completed(application) -> None:
     _safe_send(
         template=TPL_RELIEVING_LETTER, application=application,
         to=personal, cc=_join(approvers, emp.email_primary),
-        subject=f"Relieving Letter — {emp.full_name}",
-        body=(
-            f"Dear {emp.full_name},\n\n"
-            f"Please find attached your relieving letter from {inst_name}. "
-            f"Your last working date is {last_day:%d %b %Y}.\n\n"
-            "We wish you the very best in your future endeavours.\n\n"
-            "Regards,\nHR" + _FOOTER
-        ),
+        context={
+            "Institute_Name": inst_name,
+            "Last_Working_Date": f"{last_day:%d %b %Y}",
+            "Letter_No": str(application.relieving_letter_no or ""),
+        },
         attachments=[(
             f"{application.relieving_letter_no}.pdf",
             render_relieving_letter(application), "application/pdf",
@@ -251,12 +209,10 @@ def send_experience_letter(application) -> NotificationDispatchLog | None:
     return _safe_send(
         template=TPL_EXPERIENCE_LETTER, application=application,
         to=personal, cc=_join(approvers[-1:]),
-        subject=f"Experience Letter — {emp.full_name}",
-        body=(
-            f"Dear {emp.full_name},\n\n"
-            f"Please find attached your experience letter from {inst_name}.\n\n"
-            "Regards,\nHR" + _FOOTER
-        ),
+        context={
+            "Institute_Name": inst_name,
+            "Letter_No": str(application.experience_letter_no or ""),
+        },
         attachments=[(
             f"{application.experience_letter_no}.pdf",
             render_experience_letter(application), "application/pdf",

@@ -7,10 +7,17 @@
 Email leaves through the one ZeptoMail SMTP transport
 (`apps.notifications.email.send_email`) From `no-reply@dkul.in`, with
 the Reply-To resolved per trigger (`apps.notifications.reply_to`).
-Template bodies live in `NotificationTemplate` rows; an HTML body (one
-that starts with a tag) is sent as HTML with a text fallback.
+
+E-mail wording comes from the system e-mail templates (Communication →
+System Emails): `send_system_email(key, …)` resolves institute override
+→ global → code default (`apps.notifications.registry`), renders the
+variables, wraps the institute layout and attaches the template's fixed
+files. `queue_notification` routes every registered key there; the
+`NotificationTemplate` rows remain the bodies for SMS / WhatsApp /
+in-CRM only.
 """
 
+import logging
 import re
 from datetime import datetime
 from typing import Iterable
@@ -18,9 +25,12 @@ from typing import Iterable
 from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
 
+from . import registry
 from .models import (
     NotificationDispatchLog, NotificationTemplate, ScheduledNotification,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # `{name}` (our seeded bodies) and `{{name}}` (the client's HTML
@@ -81,11 +91,19 @@ def queue_notification(
 ) -> NotificationDispatchLog | ScheduledNotification:
     """Queue a notification for dispatch.
 
+    - A key registered in `apps.notifications.registry` is a system
+      e-mail: it renders from the admin-editable template (institute →
+      global → code default) and needs no NotificationTemplate row.
+    - Otherwise (SMS / WhatsApp / in-CRM) the body comes from the
+      NotificationTemplate row for the key.
     - If `fire_at` is in the future, creates a `ScheduledNotification`
-      row that `process_due()` will handle.
-    - Otherwise creates a `NotificationDispatchLog` directly at
-      status=QUEUED.
+      row that `process_due()` will handle; else dispatches now.
     """
+    if registry.is_system_email(template_key):
+        return send_system_email(
+            template_key, recipient=recipient, context=context, cc=cc,
+            fire_at=fire_at, related=related,
+        )
     try:
         tmpl = NotificationTemplate.objects.get(key=template_key, is_active=True)
     except NotificationTemplate.DoesNotExist:
@@ -191,6 +209,113 @@ def _dispatch_now(tmpl, recipient, cc, context, ct, oid,
     return log
 
 
+# --- System e-mails (admin-editable templates) --------------------------
+
+def _merge_cc(cc, extra: str, *, exclude: str = "") -> str:
+    """Caller CC + the template's extra CC, de-duplicated, minus the
+    primary recipient."""
+    out, seen = [], {(exclude or "").strip().lower()}
+    for group in (cc, extra):
+        if not group:
+            continue
+        parts = group.split(",") if isinstance(group, str) else list(group)
+        for a in parts:
+            a = (a or "").strip()
+            if a and a.lower() not in seen:
+                seen.add(a.lower())
+                out.append(a)
+    return ", ".join(out)
+
+
+def _template_attachments(resolved) -> list:
+    """Admin-attached files as (filename, bytes, content_type)."""
+    out = []
+    for att in resolved.attachments:
+        try:
+            with att.file.open("rb") as fh:
+                out.append((att.filename, fh.read(),
+                            att.content_type or "application/octet-stream"))
+        except Exception:  # noqa: BLE001 — a missing file must not stop the mail
+            logger.exception("system email %s: attachment %s unreadable",
+                             resolved.trigger.key, att.pk)
+    return out
+
+
+def send_system_email(
+    key: str, *, recipient: str, context: dict | None = None, cc: str | Iterable[str] = "",
+    bcc: str | Iterable[str] = "", attachments: Iterable | None = None, related=None,
+    institute=None, fire_at: datetime | None = None,
+) -> NotificationDispatchLog | ScheduledNotification:
+    """Send (or schedule) one system e-mail from its template.
+
+    `context` is what the `apps.notifications.context` builders return
+    plus the trigger's own variables; `institute` picks the override
+    (else the `institute_code` routing key in the context). Caller
+    attachments (receipt PDF…) go out together with the template's fixed
+    files. Never raises for a transport problem — the dispatch log row
+    carries the verdict.
+    """
+    context = dict(context or {})
+    if institute is not None:
+        context.setdefault("institute_code", getattr(institute, "code", "") or "")
+    ct, oid = _gfk_for(related)
+    now = timezone.now()
+    if fire_at and fire_at > now:
+        return ScheduledNotification.objects.create(
+            template_key=key, channel=NotificationTemplate.Channel.EMAIL,
+            recipient=recipient, cc=_merge_cc(cc, ""), context=context,
+            fire_at=fire_at, content_type=ct, object_id=oid,
+        )
+    return _deliver_system_email(
+        key, recipient, cc, context, ct, oid, bcc=bcc,
+        attachments=list(attachments or ()),
+    )
+
+
+def _deliver_system_email(key, recipient, cc, context, ct, oid, *, bcc="",
+                          attachments=(), scheduled=None) -> NotificationDispatchLog:
+    from . import templating
+    from .email import send_email
+    from .reply_to import resolve_reply_to
+
+    S = NotificationDispatchLog.Status
+    built = templating.build(key, context)
+    if built is None:
+        return NotificationDispatchLog.objects.create(
+            channel=NotificationTemplate.Channel.EMAIL, template_key=key,
+            recipient=recipient, cc=_merge_cc(cc, ""),
+            subject="(template missing)",
+            body=f"System email trigger '{key}' is not registered.",
+            status=S.FAILED, error=f"Trigger '{key}' not in apps.notifications.registry.",
+            content_type=ct, object_id=oid, scheduled=scheduled,
+        )
+
+    res = built.resolved
+    cc_all = _merge_cc(cc, res.cc_extra, exclude=recipient)
+    reply_to = res.reply_to or resolve_reply_to(key, built.context)
+
+    log = NotificationDispatchLog.objects.create(
+        channel=NotificationTemplate.Channel.EMAIL, template_key=key,
+        recipient=recipient, cc=cc_all, subject=built.subject, body=built.html,
+        status=S.QUEUED, content_type=ct, object_id=oid, scheduled=scheduled,
+        template_version=res.version,
+    )
+    all_attachments = list(attachments) + _template_attachments(res)
+    try:
+        ok, detail = send_email(
+            recipient=recipient, cc=cc_all, bcc=bcc, subject=built.subject,
+            body=built.html, is_html=True, attachments=all_attachments,
+            reply_to=reply_to,
+        )
+    except Exception as e:  # noqa: BLE001 — send_email already traps transport errors
+        ok, detail = False, f"{type(e).__name__}: {e}"
+    log.status = S.SENT if ok else S.FAILED
+    log.sent_at = timezone.now() if ok else None
+    log.error = "" if ok else (detail or "")[:2000]
+    log.save(update_fields=["status", "sent_at", "error"])
+    return log
+
+
 def process_due(*, batch_size: int = 200) -> dict:
     """Move due `ScheduledNotification` rows into the dispatch log.
 
@@ -204,6 +329,19 @@ def process_due(*, batch_size: int = 200) -> dict:
     processed = dispatched = missing = errors = 0
     for sn in qs:
         processed += 1
+        if registry.is_system_email(sn.template_key):
+            try:
+                _deliver_system_email(
+                    sn.template_key, sn.recipient, sn.cc, sn.context,
+                    sn.content_type, sn.object_id, scheduled=sn,
+                )
+                dispatched += 1
+            except Exception:  # pragma: no cover — defensive
+                logger.exception("scheduled system email %s failed", sn.pk)
+                errors += 1
+            sn.processed_at = now
+            sn.save(update_fields=["processed_at"])
+            continue
         try:
             tmpl = NotificationTemplate.objects.get(
                 key=sn.template_key, is_active=True,

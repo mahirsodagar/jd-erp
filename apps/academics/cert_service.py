@@ -134,8 +134,18 @@ def generate_certificate_no(*, cert_type: str, institute_code: str,
 
 # --- Snapshot --------------------------------------------------------
 
-def build_snapshot(*, student, enrollment, cert_type: str) -> dict:
-    """Frozen at issue time. Used by the PDF renderer."""
+#: Account Dept. remark on the No Due sheet (client wording, 2026-11-25).
+NO_DUES_REMARK_CLEAR = "Fees cleared - no outstanding dues"
+NO_DUES_REMARK_OVERRIDE = "Fee Pending - Exam Permission Granted"
+
+
+def build_snapshot(*, student, enrollment, cert_type: str,
+                   fee_override: bool = False) -> dict:
+    """Frozen at issue time. Used by the PDF renderer.
+
+    `fee_override` — the certificate was issued although fees are
+    outstanding (Accounts used `override_eligibility`). The No Due sheet
+    then says so instead of claiming the fees are cleared."""
     snap = {
         "type": cert_type,
         "student": {
@@ -187,12 +197,17 @@ def build_snapshot(*, student, enrollment, cert_type: str) -> dict:
         tr = build_transcript(student=student, only_published=only_pub)
         snap["transcript"] = tr
     if cert_type == Certificate.Type.NO_DUES and enrollment:
-        snap["no_dues"] = _no_dues_block(student, enrollment)
+        snap["no_dues"] = _no_dues_block(student, enrollment,
+                                         fee_override=fee_override)
     return snap
 
 
-def _no_dues_block(student, enrollment) -> dict:
+def _no_dues_block(student, enrollment, *, fee_override: bool = False) -> dict:
     """Data for the No Due clearance sheet.
+
+    `fee_override` flips the Account Dept. remark: a sheet issued over
+    outstanding dues reads "Fee Pending - Exam Permission Granted", not
+    "Fees cleared" (client, 2026-11-25).
 
     Subjects = the subject master for the enrollment's program +
     current semester, plus anything else on the batch timetable (so an
@@ -277,7 +292,9 @@ def _no_dues_block(student, enrollment) -> dict:
         "subjects": subjects,
         "overall_attendance_pct": round(present / total * 100, 2) if total else None,
         "class_mentor": mentor,
-        "accounts_remark": "Fees cleared - no outstanding dues",
+        "fee_override": bool(fee_override),
+        "accounts_remark": (NO_DUES_REMARK_OVERRIDE if fee_override
+                            else NO_DUES_REMARK_CLEAR),
         "hall_ticket_number": "",
     }
 

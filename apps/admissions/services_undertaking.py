@@ -408,55 +408,27 @@ def send_undertaking(
             if addr and addr.lower() != to_addr.lower() and addr not in cc_list:
                 cc_list.append(addr)
 
-    subject = (
-        f"Fee Payment Schedule - {student.student_name} "
-        f"({(enrollment.course.name if enrollment.course else enrollment.program.name)})"
-    )
-    body = (
-        f"Dear {student.student_name},\n\n"
-        f"Please find your Fee Payment Schedule attached. Reach out to your "
-        f"counsellor if anything needs to be corrected.\n\n"
-        f"Application ID: {student.application_form_id}\n"
-        f"Program: {enrollment.program.name}\n"
-        f"Campus: {enrollment.campus.name}\n"
-    )
-
     filename = (
         f"fee-payment-schedule-{student.application_form_id or enrollment.id}.pdf"
     )
-    course_name = (enrollment.course.name if enrollment.course
-                   else enrollment.program.name)
 
     # One transport (ZeptoMail, From no-reply@dkul.in); replies go to the
-    # campus undertaking inbox. Logged under TEMPLATE_KEY for audit.
-    from apps.notifications.email import send_email
-    from apps.notifications.models import (
-        NotificationDispatchLog, NotificationTemplate,
-    )
-    from apps.notifications.reply_to import resolve_reply_to
+    # campus undertaking inbox. Wording = system e-mail TEMPLATE_KEY
+    # (Communication → System Emails); logged in NotificationDispatchLog.
+    from apps.notifications.context import enrollment_vars
+    from apps.notifications.services import send_system_email
 
-    ok, detail = send_email(
-        recipient=to_addr, cc=cc_list, subject=subject, body=body,
+    log = send_system_email(
+        TEMPLATE_KEY, recipient=to_addr, cc=cc_list,
+        context=enrollment_vars(enrollment),
         attachments=[(filename, pdf_bytes, "application/pdf")],
-        reply_to=resolve_reply_to(
-            TEMPLATE_KEY, {"campus_code": enrollment.campus.code},
-        ),
+        related=enrollment,
     )
-    S = NotificationDispatchLog.Status
-    try:
-        NotificationDispatchLog.objects.create(
-            channel=NotificationTemplate.Channel.EMAIL,
-            template_key=TEMPLATE_KEY, recipient=to_addr,
-            cc=", ".join(cc_list), subject=subject, body=body,
-            status=S.SENT if ok else S.FAILED,
-            sent_at=timezone.now() if ok else None,
-            error="" if ok else detail[:2000],
-            related_object=enrollment,
-        )
-    except Exception:  # noqa: BLE001 — logging must not block the send
-        pass
+    ok = getattr(log, "status", "") == "SENT"
     if not ok:
-        raise RuntimeError(f"Email delivery failed: {detail}")
+        raise RuntimeError(
+            f"Email delivery failed: {getattr(log, 'error', '') or 'unknown error'}",
+        )
 
     return {
         "sent_to": to_addr,

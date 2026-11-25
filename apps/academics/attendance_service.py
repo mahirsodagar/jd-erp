@@ -283,12 +283,28 @@ def roster_for_batch(batch):
     ).select_related("student").order_by("student__student_name")
 
 
+def current_batch(student):
+    """The batch whose classes count towards the student's attendance.
+
+    Client rule (2026-11-25): a student moved to another batch or program
+    — by transfer (enrolment updated in place) or promotion (new
+    enrolment row) — starts their percentage afresh. Classes marked in
+    the earlier batch stay on record but no longer enter any
+    student-level percentage. None when the student has no enrolment.
+    """
+    from apps.admissions.services import current_enrollment
+
+    enrollment = current_enrollment(student)
+    return enrollment.batch if enrollment and enrollment.batch_id else None
+
+
 def student_attendance_summary(*, student, from_date=None, to_date=None) -> dict:
-    """One student's attendance across all their batches in the range."""
-    qs = Attendance.objects.filter(student=student)
+    """One student's attendance in their CURRENT batch over the range
+    (see `current_batch`). Earlier batches are excluded on purpose."""
+    batch = current_batch(student)
+    qs = Attendance.objects.filter(student=student, schedule_slot__batch=batch)
     slot_qs = ScheduleSlot.objects.filter(
-        batch__in=student.enrollments.values_list("batch_id", flat=True),
-        status=ScheduleSlot.Status.SCHEDULED,
+        batch=batch, status=ScheduleSlot.Status.SCHEDULED,
     )
     if from_date:
         qs = qs.filter(schedule_slot__date__gte=from_date)
@@ -330,6 +346,9 @@ def student_attendance_summary(*, student, from_date=None, to_date=None) -> dict
     return {
         "student_id": student.id,
         "name": student.student_name,
+        # Which batch the numbers below are for — None when unenrolled.
+        "batch_id": batch.id if batch else None,
+        "batch_name": (batch.short_name or batch.name) if batch else "",
         "total_slots": total_slots,
         "marked": marked,
         "unmarked": max(total_slots - marked, 0),

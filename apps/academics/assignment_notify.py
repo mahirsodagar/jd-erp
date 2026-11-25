@@ -59,14 +59,19 @@ def recipients_for(assignment):
 
 
 def context_for(assignment, student) -> dict:
+    """Canonical variables (System Emails page); the client's HTML still
+    reads VAR1..VAR5, mapped by the registry aliases."""
+    from apps.notifications.context import student_vars
+
     due = assignment.due_date.astimezone(_IST)
-    faculty_email, _ = faculty_for(assignment)
+    faculty_email, faculty_name = faculty_for(assignment)
     return {
-        "VAR1": student.student_name,
-        "VAR2": assignment.subject.name,
-        "VAR3": assignment.title,
-        "VAR4": due.strftime("%d-%m-%Y %I:%M %p"),
-        "VAR5": SUBMISSION_MODE,
+        **student_vars(student),
+        "Subject_Name": assignment.subject.name,
+        "Assignment_Title": assignment.title,
+        "Due_Date": due.strftime("%d-%m-%Y %I:%M %p"),
+        "Submission_Mode": SUBMISSION_MODE,
+        "Faculty_Name": faculty_name,
         "reply_to": faculty_email,
     }
 
@@ -150,13 +155,15 @@ def send_assignment_submitted(submission):
         log.info("assignment %s: no faculty email, submission mail skipped",
                  a.pk)
         return None
+    from apps.notifications.context import student_vars
+
     try:
         return queue_notification(
             template_key=SUBMITTED_KEY,
             recipient=to,
             context={
+                **student_vars(submission.student),
                 "Faculty_Name": faculty_name,
-                "Student_Name": submission.student.student_name,
                 "Subject_Name": a.subject.name,
                 "Assignment_Title": a.title,
                 "reply_to": (submission.student.student_email or "").strip(),

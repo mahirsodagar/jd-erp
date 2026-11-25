@@ -686,6 +686,11 @@ PRINCIPAL_DESIGNATION = env("PRINCIPAL_DESIGNATION", default="Principal")
 # staff for the timetable's Faculty pickers (`/api/employees/?teaching=1`).
 # Client 2026-11-21: only "Faculty". Add e.g. "Assistant Professor" or
 # "Visiting Faculty" here if those must be schedulable too.
+# Designations whose employees are teaching staff BY DEFAULT: migration
+# employees.0013 ticks `Employee.is_teaching` for them and a new hire with
+# one of these designations gets the flag on create. The pickers
+# themselves filter on the flag, which HR can set for anyone (an HOD who
+# also teaches) — since 2026-11-25 this list no longer limits pickers.
 TIMETABLE_FACULTY_DESIGNATIONS = env.list(
     "TIMETABLE_FACULTY_DESIGNATIONS", default=["Faculty"],
 )

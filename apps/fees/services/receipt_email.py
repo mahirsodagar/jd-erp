@@ -8,15 +8,18 @@ the same copy. The campus inbox comes from `FEE_RECEIPT_CAMPUS_INBOXES`
 (keyed on `Campus.code`); a campus with no inbox configured still gets
 the student copy.
 
-Best-effort: a mail problem is logged in `NotificationDispatchLog` and
-never fails the receipt itself.
+Wording = system e-mail `fees.receipt.email` (Communication → System
+Emails). Best-effort: a mail problem is logged in
+`NotificationDispatchLog` and never fails the receipt itself.
 """
 
 import logging
 
 from django.conf import settings
 
-from apps.notifications.models import NotificationDispatchLog, NotificationTemplate
+from apps.notifications.context import enrollment_vars, receipt_vars
+from apps.notifications.models import NotificationDispatchLog
+from apps.notifications.services import send_system_email
 
 from .pdf import render_receipt_pdf
 
@@ -32,32 +35,14 @@ def campus_inbox_for(campus) -> str:
     return (inboxes.get(code) or "").strip()
 
 
-def _compose(receipt) -> tuple[str, str]:
-    enrollment = receipt.enrollment
-    student = enrollment.student
-    institute = getattr(student, "institute", None)
-    inst_name = getattr(institute, "name", "") or "JD Institute"
-    amount = f"{receipt.amount:,.2f}"
-    particular = (
-        receipt.installment.description
-        if receipt.installment_id and getattr(receipt.installment, "description", "")
-        else (receipt.other_fee.name if receipt.other_fee_id else "Fee payment")
-    )
-    subject = f"Fee receipt {receipt.receipt_no} — {student.student_name}"
-    body = (
-        f"Dear {student.student_name},\n\n"
-        f"We have received your payment. The receipt is attached.\n\n"
-        f"Receipt no:   {receipt.receipt_no}\n"
-        f"Amount:       Rs. {amount}\n"
-        f"Towards:      {particular}\n"
-        f"Date:         {receipt.received_date.strftime('%d-%m-%Y')}\n"
-        f"Mode:         {receipt.get_payment_mode_display()}\n"
-        f"Program:      {enrollment.program.name}\n"
-        f"Campus:       {enrollment.campus.name}\n\n"
-        f"Please keep this receipt for your records.\n\n"
-        f"Regards,\nAccounts Office\n{inst_name}"
-    )
-    return subject, body
+def receipt_recipients(primary_email: str, campus) -> tuple[str, list[str]]:
+    """`(to, cc)` for any receipt mail: the person in To (else the campus
+    receipts inbox), campus inbox + Accounts in CC, no duplicates."""
+    campus_email = campus_inbox_for(campus)
+    accounts = (getattr(settings, "ACCOUNTS_INBOX", "") or "").strip()
+    to = (primary_email or "").strip() or campus_email
+    cc = [e for e in (campus_email, accounts) if e and e.lower() != to.lower()]
+    return to, cc
 
 
 def send_receipt_email(receipt) -> NotificationDispatchLog | None:
@@ -69,50 +54,23 @@ def send_receipt_email(receipt) -> NotificationDispatchLog | None:
     try:
         enrollment = receipt.enrollment
         student = enrollment.student
-        student_email = (student.student_email or "").strip()
-        campus_email = campus_inbox_for(enrollment.campus)
-        accounts = (getattr(settings, "ACCOUNTS_INBOX", "") or "").strip()
-
-        # Student in To; campus (and the optional accounts group) in CC.
-        # With no student address the campus copy still goes out.
-        to = student_email or campus_email
-        cc = [e for e in (campus_email, accounts)
-              if e and e.lower() != to.lower()]
+        to, cc = receipt_recipients(student.student_email, enrollment.campus)
         if not to:
             logger.info("Receipt %s: no recipient (student has no email, "
                         "campus %s has no inbox).", receipt.receipt_no,
                         enrollment.campus.code)
             return None
 
-        subject, body = _compose(receipt)
-        log = NotificationDispatchLog.objects.create(
-            channel=NotificationTemplate.Channel.EMAIL,
-            template_key=TEMPLATE_KEY, recipient=to, cc=", ".join(cc),
-            subject=subject, body=body, related_object=receipt,
-        )
-
-        from django.utils import timezone
-
-        from apps.notifications.email import send_email
-        from apps.notifications.reply_to import resolve_reply_to
-
         pdf = render_receipt_pdf(receipt)
         # Replies go to the campus receipts inbox (policy CAMPUS_RECEIPTS).
-        ok, detail = send_email(
-            recipient=to, cc=", ".join(cc), subject=subject, body=body,
+        log = send_system_email(
+            TEMPLATE_KEY, recipient=to, cc=cc, related=receipt,
+            context={**enrollment_vars(enrollment), **receipt_vars(receipt)},
             attachments=[(f"{receipt.receipt_no}.pdf", pdf, "application/pdf")],
-            reply_to=resolve_reply_to(
-                TEMPLATE_KEY, {"campus_code": enrollment.campus.code},
-            ),
         )
-        log.status = (NotificationDispatchLog.Status.SENT if ok
-                      else NotificationDispatchLog.Status.FAILED)
-        log.sent_at = timezone.now() if ok else None
-        log.error = "" if ok else detail
-        log.save(update_fields=["status", "sent_at", "error"])
-        if not ok:
+        if log.status != NotificationDispatchLog.Status.SENT:
             logger.warning("Receipt %s email to %s failed: %s",
-                           receipt.receipt_no, to, detail)
+                           receipt.receipt_no, to, log.error)
         return log
     except Exception:  # noqa: BLE001 — never break receipt creation
         logger.exception("Receipt email failed for receipt id=%s",

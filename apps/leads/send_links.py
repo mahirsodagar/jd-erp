@@ -20,6 +20,7 @@ from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.utils import timezone
 
+from apps.notifications.context import lead_vars
 from apps.notifications.services import queue_notification
 
 from .models import Lead, LeadCommunication
@@ -164,17 +165,7 @@ def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict
     short_url = shorten(long_url)
 
     first_name = _first_name(lead.name)
-    sms_body = (
-        f"Dear{first_name}, Thank you for selecting JD, Your inquiry has been submitted. Please click the link to complete your application - {short_url}"
-    )
     email_subject = f"JD Student Application Link : {lead.name}"
-    email_body = (
-        "Greetings from JD!\n"
-        f"Dear {lead.name},\n\n"
-        "Thank you for selecting JD, Your inquiry has been submitted.\n\n"
-        f"Please click the link to complete your application - {long_url}\n\n"
-        "With Regards,\nJD"
-    )
 
     sms_log = queue_notification(
         template_key="lead.application_link.sms",
@@ -193,15 +184,15 @@ def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict
     )
     email_log = None
     if lead.email:
+        # Template `lead.application_link.email` (Communication → System
+        # Emails); variables from the shared lead builder + the link.
         email_log = queue_notification(
             template_key="lead.application_link.email",
             recipient=lead.email,
             context={
-                "Student_Name": lead.name,
-                "Course_Name": lead.program.name if lead.program_id else "",
+                **lead_vars(lead),
                 "Application_Form_Link": long_url,
-                "name": lead.name, "url": long_url,
-                "institute": institute_label,
+                "Institute_Name": institute_label,
                 **_reply_context(lead),
             },
             related=lead,
@@ -459,28 +450,18 @@ def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
         related=lead,
     )
 
-    # Email — same pattern as send_application_link: short body, link
-    # in plain text, routed through the dispatcher.
+    # Email — template `lead.fee_link.email` (Communication → System
+    # Emails), routed through the dispatcher like the SMS/WA legs.
     email_subject = f"{institute_label} — Application fee payment link"
-    email_body = (
-        f"Dear {lead.name},\n\n"
-        f"Thank you for choosing {institute_label} for your Design/Art/"
-        f"Media course.\n\n"
-        f"Click the link below to pay your fees and complete the "
-        f"admission process:\n\n{url}\n\n"
-        f"Best Regards,\nJD Admissions Team"
-    )
     email_log = None
     if lead.email:
         email_log = queue_notification(
             template_key="lead.fee_link.email",
             recipient=lead.email,
             context={
-                "Student_Name": lead.name,
-                "Course_Name": lead.program.name if lead.program_id else "",
+                **lead_vars(lead),
                 "Payment_Link": url,
-                "name": lead.name, "url": url,
-                "institute": institute_label,
+                "Institute_Name": institute_label,
                 **_reply_context(lead),
             },
             related=lead,
@@ -636,11 +617,11 @@ def send_entrance_exam_link(*, attempt, actor=None) -> dict:
         template_key="lead.entrance_exam_link.email",
         recipient=lead.email,
         context={
-            "name": lead.name,
-            "exam": exam.name,
-            "url": url,
-            "duration": str(exam.duration_min),
-            "window": window_note,
+            **lead_vars(lead),
+            "Exam_Name": exam.name,
+            "Exam_Link": url,
+            "Exam_Duration": str(exam.duration_min),
+            "Exam_Window": window_note,
             **_reply_context(lead),
         },
         related=lead,
@@ -700,11 +681,7 @@ def send_status_email(*, lead: Lead, status: str, actor=None):
         log = queue_notification(
             template_key=key,
             recipient=lead.email,
-            context={
-                "First_Name": _first_name(lead.name),
-                "Course_Name": lead.program.name if lead.program_id else "",
-                **_reply_context(lead),
-            },
+            context={**lead_vars(lead), **_reply_context(lead)},
             related=lead,
         )
         LeadCommunication.objects.create(
@@ -730,22 +707,11 @@ def send_welcome_message(*, lead: Lead, actor=None) -> dict:
         raise ValueError("Lead has no email on file.")
 
     subject = "Welcome Note for New Students and Parents"
-    body = (
-        f"Dear {lead.name},\n\n"
-        "Thank you for choosing JD as the place to pursue further "
-        "education! We are happy to welcome you onboard.\n\n"
-        "Our endeavours have always been to provide our students with a "
-        "cohesive learning environment that encompasses practical and "
-        "theoretical education.\n\n"
-        "For any clarifications or queries you can reach out to your "
-        "administrative office.\n\n"
-        "See you very soon!\n\nRegards,\nJD"
-    )
 
     email_log = queue_notification(
         template_key="lead.welcome.email",
         recipient=lead.email,
-        context={"name": lead.name, "lead_id": lead.id, **_reply_context(lead)},
+        context={**lead_vars(lead), **_reply_context(lead)},
         related=lead,
     )
 

@@ -19,19 +19,23 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
-from django.conf import settings
 from django.utils import timezone
 
 from apps.fees.models import FeeReceipt
-from apps.notifications.models import NotificationDispatchLog, NotificationTemplate
+from apps.notifications.context import receipt_vars, student_vars
+from apps.notifications.models import NotificationDispatchLog
+from apps.notifications.services import send_system_email
 
 from .pdf import render_receipt_pdf
-from .receipt_email import campus_inbox_for
+from .receipt_email import receipt_recipients
 from .registration import REGISTRATION_DESCRIPTION
 
 logger = logging.getLogger(__name__)
 
-TEMPLATE_KEY = "fees.receipt.email"
+# Its own system e-mail (Communication → System Emails): the wording
+# differs from the counter receipt ("our admissions team will contact
+# you about enrolment").
+TEMPLATE_KEY = "fees.applicant_receipt.email"
 
 
 class _Placement:
@@ -87,29 +91,6 @@ class RegistrationReceipt:
         return str(dict(FeeReceipt.PaymentMode.choices).get(self._mode, self._mode))
 
 
-def _compose(receipt: RegistrationReceipt) -> tuple[str, str]:
-    student = receipt.enrollment.student
-    institute = getattr(student, "institute", None)
-    inst_name = getattr(institute, "name", "") or "JD Institute"
-    amount = f"{Decimal(receipt.amount):,.2f}"
-    subject = f"Fee receipt {receipt.receipt_no} — {student.student_name}"
-    body = (
-        f"Dear {student.student_name},\n\n"
-        f"We have received your {receipt.particular.lower()}. The receipt is attached.\n\n"
-        f"Receipt no:   {receipt.receipt_no}\n"
-        f"Amount:       Rs. {amount}\n"
-        f"Towards:      {receipt.particular}\n"
-        f"Date:         {receipt.received_date.strftime('%d-%m-%Y')}\n"
-        f"Mode:         {receipt.get_payment_mode_display()}\n"
-        f"Program:      {student.program.name}\n"
-        f"Campus:       {student.campus.name}\n\n"
-        f"Please keep this receipt for your records. Our admissions team "
-        f"will contact you about enrolment.\n\n"
-        f"Regards,\nAccounts Office\n{inst_name}"
-    )
-    return subject, body
-
-
 def send_registration_payment_receipt(payment_request, order) -> NotificationDispatchLog | None:
     """Mail the receipt PDF to the student with the campus receipts
     inbox in CC. Returns the dispatch log, or None when there was nobody
@@ -117,44 +98,23 @@ def send_registration_payment_receipt(payment_request, order) -> NotificationDis
     try:
         receipt = RegistrationReceipt(payment_request, order)
         student = payment_request.student
-        student_email = (student.student_email or "").strip()
-        campus_email = campus_inbox_for(student.campus)
-        accounts = (getattr(settings, "ACCOUNTS_INBOX", "") or "").strip()
-
-        to = student_email or campus_email
-        cc = [e for e in (campus_email, accounts)
-              if e and e.lower() != to.lower()]
+        to, cc = receipt_recipients(student.student_email, student.campus)
         if not to:
             logger.info("Registration receipt %s: no recipient.", receipt.receipt_no)
             return None
 
-        subject, body = _compose(receipt)
-        log = NotificationDispatchLog.objects.create(
-            channel=NotificationTemplate.Channel.EMAIL,
-            template_key=TEMPLATE_KEY, recipient=to, cc=", ".join(cc),
-            subject=subject, body=body, related_object=payment_request,
-        )
-
-        from apps.notifications.email import send_email
-        from apps.notifications.reply_to import resolve_reply_to
-
         pdf = render_receipt_pdf(receipt)
-        ok, detail = send_email(
-            recipient=to, cc=", ".join(cc), subject=subject, body=body,
+        log = send_system_email(
+            TEMPLATE_KEY, recipient=to, cc=cc, related=payment_request,
+            context={
+                **student_vars(student),
+                **receipt_vars(receipt, particular=receipt.particular),
+            },
             attachments=[(f"{receipt.receipt_no}.pdf", pdf, "application/pdf")],
-            reply_to=resolve_reply_to(
-                TEMPLATE_KEY,
-                {"campus_code": getattr(student.campus, "code", "")},
-            ),
         )
-        log.status = (NotificationDispatchLog.Status.SENT if ok
-                      else NotificationDispatchLog.Status.FAILED)
-        log.sent_at = timezone.now() if ok else None
-        log.error = "" if ok else detail
-        log.save(update_fields=["status", "sent_at", "error"])
-        if not ok:
+        if log.status != NotificationDispatchLog.Status.SENT:
             logger.warning("Registration receipt %s email to %s failed: %s",
-                           receipt.receipt_no, to, detail)
+                           receipt.receipt_no, to, log.error)
         return log
     except Exception:  # noqa: BLE001 — never break the settlement
         logger.exception("Registration receipt email failed for request id=%s",

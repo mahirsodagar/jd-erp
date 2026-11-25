@@ -310,9 +310,14 @@ def program_wise_report(*, program, campus=None, academic_year=None,
 # === Tab 3 — Student Wise ============================================
 
 def student_wise_report(*, student, from_date=None, to_date=None) -> dict:
-    """Per-subject attendance for one student, with absent/late dates."""
+    """Per-subject attendance for one student in their CURRENT batch,
+    with absent/late dates. Earlier batches (transfer / promotion) are
+    excluded on purpose — see `attendance_service.current_batch`."""
+    from .attendance_service import current_batch
+
+    batch = current_batch(student)
     qs = (Attendance.objects
-          .filter(student=student)
+          .filter(student=student, schedule_slot__batch=batch)
           .select_related("schedule_slot", "schedule_slot__subject"))
     if from_date:
         qs = qs.filter(schedule_slot__date__gte=from_date)
@@ -354,6 +359,8 @@ def student_wise_report(*, student, from_date=None, to_date=None) -> dict:
         "student_id": student.id,
         "name": student.student_name,
         "application_form_id": student.application_form_id,
+        "batch_id": batch.id if batch else None,
+        "batch_name": (batch.short_name or batch.name) if batch else "",
         "subjects": subjects,
         "totals": {
             "present": tot_present,

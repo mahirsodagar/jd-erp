@@ -75,10 +75,16 @@ def on_followup_saved(sender, instance, created, **kwargs):
 
     from .services import queue_notification
 
+    from .context import lead_vars
+
     for tmpl, recipient, fire_at, cc in _outcome_handlers(instance.lead, instance):
         if not recipient:
             continue
         ctx = {
+            # Canonical lead variables for the e-mail templates (System
+            # Emails page) — the WhatsApp bodies still read the lowercase
+            # names below.
+            **lead_vars(instance.lead),
             "name": instance.lead.name,
             "phone": instance.lead.phone,
             "email": instance.lead.email,
@@ -103,8 +109,10 @@ def on_lead_created(sender, instance, created, **kwargs):
         return
     from apps.leads.send_links import _reply_context
 
+    from .context import lead_vars
     from .services import queue_notification
     ctx = {
+        **lead_vars(instance),
         "name": instance.name, "email": instance.email, "phone": instance.phone,
         "program": instance.program.name if instance.program else "",
         # Reply-To: assigned counsellor, else campus admissions inbox,

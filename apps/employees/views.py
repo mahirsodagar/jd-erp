@@ -203,17 +203,12 @@ def _apply_filters(qs, params):
     if v := params.get("nationality"):
         qs = qs.filter(nationality=v)
     if params.get("teaching") in ("1", "true", "True"):
-        # Teaching staff for the timetable pickers: employees whose
-        # DESIGNATION is one of settings.TIMETABLE_FACULTY_DESIGNATIONS
-        # ("Faculty" only — client 2026-11-21). Login roles are no use
-        # here: every employee holds the baseline Faculty role.
-        from django.conf import settings
-        from django.db.models import Q
-        match = Q()
-        for n in getattr(settings, "TIMETABLE_FACULTY_DESIGNATIONS", []) or []:
-            if n.strip():
-                match |= Q(designation__name__iexact=n.strip())
-        qs = qs.filter(match) if match else qs.none()
+        # Teaching staff for every faculty / instructor / mentor picker:
+        # the HR-set `is_teaching` flag, whatever the designation, so an
+        # HOD who also teaches is listed (client, 2026-11-25). Until
+        # then it was designation == Faculty only. Login roles are no
+        # use here: every employee holds the baseline Faculty role.
+        qs = qs.filter(is_teaching=True)
     if v := params.get("roles"):
         # Comma-separated login-role names (case-insensitive), e.g.
         # "Faculty,HOD" — employees whose linked user holds any of them.
@@ -323,7 +318,8 @@ class EmployeeOptionsView(APIView):
     picker needs: id, code, name, designation, department, campus. No
     contact details, no pay, no documents.
 
-    Active employees only unless `?all=1`. Optional `?campus=<id>`.
+    Active employees only unless `?all=1`. Optional `?campus=<id>` and
+    `?teaching=1` (HR's teaching-staff flag, for faculty pickers).
     """
     permission_classes = [IsAuthenticated]
 
@@ -340,6 +336,8 @@ class EmployeeOptionsView(APIView):
             qs = qs.filter(status=Employee.Status.ACTIVE)
         if v := request.query_params.get("campus"):
             qs = qs.filter(campus_id=v)
+        if request.query_params.get("teaching") in ("1", "true", "True"):
+            qs = qs.filter(is_teaching=True)
         qs = qs.order_by("first_name", "family_name", "emp_code")
         return Response([
             {
@@ -350,6 +348,7 @@ class EmployeeOptionsView(APIView):
                 "department": e.department.name if e.department_id else "",
                 "campus_id": e.campus_id,
                 "campus": e.campus.name if e.campus_id else "",
+                "is_teaching": e.is_teaching,
             }
             for e in qs
         ])

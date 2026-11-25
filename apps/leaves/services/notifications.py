@@ -38,11 +38,40 @@ def leave_inbox_for(employee) -> str:
 
 
 def _campus_context(employee, **extra) -> dict:
-    """Send context carrying the employee's campus so the Reply-To policy
-    (token HR_LEAVE) lands on the same campus inbox as the CC."""
+    """Template context: the shared employee variables (which carry the
+    campus code, so the Reply-To policy token HR_LEAVE lands on the same
+    campus inbox as the CC) plus the trigger's own."""
+    from apps.notifications.context import employee_vars
     from apps.notifications.reply_to import campus_code_of
 
-    return {"campus_code": campus_code_of(employee), **extra}
+    return {**employee_vars(employee), "campus_code": campus_code_of(employee), **extra}
+
+
+def _d(value) -> str:
+    return value.strftime("%d-%m-%Y") if value else ""
+
+
+def _leave_vars(application) -> dict:
+    session = application.SESSION_LABELS.get(
+        application.from_session, application.from_session,
+    )
+    return {
+        "Leave_Type": application.leave_type.name,
+        "From_Date": _d(application.from_date),
+        "To_Date": _d(application.to_date),
+        "Days": str(application.count),
+        "Session": str(session),
+        "Reason": application.reason or "",
+    }
+
+
+def _compoff_vars(compoff) -> dict:
+    return {
+        "Worked_Date": _d(compoff.worked_date),
+        "Sessions_Worked": f"{compoff.worked_session_1}+{compoff.worked_session_2}",
+        "Earned_Days": str(compoff.count),
+        "Reason": compoff.reason or "",
+    }
 
 
 def _cc(*parts: str) -> str:
@@ -78,13 +107,16 @@ def reply_to_for(template: str, context: dict | None = None) -> str:
 
 
 def deliver(log: EmailDispatchLog) -> EmailDispatchLog:
-    """Attempt delivery of one logged email and record the outcome."""
+    """Re-deliver one logged email (replay of a failed row by
+    `manage.py send_leave_emails --failed`) and record the outcome. The
+    stored body is the rendered HTML, so it goes out as HTML."""
     from apps.notifications.email import send_email
 
     try:
         ok, detail = send_email(
             recipient=log.to, cc=log.cc,
             subject=log.subject, body=log.body,
+            is_html=(log.body or "").lstrip()[:1] == "<",
             reply_to=reply_to_for(log.template, log.context),
         )
     except Exception as e:  # defensive — send_email already traps SMTP errors
@@ -98,16 +130,28 @@ def deliver(log: EmailDispatchLog) -> EmailDispatchLog:
     return log
 
 
-def send_email_now(*, template: str, to: str, subject: str, body: str,
-                   cc: str = "", context: dict | None = None,
+def send_email_now(*, template: str, to: str, cc: str = "",
+                   context: dict | None = None,
                    application=None, compoff=None) -> EmailDispatchLog:
-    """Log an outbound email and send it."""
-    log = EmailDispatchLog.objects.create(
-        template=template, to=to, cc=cc, subject=subject, body=body,
+    """Send one leave / comp-off mail from its system e-mail template
+    (Communication → System Emails) and mirror the outcome into the
+    leave module's own `EmailDispatchLog` for audit and replay."""
+    from apps.notifications.services import send_system_email
+
+    related = application if application is not None else compoff
+    dispatch = send_system_email(
+        template, recipient=to, cc=cc, context=context or {}, related=related,
+    )
+    sent = getattr(dispatch, "status", "") == "SENT"
+    return EmailDispatchLog.objects.create(
+        template=template, to=to, cc=getattr(dispatch, "cc", cc) or cc,
+        subject=getattr(dispatch, "subject", ""), body=getattr(dispatch, "body", ""),
         context=context or {},
+        status=(EmailDispatchLog.Status.SENT if sent else EmailDispatchLog.Status.FAILED),
+        sent_at=timezone.now() if sent else None,
+        error="" if sent else (getattr(dispatch, "error", "") or ""),
         related_application=application, related_compoff=compoff,
     )
-    return deliver(log)
 
 
 # Historical name — kept so existing callers/tests keep working.
@@ -126,28 +170,12 @@ def notify_leave_applied(application) -> None:
               f"{application.to_date} ({application.count} day(s))."),
         link="/leaves/team", exclude_user=emp.user_account,
     )
-    body = (
-        f"{emp.full_name} ({emp.emp_code}) has applied for "
-        f"{application.leave_type.name}.\n"
-        f"Dates: {application.from_date} → {application.to_date}\n"
-        f"Days: {application.count} "
-        f"({application.SESSION_LABELS.get(application.from_session, application.from_session)})\n"
-        f"Reason: {application.reason}\n"
-    )
     send_email_now(
         template=TPL_LEAVE_APPLIED,
         to=application.manager_email,
         cc=_cc(application.cc_emails, leave_inbox_for(emp)),
-        subject=f"Leave application — {emp.full_name} ({application.from_date})",
-        body=body,
         application=application,
-        context=_campus_context(
-            emp,
-            employee_id=emp.id, leave_type=application.leave_type.code,
-            from_date=str(application.from_date),
-            to_date=str(application.to_date),
-            count=str(application.count),
-        ),
+        context=_campus_context(emp, **_leave_vars(application)),
     )
 
 
@@ -166,14 +194,11 @@ def notify_leave_decision(application) -> None:
         template=TPL_LEAVE_DECISION,
         to=emp.email_primary,
         cc=_cc(application.manager_email, leave_inbox_for(emp)),
-        subject=f"Leave {decision} — {application.from_date}",
-        body=(
-            f"Your leave application ({application.from_date} → "
-            f"{application.to_date}) has been {decision}.\n\n"
-            f"Remarks: {application.approver_remarks or '(none)'}"
-        ),
         application=application,
-        context=_campus_context(emp, decision=decision),
+        context=_campus_context(
+            emp, **_leave_vars(application),
+            Decision=decision, Remarks=application.approver_remarks or "(none)",
+        ),
     )
 
 
@@ -193,16 +218,8 @@ def notify_compoff_applied(compoff) -> None:
         to=to,
         # No manager on file → the inbox is already the To; don't CC it too.
         cc=_cc(compoff.cc_emails, inbox if to != inbox else ""),
-        subject=f"Comp-off application — {emp.full_name} ({compoff.worked_date})",
-        body=(
-            f"{emp.full_name} ({emp.emp_code}) has applied for comp-off.\n"
-            f"Worked date: {compoff.worked_date}\n"
-            f"Sessions worked: {compoff.worked_session_1}+{compoff.worked_session_2}\n"
-            f"Earned: {compoff.count}\n"
-            f"Reason: {compoff.reason}"
-        ),
         compoff=compoff,
-        context=_campus_context(emp),
+        context=_campus_context(emp, **_compoff_vars(compoff)),
     )
 
 
@@ -220,11 +237,9 @@ def notify_compoff_decision(compoff) -> None:
         template=TPL_COMPOFF_DECISION,
         to=emp.email_primary,
         cc=_cc(compoff.manager_email, leave_inbox_for(emp)),
-        subject=f"Comp-off {decision} — {compoff.worked_date}",
-        body=(
-            f"Your comp-off for {compoff.worked_date} has been {decision}.\n"
-            f"Remarks: {compoff.approver_remarks or '(none)'}"
-        ),
         compoff=compoff,
-        context=_campus_context(emp, decision=decision),
+        context=_campus_context(
+            emp, **_compoff_vars(compoff),
+            Decision=decision, Remarks=compoff.approver_remarks or "(none)",
+        ),
     )

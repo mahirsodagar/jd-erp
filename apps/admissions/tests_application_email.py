@@ -17,12 +17,18 @@ INBOXES = {
     "GOA": "acknowledgement.goa@jdinstitute.edu.in",
 }
 
+def _ack(outbox):
+    """The acknowledgement mails only — creating the lead in the fixture
+    also fires the automatic lead welcome mail (`lead_welcome_email`)."""
+    return [m for m in outbox if not m.subject.startswith("Welcome")]
+
+
 def _office(outbox):
-    return [m for m in outbox if m.attachments]
+    return [m for m in _ack(outbox) if m.attachments]
 
 
 def _student(outbox):
-    return [m for m in outbox if not m.attachments]
+    return [m for m in _ack(outbox) if not m.attachments]
 
 
 @override_settings(
@@ -37,7 +43,7 @@ class ApplicationAcknowledgementTests(RequiredFixture):
         r = self.client.post(self.url, self.payload())
         self.assertEqual(r.status_code, 201, r.content)
         student = Student.objects.get(lead_origin=self.lead)
-        self.assertEqual(len(mail.outbox), 2)
+        self.assertEqual(len(_ack(mail.outbox)), 2)
 
         # Student copy — the template with the four variables filled.
         (s,) = _student(mail.outbox)
@@ -67,10 +73,10 @@ class ApplicationAcknowledgementTests(RequiredFixture):
 
     def test_resubmit_is_silent(self):
         self.client.post(self.url, self.payload())
-        self.assertEqual(len(mail.outbox), 2)
+        self.assertEqual(len(_ack(mail.outbox)), 2)
         r = self.client.post(self.url, self.payload(father_occupation="Doctor"))
         self.assertEqual(r.status_code, 201, r.content)
-        self.assertEqual(len(mail.outbox), 2)
+        self.assertEqual(len(_ack(mail.outbox)), 2)
 
     def test_campus_inbox_lookup_is_by_code(self):
         self.assertEqual(campus_inbox_for(Campus(code="goa")),
@@ -83,7 +89,7 @@ class ApplicationAcknowledgementTests(RequiredFixture):
         self.campus.save(update_fields=["code"])
         r = self.client.post(self.url, self.payload())
         self.assertEqual(r.status_code, 201, r.content)
-        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(len(_ack(mail.outbox)), 1)
         (s,) = _student(mail.outbox)
         self.assertEqual(s.to, ["asha@example.com"])
         # No campus inbox → the default Reply-To.
@@ -126,7 +132,7 @@ class ApplicationAcknowledgementTests(RequiredFixture):
         self.campus.save(update_fields=["code"])
         self._assign_counsellor()
         self.client.post(self.url, self.payload())
-        self.assertEqual(len(mail.outbox), 2)
+        self.assertEqual(len(_ack(mail.outbox)), 2)
         (m,) = _office(mail.outbox)
         self.assertEqual(m.to, ["priya@jdinstitute.edu.in"])
         self.assertEqual(m.cc, [])

@@ -28,7 +28,6 @@ from apps.common.throttles import (
     LoginRateThrottle,
     PasswordChangeThrottle,
 )
-from apps.notifications.email import send_email
 
 from .permissions import HasPerm, has_perm
 from .serializers import (
@@ -275,14 +274,15 @@ class AdminResetPasswordView(APIView):
             base = getattr(
                 dj_settings, "FRONTEND_BASE_URL", "http://localhost:5173",
             ).rstrip("/")
+            from apps.notifications.context import user_vars
+
             log = queue_notification(
                 template_key="account.password_reset_by_admin.email",
                 recipient=delivery["recipient"],
                 context={
-                    "name": target.full_name or target.username,
-                    "username": target.username,
-                    "password": new_pw,
-                    "login_url": base,
+                    **user_vars(target),
+                    "Password": new_pw,
+                    "Login_Url": base,
                 },
                 related=target,
             )
@@ -332,19 +332,17 @@ class ForgotPasswordView(APIView):
             # SPA uses HashRouter → route lives after #.
             reset_url = f"{base}/#/reset-password/{uidb64}/{token}"
 
-            subject = "Reset your JD ERP password"
-            body = (
-                f"Hi {user.full_name or user.username},\n\n"
-                "We received a request to reset the password on your JD "
-                "account. To choose a new password, open this link:\n\n"
-                f"{reset_url}\n\n"
-                "The link expires in a few days. If you didn't request "
-                "this, you can safely ignore the email — your password "
-                "won't change.\n\n"
-                "— JD Admissions"
-            )
+            # System e-mail `account.forgot_password.email` (wording
+            # editable under Communication → System Emails).
             try:
-                send_email(recipient=email, subject=subject, body=body)
+                from apps.notifications.context import user_vars
+                from apps.notifications.services import send_system_email
+
+                send_system_email(
+                    "account.forgot_password.email", recipient=email,
+                    context={**user_vars(user), "Reset_Link": reset_url},
+                    related=user,
+                )
             except Exception:
                 # Don't surface the failure to the caller (still 200 to
                 # avoid enumeration) — but log it so ops can spot
@@ -382,16 +380,12 @@ class ResetPasswordView(APIView):
         # Best-effort: tell the user their password just changed.
         if user.email:
             try:
-                send_email(
-                    recipient=user.email,
-                    subject="Your JD ERP password was changed",
-                    body=(
-                        f"Hi {user.full_name or user.username},\n\n"
-                        "Your password was just changed. If this was you, "
-                        "no further action is needed. If you didn't change "
-                        "your password, contact your administrator "
-                        "immediately.\n\n— JD Admissions"
-                    ),
+                from apps.notifications.context import user_vars
+                from apps.notifications.services import send_system_email
+
+                send_system_email(
+                    "account.password_changed.email", recipient=user.email,
+                    context=user_vars(user), related=user,
                 )
             except Exception:
                 logger.exception("Failed to send password-changed notice to %s", user.email)

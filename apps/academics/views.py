@@ -1656,6 +1656,9 @@ class CertificateIssueView(APIView):
             student=cert.student, enrollment=cert.enrollment,
             cert_type=cert.type,
         )
+        # True only when the checks failed AND Accounts chose to issue
+        # anyway — the No Due sheet then reads "Fee Pending".
+        overridden = False
         if not elig["ok"]:
             override = s.validated_data.get("override_eligibility", False)
             if override and not has_perm(u, "academics.certificate.override_eligibility"):
@@ -1670,6 +1673,7 @@ class CertificateIssueView(APIView):
                      "reasons": elig["reasons"]},
                     status=http.HTTP_400_BAD_REQUEST,
                 )
+            overridden = True
 
         cert.certificate_no = generate_certificate_no(
             cert_type=cert.type,
@@ -1677,7 +1681,7 @@ class CertificateIssueView(APIView):
         )
         cert.snapshot = build_snapshot(
             student=cert.student, enrollment=cert.enrollment,
-            cert_type=cert.type,
+            cert_type=cert.type, fee_override=overridden,
         )
         cert.status = Certificate.Status.ISSUED
         cert.issued_by = u

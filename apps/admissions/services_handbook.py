@@ -1,4 +1,4 @@
-"""Email body + dispatcher for "Send Handbook".
+"""Dispatcher for "Send Handbook".
 
 The handbook is institute-specific (JDIFT diploma rules differ from the
 JDSD degree rules on fees, attendance relaxations, late-fee interest,
@@ -8,45 +8,26 @@ finance/academics can replace them from Master -> Institutes without a
 deploy.
 
 With no PDF on file the send is refused rather than mailing a body that
-promises an attachment it doesn't carry.
+promises an attachment it doesn't carry. The wording is the system
+e-mail `admissions.handbook.email` (Communication → System Emails).
 """
 
 from __future__ import annotations
 
 import re
 
-from apps.notifications.email import send_email
+from apps.notifications.context import student_vars
+from apps.notifications.models import NotificationDispatchLog
+from apps.notifications.services import send_system_email
 
 from .models import Student
+
+TEMPLATE_KEY = "admissions.handbook.email"
 
 
 def _attachment_name(institute) -> str:
     code = re.sub(r"[^A-Za-z0-9]+", "", getattr(institute, "code", "") or "")
     return f"{code or 'JD'}_Student_Handbook.pdf"
-
-
-def _build_body(*, student: Student) -> str:
-    institute = getattr(student.institute, "name", "the institute")
-    program = getattr(student.program, "name", "your program")
-    return (
-        f"Dear {student.student_name},\n\n"
-        f"Welcome to {program} at {institute}!\n\n"
-        "Please find the Student Handbook attached. It is the official "
-        "manual for your time with us and covers, among other things:\n"
-        "  - the attendance policy (85% minimum per module) and leave rules\n"
-        "  - assessment, submission deadlines and progression\n"
-        "  - fee payment modes and deadlines\n"
-        "  - the code of conduct, anti-ragging and anti-harassment "
-        "policies\n"
-        "  - support services: counselling, library, Wi-Fi, medical help\n"
-        "  - the appeals and complaints process\n\n"
-        "Read it carefully before orientation, and share it with your "
-        "parents/guardians - the closing pages include the undertakings "
-        "both of you are required to sign and submit.\n\n"
-        "If you have any questions, reach out to your Class Mentor or the "
-        "admissions office - we're happy to help.\n\n"
-        f"- {institute}"
-    )
 
 
 def send_handbook_email(*, student: Student) -> tuple[bool, str]:
@@ -68,10 +49,10 @@ def send_handbook_email(*, student: Student) -> tuple[bool, str]:
     except (OSError, ValueError) as e:
         return False, f"Could not read the handbook PDF: {e}"
 
-    institute_name = getattr(institute, "name", "JD")
-    return send_email(
-        recipient=recipient,
-        subject=f"Your Student Handbook - {institute_name}",
-        body=_build_body(student=student),
+    log = send_system_email(
+        TEMPLATE_KEY, recipient=recipient, context=student_vars(student),
         attachments=[(_attachment_name(institute), content, "application/pdf")],
+        related=student, institute=institute,
     )
+    ok = getattr(log, "status", "") == NotificationDispatchLog.Status.SENT
+    return ok, "" if ok else (getattr(log, "error", "") or "Email delivery failed.")

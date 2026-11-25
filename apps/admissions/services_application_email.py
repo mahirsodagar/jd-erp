@@ -1,29 +1,31 @@
 """Acknowledge a submitted application form by email.
 
 Fires once, on the student's first submit of the public self-fill form
-(`PublicApplicationView.post`), as two mails:
+(`PublicApplicationView.post`), as two mails — both system e-mails whose
+wording is editable under Communication → System Emails:
 
-* Student copy — template row `admissions.application_submitted.email`
-  via `queue_notification` (no PDF, no pay links; the student sees the
-  "Pay fees" page right after submitting anyway). Replies go to the
-  campus admissions inbox.
-* Office copy — the mail with the application form PDF
-  (`services_application_pdf.render_application_pdf`) and fee lines, To
-  the campus acknowledgement inbox (`APPLICATION_ACK_CAMPUS_INBOXES`,
-  keyed on `Campus.code`), else `OPERATIONS_INBOX`, else the academic
-  counsellor assigned to the originating lead. CC `OPERATIONS_INBOX` and
-  that counsellor (client decision 2026-11-20). Skipped only when none
-  of the three exists.
+* Student copy — `admissions.application_submitted.email` (no PDF, no
+  pay links; the student sees the "Pay fees" page right after
+  submitting anyway). Replies go to the campus admissions inbox.
+* Office copy — `admissions.form_submitted.email` with the application
+  form PDF (`services_application_pdf.render_application_pdf`) and fee
+  lines, To the campus acknowledgement inbox
+  (`APPLICATION_ACK_CAMPUS_INBOXES`, keyed on `Campus.code`), else
+  `OPERATIONS_INBOX`, else the academic counsellor assigned to the
+  originating lead. CC `OPERATIONS_INBOX` and that counsellor (client
+  decision 2026-11-20). Skipped only when none of the three exists.
 
 Best-effort: a mail problem is logged in `NotificationDispatchLog` and
 never fails the submission itself.
 """
 
 import logging
+from html import escape
 
 from django.conf import settings
 
-from apps.notifications.models import NotificationDispatchLog, NotificationTemplate
+from apps.notifications.context import student_vars
+from apps.notifications.services import send_system_email
 
 from .services_application_pdf import render_application_pdf
 
@@ -42,8 +44,9 @@ def campus_inbox_for(campus) -> str:
 
 def _fee_lines(fee_page: dict | None) -> str:
     """One "pay online" paragraph per fee still due and payable online
-    (see `payments.applicant_fees.fee_page_for`). Paid rows and rows
-    collected at the college say nothing."""
+    (see `payments.applicant_fees.fee_page_for`), as HTML for the
+    `{{Fee_Lines}}` variable. Paid rows and rows collected at the
+    college say nothing."""
     from apps.payments.applicant_fees import due_rows
 
     out = []
@@ -53,34 +56,13 @@ def _fee_lines(fee_page: dict | None) -> str:
             amount = f"{float(amount):,.2f}"
         except (TypeError, ValueError):
             pass
+        url = escape(str(row.get("pay_url", "") or ""))
         out.append(
-            f"{row.get('label', 'Fee')}: Rs. {amount}\n"
-            f"You can pay it online whenever convenient using this link:\n"
-            f"{row.get('pay_url', '')}\n\n"
+            f"<p>{escape(str(row.get('label', 'Fee')))}: Rs. {escape(str(amount))}<br>"
+            f"You can pay it online whenever convenient using this link:<br>"
+            f"<a href=\"{url}\">{url}</a></p>"
         )
     return "".join(out)
-
-
-def _compose(student, fee_page: dict | None = None) -> tuple[str, str]:
-    institute = getattr(student, "institute", None)
-    inst_name = getattr(institute, "name", "") or "JD Institute"
-    program = getattr(student.program, "name", "") or "—"
-    campus = getattr(student.campus, "name", "") or "—"
-    subject = (f"Application received — {student.application_form_id} "
-               f"({student.student_name})")
-    body = (
-        f"Dear {student.student_name},\n\n"
-        f"Thank you for applying to {inst_name}. We have received your "
-        f"application form; a copy is attached for your records.\n\n"
-        f"Application no: {student.application_form_id}\n"
-        f"Program:        {program}\n"
-        f"Campus:         {campus}\n\n"
-        + _fee_lines(fee_page)
-        + f"Our admissions team will review it and contact you about the "
-        f"next steps.\n\n"
-        f"Regards,\nAdmissions Office\n{inst_name}"
-    )
-    return subject, body
 
 
 def _send_student_copy(student):
@@ -91,20 +73,12 @@ def _send_student_copy(student):
     try:
         from django.utils import timezone
 
-        from apps.notifications.services import queue_notification
-
-        submitted = timezone.localdate()
-        return queue_notification(
-            template_key=STUDENT_TEMPLATE_KEY,
-            recipient=to,
+        return send_system_email(
+            STUDENT_TEMPLATE_KEY, recipient=to, related=student,
             context={
-                "Student_Name": student.student_name,
-                "Course_Name": getattr(student.program, "name", "") or "",
-                "Application_ID": student.application_form_id,
-                "Submission_Date": submitted.strftime("%d-%m-%Y"),
-                "campus_code": getattr(student.campus, "code", "") or "",
+                **student_vars(student),
+                "Submission_Date": timezone.localdate().strftime("%d-%m-%Y"),
             },
-            related=student,
         )
     except Exception:  # noqa: BLE001 — never break the submission
         logger.exception("Application %s: student ack failed",
@@ -141,36 +115,17 @@ def _send_office_copy(student, fee_page):
                     getattr(student.campus, "code", ""))
         return None
 
-    subject, body = _compose(student, fee_page)
-    log = NotificationDispatchLog.objects.create(
-        channel=NotificationTemplate.Channel.EMAIL,
-        template_key=TEMPLATE_KEY, recipient=to, cc=", ".join(cc),
-        subject=subject, body=body, related_object=student,
-    )
-
-    from django.utils import timezone
-
-    from apps.notifications.email import send_email
-    from apps.notifications.reply_to import resolve_reply_to
-
     pdf = render_application_pdf(student)
-    ok, detail = send_email(
-        recipient=to, cc=", ".join(cc), subject=subject, body=body,
+    log = send_system_email(
+        TEMPLATE_KEY, recipient=to, cc=", ".join(cc), related=student,
+        context={**student_vars(student), "Fee_Lines": _fee_lines(fee_page)},
         attachments=[(f"Application-{student.application_form_id}.pdf",
                       pdf, "application/pdf")],
-        reply_to=resolve_reply_to(
-            TEMPLATE_KEY,
-            {"campus_code": getattr(student.campus, "code", "") or ""},
-        ),
     )
-    log.status = (NotificationDispatchLog.Status.SENT if ok
-                  else NotificationDispatchLog.Status.FAILED)
-    log.sent_at = timezone.now() if ok else None
-    log.error = "" if ok else detail
-    log.save(update_fields=["status", "sent_at", "error"])
-    if not ok:
+    if getattr(log, "status", "") != "SENT":
         logger.warning("Application %s office copy to %s failed: %s",
-                       student.application_form_id, to, detail)
+                       student.application_form_id, to,
+                       getattr(log, "error", ""))
     return log
 
 

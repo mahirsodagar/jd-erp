@@ -148,13 +148,29 @@ class PortalCoursewareTopicSerializer(serializers.ModelSerializer):
                 if request else obj.image.url)
 
     def get_attachments(self, obj):
+        """View-only (client, 2026-11-25): the portal never gets the
+        raw media URL. Each attachment points at the authenticated
+        inline-view endpoint and says what kind of file it is so the
+        portal can pick a viewer (PDF frame, image, video) and offer no
+        download."""
+        from django.urls import reverse
+
+        from apps.portal.courseware_files import attachment_kind
+
         request = self.context.get("request")
         out = []
         for a in obj.attachments.all():
-            url = a.file.url if a.file else None
-            if url and request:
-                url = request.build_absolute_uri(url)
-            out.append({"id": a.id, "name": a.name, "url": url})
+            if not a.file:
+                continue
+            kind, content_type = attachment_kind(a.file.name)
+            path = reverse("portal-courseware-attachment-view", args=[a.id])
+            out.append({
+                "id": a.id,
+                "name": a.name,
+                "kind": kind,
+                "content_type": content_type,
+                "view_url": request.build_absolute_uri(path) if request else path,
+            })
         return out
 
 

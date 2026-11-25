@@ -194,6 +194,26 @@ def _particular(receipt) -> str:
     return getattr(receipt, "particular", "") or "Fee"
 
 
+def issued_by_label(receipt) -> str:
+    """Who the receipt says issued it. The cashier when a staff member
+    recorded the payment; otherwise (gateway settlements, registration and
+    online application fees have no human behind them) the institute's
+    accounts office, so the line is never blank — every receipt carries
+    an issuer (client request, 2026-11-25)."""
+    user = receipt.received_by if getattr(receipt, "received_by_id", None) else None
+    if user is not None:
+        name = (user.full_name or "").strip() or user.username
+        if name:
+            return name
+    institute = None
+    try:
+        institute = receipt.enrollment.student.institute
+    except AttributeError:
+        pass
+    inst_name = (getattr(institute, "name", "") or "").strip()
+    return f"Accounts Office, {inst_name}" if inst_name else "Accounts Office"
+
+
 def _mode_label(receipt) -> str:
     """"Online", not "Online (card / netbanking)" — the parenthetical is
     there to help the cashier pick the right mode, and never fits the
@@ -335,10 +355,7 @@ def _draw_receipt_page(pdf: FPDF, receipt) -> None:
 
     _label_value(pdf, "Amount in words", amount_in_words(receipt.amount),
                  label_w=36)
-    issued_by = ""
-    if receipt.received_by_id:
-        issued_by = receipt.received_by.full_name or receipt.received_by.username
-    _label_value(pdf, "Issued By", issued_by, label_w=25)
+    _label_value(pdf, "Issued By", issued_by_label(receipt), label_w=25)
 
     if receipt.status == receipt.Status.CANCELLED:
         pdf.ln(3)

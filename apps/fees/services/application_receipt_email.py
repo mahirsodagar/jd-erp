@@ -15,45 +15,22 @@ mail twice (a SENT dispatch-log row for the lead already exists).
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
 
-from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
-from django.utils import timezone
 
-from apps.notifications.models import NotificationDispatchLog, NotificationTemplate
+from apps.notifications.context import lead_vars, receipt_vars
+from apps.notifications.models import NotificationDispatchLog
+from apps.notifications.services import send_system_email
 
 from .application_receipt import (
     ApplicationFeeReceipt, ensure_application_fee_receipt_no,
     render_application_fee_receipt,
 )
-from .receipt_email import campus_inbox_for
+from .receipt_email import receipt_recipients
 
 logger = logging.getLogger(__name__)
 
 TEMPLATE_KEY = "fees.application_fee_receipt.email"
-
-
-def _compose(lead, receipt: ApplicationFeeReceipt) -> tuple[str, str]:
-    inst = receipt.enrollment.student.institute
-    inst_name = getattr(inst, "name", "") or "JD Institute"
-    amount = f"{Decimal(receipt.amount):,.2f}"
-    subject = f"Application fee receipt {receipt.receipt_no} — {lead.name}"
-    body = (
-        f"Dear {lead.name},\n\n"
-        f"We have received your application fee. The receipt is attached.\n\n"
-        f"Receipt no:   {receipt.receipt_no}\n"
-        f"Amount:       Rs. {amount}\n"
-        f"Towards:      {receipt.particular}\n"
-        f"Date:         {receipt.received_date.strftime('%d-%m-%Y')}\n"
-        f"Mode:         {receipt.get_payment_mode_display()}\n"
-        + (f"Program:      {lead.program.name}\n" if lead.program_id else "")
-        + f"Campus:       {lead.campus.name}\n\n"
-        f"Please keep this receipt for your records. Our admissions team "
-        f"will share the application form link with you.\n\n"
-        f"Regards,\nAccounts Office\n{inst_name}"
-    )
-    return subject, body
 
 
 def already_sent(lead) -> bool:
@@ -76,43 +53,24 @@ def send_application_fee_receipt(lead) -> NotificationDispatchLog | None:
         ensure_application_fee_receipt_no(lead)
         receipt = ApplicationFeeReceipt(lead)
 
-        lead_email = (lead.email or "").strip()
-        campus_email = campus_inbox_for(lead.campus)
-        accounts = (getattr(settings, "ACCOUNTS_INBOX", "") or "").strip()
-        to = lead_email or campus_email
-        cc = [e for e in (campus_email, accounts)
-              if e and e.lower() != to.lower()]
+        to, cc = receipt_recipients(lead.email, lead.campus)
         if not to:
             logger.info("Application fee receipt %s: no recipient.",
                         receipt.receipt_no)
             return None
 
-        subject, body = _compose(lead, receipt)
-        log = NotificationDispatchLog.objects.create(
-            channel=NotificationTemplate.Channel.EMAIL,
-            template_key=TEMPLATE_KEY, recipient=to, cc=", ".join(cc),
-            subject=subject, body=body, related_object=lead,
-        )
-
-        from apps.notifications.email import send_email
-        from apps.notifications.reply_to import resolve_reply_to
-
         pdf = render_application_fee_receipt(lead)
-        ok, detail = send_email(
-            recipient=to, cc=", ".join(cc), subject=subject, body=body,
+        # Replies to the campus receipts inbox (policy CAMPUS_RECEIPTS) —
+        # the lead builder's counsellor Reply-To is dropped on purpose.
+        ctx = {**lead_vars(lead), **receipt_vars(receipt, particular=receipt.particular)}
+        ctx.pop("reply_to", None)
+        log = send_system_email(
+            TEMPLATE_KEY, recipient=to, cc=cc, related=lead, context=ctx,
             attachments=[(f"{receipt.receipt_no}.pdf", pdf, "application/pdf")],
-            reply_to=resolve_reply_to(
-                TEMPLATE_KEY, {"campus_code": getattr(lead.campus, "code", "")},
-            ),
         )
-        log.status = (NotificationDispatchLog.Status.SENT if ok
-                      else NotificationDispatchLog.Status.FAILED)
-        log.sent_at = timezone.now() if ok else None
-        log.error = "" if ok else detail
-        log.save(update_fields=["status", "sent_at", "error"])
-        if not ok:
+        if log.status != NotificationDispatchLog.Status.SENT:
             logger.warning("Application fee receipt %s email to %s failed: %s",
-                           receipt.receipt_no, to, detail)
+                           receipt.receipt_no, to, log.error)
         return log
     except Exception:  # noqa: BLE001 — never break the payment
         logger.exception("Application fee receipt email failed for lead id=%s",

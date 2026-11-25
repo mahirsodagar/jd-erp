@@ -223,9 +223,9 @@ class FeeReceiptDetailSerializer(serializers.ModelSerializer):
     other_fee_name = serializers.CharField(
         source="other_fee.name", read_only=True, default="",
     )
-    received_by_name = serializers.CharField(
-        source="received_by.username", read_only=True, default="",
-    )
+    # Same wording as the PDF's "Issued By" line: cashier's name, or the
+    # institute's accounts office for online settlements.
+    received_by_name = serializers.SerializerMethodField()
     cancelled_by_name = serializers.CharField(
         source="cancelled_by.username", read_only=True, default="",
     )
@@ -246,6 +246,10 @@ class FeeReceiptDetailSerializer(serializers.ModelSerializer):
             "created_on", "updated_on",
         ]
         read_only_fields = fields
+
+    def get_received_by_name(self, obj) -> str:
+        from .services.pdf import issued_by_label
+        return issued_by_label(obj)
 
 
 class FeeReceiptUpdateSerializer(serializers.ModelSerializer):

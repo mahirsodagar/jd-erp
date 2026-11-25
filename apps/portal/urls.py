@@ -6,7 +6,8 @@ from .views import (
     AppointmentCancelView, AppointmentFacultyView, AppointmentListCreateView,
     AssignmentListView, AssignmentSubjectsView, AssignmentSubmitView,
     AttendanceCalendarView, AttendanceReportView,
-    ChangePasswordView, CoursewareListView, CoursewareSubjectsView,
+    ChangePasswordView, CoursewareAttachmentViewView, CoursewareListView,
+    CoursewareSubjectsView,
     DashboardView, DocumentRequestListCreateView,
     FeedbackLinkView, FeedbackOptionsView,
     LeaveListCreateView, LeaveMentorsView, LessonListView, MeView,
@@ -45,6 +46,9 @@ urlpatterns = [
          name="portal-courseware-subjects"),
     path("courseware/", CoursewareListView.as_view(),
          name="portal-courseware-list"),
+    path("courseware/attachments/<int:pk>/view/",
+         CoursewareAttachmentViewView.as_view(),
+         name="portal-courseware-attachment-view"),
 
     # Tests
     path("tests/subjects/", TestSubjectsView.as_view(),

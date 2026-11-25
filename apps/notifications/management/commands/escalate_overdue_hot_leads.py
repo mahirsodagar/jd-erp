@@ -45,7 +45,10 @@ class Command(BaseCommand):
         for lead, fu in overdue:
             counsellor = (lead.assign_to.username if lead.assign_to_id
                           else "(unassigned)")
+            from apps.notifications.context import lead_vars
+
             ctx = {
+                **lead_vars(lead),
                 "name": lead.name, "phone": lead.phone, "email": lead.email,
                 "counsellor": counsellor,
                 "program": lead.program.name if lead.program else "",

@@ -481,17 +481,25 @@ class CertificateSerializer(serializers.ModelSerializer):
         ]
 
 
+# Types that can still be requested. NOC was withdrawn on client request
+# (2026-11-25); the enum value stays so existing rows keep rendering.
+REQUESTABLE_CERT_TYPES = [
+    (v, label) for v, label in Certificate.Type.choices
+    if v != Certificate.Type.NOC
+]
+
+
 class CertificateRequestSerializer(serializers.Serializer):
     student = serializers.IntegerField()
     enrollment = serializers.IntegerField(required=False, allow_null=True)
-    type = serializers.ChoiceField(choices=Certificate.Type.choices)
+    type = serializers.ChoiceField(choices=REQUESTABLE_CERT_TYPES)
     purpose = serializers.CharField(required=False, allow_blank=True, max_length=200)
     remarks = serializers.CharField(required=False, allow_blank=True)
 
 
 class MyCertificateRequestSerializer(serializers.Serializer):
     """Self-request: the student is taken from request.user."""
-    type = serializers.ChoiceField(choices=Certificate.Type.choices)
+    type = serializers.ChoiceField(choices=REQUESTABLE_CERT_TYPES)
     purpose = serializers.CharField(required=False, allow_blank=True, max_length=200)
     remarks = serializers.CharField(required=False, allow_blank=True)
 

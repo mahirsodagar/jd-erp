@@ -282,6 +282,13 @@ RULES: dict[str, tuple[str, ...]] = {
     # The combined page's CSV was available to whoever saw every
     # application; the new Relieving Report page carries its own key.
     "hr.relieving.report": ("hr.relieving.view_all",),
+
+    # --- Communication: System Emails (2026-11-25) ---------------------
+    # Whoever already curated the bulk-email templates curates the
+    # system mail wording too; bulk-email managers can at least read it.
+    "comms.system_email.view": ("comms.template.view", "comms.template.manage",
+                                "comms.bulk_email.manage"),
+    "comms.system_email.manage": ("comms.template.manage",),
 }
 
 
