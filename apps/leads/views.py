@@ -771,6 +771,11 @@ class LeadMarkFeePaidView(_SendLinkBase):
             ensure_application_fee_receipt_no,
         )
         ensure_application_fee_receipt_no(lead)
+        # Receipt PDF to the applicant, same as the counter fee flow.
+        from apps.fees.services.application_receipt_email import (
+            send_application_fee_receipt,
+        )
+        send_application_fee_receipt(lead)
         return Response(
             {
                 "application_fee_paid_at": lead.application_fee_paid_at,

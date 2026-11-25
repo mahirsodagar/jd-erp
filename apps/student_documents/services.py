@@ -2,6 +2,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import DocumentRequest
+from .notify import notify_document_decision, notify_document_requested
 
 
 @transaction.atomic
@@ -19,13 +20,15 @@ def apply_document(*, student, doc_type: str, purpose: str,
         raise ValueError(
             "You already have a pending request for this document."
         )
-    return DocumentRequest.objects.create(
+    obj = DocumentRequest.objects.create(
         student=student,
         doc_type=doc_type,
         doc_type_other=doc_type_other.strip()
         if doc_type == DocumentRequest.DocType.OTHER else "",
         purpose=purpose,
     )
+    notify_document_requested(obj)
+    return obj
 
 
 @transaction.atomic
@@ -48,4 +51,5 @@ def decide_document(*, request_obj: DocumentRequest, decision: str,
         request_obj.attachment = attachment
         fields.append("attachment")
     request_obj.save(update_fields=fields)
+    notify_document_decision(request_obj)
     return request_obj

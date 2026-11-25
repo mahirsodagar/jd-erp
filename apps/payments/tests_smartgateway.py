@@ -513,6 +513,37 @@ class WebhookProcessingTests(_LeadFixture):
         self.assertEqual(self.lead.application_fee_ref, "jd-AF1N01-1")
         self.assertEqual(self.lead.application_fee_amount, Decimal("1000.00"))
 
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        FEE_RECEIPT_CAMPUS_INBOXES={"BLR": "dkul.receipts@jdinstitute.edu.in"},
+        ACCOUNTS_INBOX="",
+    )
+    def test_success_webhook_mails_the_application_fee_receipt(self):
+        from django.core import mail
+
+        from apps.notifications.models import NotificationDispatchLog
+
+        with patch.object(services, "fetch_order", return_value=_order_body()):
+            self._post(self._body())
+        self.lead.refresh_from_db()
+        self.assertTrue(self.lead.application_fee_receipt_no)
+        self.assertEqual(len(mail.outbox), 1)
+        m = mail.outbox[0]
+        self.assertEqual(m.to, ["asha@example.com"])
+        self.assertEqual(m.cc, ["dkul.receipts@jdinstitute.edu.in"])
+        self.assertIn(self.lead.application_fee_receipt_no, m.subject)
+        self.assertEqual(m.attachments[0][0],
+                         f"{self.lead.application_fee_receipt_no}.pdf")
+        self.assertTrue(m.attachments[0][1].startswith(b"%PDF"))
+        self.assertEqual(NotificationDispatchLog.objects.filter(
+            template_key="fees.application_fee_receipt.email",
+            status=NotificationDispatchLog.Status.SENT).count(), 1)
+
+        # A replayed webhook must not mail the receipt a second time.
+        with patch.object(services, "fetch_order", return_value=_order_body()):
+            self._post(self._body(event_id="evt_replay"))
+        self.assertEqual(len(mail.outbox), 1)
+
     def test_webhook_payload_is_not_trusted_on_its_own(self):
         """SmartGateway doesn't sign webhook bodies, so a CHARGED claim
         must be confirmed against /orders/ before money is believed."""

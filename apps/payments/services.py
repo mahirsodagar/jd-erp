@@ -707,6 +707,12 @@ def _mark_lead_fee_paid(payment_request: PaymentRequest, order: PaymentOrder) ->
         ensure_application_fee_receipt_no,
     )
     ensure_application_fee_receipt_no(lead)
+    # Same as every other online payment: receipt PDF straight to the
+    # payer, campus receipts inbox in CC (client, 2026-11-25).
+    from apps.fees.services.application_receipt_email import (
+        send_application_fee_receipt,
+    )
+    send_application_fee_receipt(lead)
 
 
 def _record_installment_receipt(

@@ -71,6 +71,14 @@ def _email_result(log) -> dict:
     }
 
 
+def _sent_to(lead: Lead, what: str) -> str:
+    """One-line reason for the lead's Communications log — the client
+    (2026-11-25) does not want the whole template body repeated there."""
+    targets = [t for t in (lead.phone and f"SMS {lead.phone}",
+                           lead.email and f"email {lead.email}") if t]
+    return f"{what} sent via " + (" and ".join(targets) or "no contact on file") + "."
+
+
 def _first_name(full_name: str) -> str:
     """First whitespace-delimited token of a name, for SMS greetings.
 
@@ -203,7 +211,7 @@ def send_application_link(*, lead: Lead, institute_key: str, actor=None) -> dict
         lead=lead,
         type=LeadCommunication.Type.SMS,
         subject=email_subject,
-        message=sms_body,
+        message=_sent_to(lead, "Application form link"),
         sent_at=timezone.now(),
         logged_by=actor,
     )
@@ -482,7 +490,7 @@ def send_fee_link(*, lead: Lead, institute_key: str, actor=None) -> dict:
         lead=lead,
         type=LeadCommunication.Type.SMS,
         subject=email_subject,
-        message=sms_body,
+        message=_sent_to(lead, "Application fee payment link"),
         sent_at=timezone.now(),
         logged_by=actor,
     )
@@ -565,7 +573,8 @@ def send_fee_payment_instructions_email(
         lead=lead,
         type=LeadCommunication.Type.EMAIL,
         subject=subject,
-        message=text_body,
+        message=(f"Application fee payment instructions (UPI / QR / bank "
+                 f"transfer, Rs. {amount}) emailed to {lead.email}."),
         sent_at=timezone.now(),
         logged_by=actor,
     )
@@ -702,7 +711,8 @@ def send_status_email(*, lead: Lead, status: str, actor=None):
             lead=lead,
             type=LeadCommunication.Type.EMAIL,
             subject=subject,
-            message=getattr(log, "body", "") or subject,
+            message=(f"'{subject}' mail sent to {lead.email} on status "
+                     f"change to {status}."),
             sent_at=timezone.now(),
             logged_by=actor,
         )
@@ -743,7 +753,7 @@ def send_welcome_message(*, lead: Lead, actor=None) -> dict:
         lead=lead,
         type=LeadCommunication.Type.EMAIL,
         subject=subject,
-        message=body,
+        message=f"Welcome note emailed to {lead.email}.",
         sent_at=timezone.now(),
         logged_by=actor,
     )
