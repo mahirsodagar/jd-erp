@@ -254,6 +254,8 @@ def exam_report(exam: EntranceExam) -> dict:
             "status": a.status,
             "submitted_at": a.submitted_at,
             "total_score": str(a.total_score) if a.total_score is not None else None,
+            "result": a.result or None,
+            "result_mailed_at": a.result_mailed_at,
         })
     rows.sort(key=lambda r: -(float(r["total_score"]) if r["total_score"] else -1))
     return {
