@@ -188,6 +188,7 @@ class BatchMentorReportSerializer(serializers.ModelSerializer):
 
 class ZeroHourReportSerializer(serializers.ModelSerializer):
     batch_name = serializers.CharField(source="batch.name", read_only=True)
+    program_name = serializers.CharField(source="batch.program.name", read_only=True)
     mentor_name = serializers.CharField(source="mentor.full_name", read_only=True)
     submitted_by_name = serializers.CharField(
         source="submitted_by.full_name", read_only=True, default="",
@@ -198,7 +199,7 @@ class ZeroHourReportSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "report_date",
-            "batch", "batch_name",
+            "batch", "batch_name", "program_name",
             "mentor", "mentor_name",
             "batch_strength", "zero_hour_attendance",
             "avg_attendance_first_half", "avg_attendance_month_end",
@@ -209,7 +210,7 @@ class ZeroHourReportSerializer(serializers.ModelSerializer):
             "created_at", "updated_at",
         ]
         read_only_fields = [
-            "id", "batch_name", "mentor_name",
+            "id", "batch_name", "program_name", "mentor_name",
             "submitted_by", "submitted_by_name", "created_at", "updated_at",
         ]
 

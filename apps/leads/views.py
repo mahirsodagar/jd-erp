@@ -633,7 +633,8 @@ class _SendLinkBase(APIView):
 
     def _resolve(self, request, pk):
         try:
-            lead = Lead.objects.select_related("campus", "program").get(pk=pk)
+            lead = Lead.objects.select_related(
+                "campus", "program", "program__institute").get(pk=pk)
         except Lead.DoesNotExist:
             return None, Response(
                 {"detail": "Lead not found."}, status=http.HTTP_404_NOT_FOUND,
@@ -654,26 +655,22 @@ class _SendLinkBase(APIView):
 
 
 class LeadSendApplicationLinkView(_SendLinkBase):
-    """Body: { "institute": "JDIFT" | "JDSD" }"""
+    """No body needed: the institute follows the lead's program
+    (2026-11-26). A legacy `{"institute": ...}` in the body is ignored."""
 
     required_perm = "leads.send.application_link"
 
     def post(self, request, pk):
-        from .send_links import send_application_link
+        from .send_links import lead_institute_key, send_application_link
 
         lead, err = self._resolve(request, pk)
         if err:
             return err
 
-        institute = request.data.get("institute")
-        if not institute:
-            return Response(
-                {"institute": "Required. e.g. 'JDIFT' or 'JDSD'."},
-                status=http.HTTP_400_BAD_REQUEST,
-            )
         try:
             result = send_application_link(
-                lead=lead, institute_key=institute, actor=request.user,
+                lead=lead, institute_key=lead_institute_key(lead),
+                actor=request.user,
             )
         except ValueError as e:
             return Response({"detail": str(e)}, status=http.HTTP_400_BAD_REQUEST)
@@ -681,26 +678,22 @@ class LeadSendApplicationLinkView(_SendLinkBase):
 
 
 class LeadSendFeeLinkView(_SendLinkBase):
-    """Body: { "institute": "JDIFT" | "JDSD" }"""
+    """No body needed: the institute follows the lead's program
+    (2026-11-26). A legacy `{"institute": ...}` in the body is ignored."""
 
     required_perm = "leads.send.fee_link"
 
     def post(self, request, pk):
-        from .send_links import send_fee_link
+        from .send_links import lead_institute_key, send_fee_link
 
         lead, err = self._resolve(request, pk)
         if err:
             return err
 
-        institute = request.data.get("institute")
-        if not institute:
-            return Response(
-                {"institute": "Required. e.g. 'JDIFT' or 'JDSD'."},
-                status=http.HTTP_400_BAD_REQUEST,
-            )
         try:
             result = send_fee_link(
-                lead=lead, institute_key=institute, actor=request.user,
+                lead=lead, institute_key=lead_institute_key(lead),
+                actor=request.user,
             )
         except ValueError as e:
             return Response({"detail": str(e)}, status=http.HTTP_400_BAD_REQUEST)

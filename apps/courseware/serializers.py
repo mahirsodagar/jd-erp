@@ -61,3 +61,10 @@ class PublishTopicSerializer(serializers.Serializer):
         child=serializers.CharField(max_length=200),
         required=False, allow_empty=True,
     )
+
+    def validate_attachments(self, files):
+        # PDF / image / video only (client, 2026-11-26).
+        from .files import validate_attachment
+        for f in files:
+            validate_attachment(f)
+        return files

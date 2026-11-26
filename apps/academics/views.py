@@ -70,10 +70,24 @@ def _forced(request, user) -> bool:
 
 
 def _scope(qs, user):
-    """Campus-scope mutations / non-admin reads."""
+    """Campus-scope mutations."""
     if user.is_superuser or has_perm(user, "academics.schedule.view_all"):
         return qs
     return qs.filter(batch__campus__in=user.campuses.all())
+
+
+def _read_scope(qs, user):
+    """What the Timetable / Calendar pages list (2026-11-26): everything
+    for `academics.schedule.view_all` holders (admin roles, HoD), only
+    the caller's OWN classes for everyone else — a faculty member with
+    the plain `view` key sees their timetable, not the whole campus's.
+    A staff login with no Employee row sees nothing."""
+    if user.is_superuser or has_perm(user, "academics.schedule.view_all"):
+        return qs
+    emp = getattr(user, "employee", None)
+    if emp is None:
+        return qs.none()
+    return qs.filter(instructor=emp)
 
 
 # --- Schedule slot CRUD -----------------------------------------------
@@ -85,7 +99,7 @@ class ScheduleSlotListCreateView(APIView):
         qs = ScheduleSlot.objects.select_related(
             "batch", "batch__campus", "subject", "instructor", "classroom", "time_slot",
         )
-        qs = _scope(qs, request.user)
+        qs = _read_scope(qs, request.user)
         params = request.query_params
         if v := params.get("campus"):
             qs = qs.filter(batch__campus_id=v)

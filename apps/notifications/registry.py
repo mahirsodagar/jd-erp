@@ -254,6 +254,52 @@ _TRIGGERS: list[Trigger] = [
         aliases={"name": "Student_Name", "exam": "Exam_Name", "url": "Exam_Link", "duration": "Exam_Duration", "window": "Exam_Window"},
     ),
     Trigger(
+        key="lead.entrance_exam_result.email", group="leads",
+        label="Entrance exam result — pass",
+        description="Sent automatically when staff mark a candidate's entrance exam "
+                    "as PASS on the grading page. Once per candidate.",
+        recipients="To the lead. Reply-To: assigned counsellor, else the campus admissions inbox.",
+        variables=_vars(LEAD_VARS, [
+            Var("Exam_Name", "Exam name", "JD Design Aptitude Test 2026"),
+            Var("Exam_Date", "Date the candidate sat the exam", "26-11-2026"),
+            Var("Score", "Candidate's total score", "72.0"),
+            Var("Total_Marks", "Exam total marks", "100.0"),
+            Var("Contact", "Campus phone, else institute phone / email", "+91 80 4040 0000"),
+        ]),
+        default_subject="Entrance Exam Result – {{Student_Name}} {{Course_Name}}",
+        default_body=_p(
+            "Dear {{Student_Name}},",
+            "Congratulations on clearing the entrance exam for {{Course_Name}} at {{Institute_Name}}.",
+            "Our Admissions team will get in touch with you shortly with the next steps regarding your admission process. In the meantime, please keep your application documents and registration details handy.",
+            "If you have any immediate questions, feel free to reply to this email or contact us at {{Contact}}.",
+            "Best regards,<br>Admissions Team<br>{{Institute_Name}}",
+        ),
+        aliases={"name": "Student_Name", "course": "Course_Name", "institute": "Institute_Name", "contact": "Contact"},
+    ),
+    Trigger(
+        key="lead.entrance_exam_fail.email", group="leads",
+        label="Entrance exam result — not cleared",
+        description="Sent automatically when staff mark a candidate's entrance exam "
+                    "as FAIL on the grading page. Once per candidate.",
+        recipients="To the lead. Reply-To: assigned counsellor, else the campus admissions inbox.",
+        variables=_vars(LEAD_VARS, [
+            Var("Exam_Name", "Exam name", "JD Design Aptitude Test 2026"),
+            Var("Exam_Date", "Date the candidate sat the exam", "26-11-2026"),
+            Var("Score", "Candidate's total score", "31.0"),
+            Var("Total_Marks", "Exam total marks", "100.0"),
+            Var("Contact", "Campus phone, else institute phone / email", "+91 80 4040 0000"),
+        ]),
+        default_subject="Entrance Exam Results – {{Exam_Name}} / {{Institute_Name}}",
+        default_body=_p(
+            "Dear {{Student_Name}},",
+            "Thank you for appearing for the {{Exam_Name}} on {{Exam_Date}} and for your interest in joining {{Institute_Name}} – {{Course_Name}}.",
+            "We appreciate the time, effort, and dedication you put into preparing for the test. After a careful evaluation of all candidates' scores, we regret to inform you that you have not cleared the entrance exam for this admission cycle.",
+            "Please do not be discouraged, as competition was very high this year. We encourage you to keep working toward your goals and wish you the very best of luck in your future academic pursuits and next attempts.",
+            "Best regards,<br>{{Institute_Name}}",
+        ),
+        aliases={"name": "Student_Name", "course": "Course_Name", "institute": "Institute_Name", "exam": "Exam_Name", "date": "Exam_Date"},
+    ),
+    Trigger(
         key="lead.welcome.email", group="leads",
         label="Welcome note",
         description="Counsellor sends the welcome note to a lead (Send → Welcome note).",

@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from django.test import SimpleTestCase, TestCase
 
-from apps.leaves.models import LeaveApplication, LeaveType
+from apps.leaves.models import LeaveAllocation, LeaveApplication, LeaveType
 from apps.leaves.services.balance import cl_dashboard, leave_year
 from apps.master.models import Campus, Institute
 from apps.relieving.tests_notifications import make_employee
@@ -44,6 +44,12 @@ class ClDashboardWindowTests(TestCase):
         cls.cl, _ = LeaveType.objects.get_or_create(
             code="CASUAL",
             defaults={"name": "Casual Leave", "category": LeaveType.Category.LEAVE},
+        )
+        # 12 CL for the 2026-27 window; the dashboard's CL balance is the
+        # same window-scoped figure as the Balances page.
+        LeaveAllocation.objects.create(
+            employee=cls.emp, leave_type=cls.cl, count=Decimal("12"),
+            start_date=date(2026, 6, 1), end_date=date(2027, 5, 31),
         )
 
     def _approved_cl(self, day):

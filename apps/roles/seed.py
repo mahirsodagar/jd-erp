@@ -544,7 +544,6 @@ CATALOGUE = [
     ("dashboard", "dashboard.my_leads.view", "See the count of active leads assigned to me"),
     ("dashboard", "dashboard.enrollments.view", "See the active enrolments count"),
     ("dashboard", "dashboard.students.view", "See the total students count"),
-    ("dashboard", "dashboard.engagement.view", "See the engagement metrics chart"),
     ("dashboard", "dashboard.my_work.view", "See my reports and plans feed"),
     # Campus cards (ported from the PHP dashboard) + the batch-wise
     # breakdown behind each card. Unlike the tiles above this one is NOT

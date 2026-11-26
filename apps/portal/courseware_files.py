@@ -14,8 +14,13 @@ an inline viewer.
 import mimetypes
 from pathlib import PurePosixPath
 
-VIEWABLE_IMAGE = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}
-VIEWABLE_VIDEO = {".mp4", ".webm", ".ogv", ".m4v", ".mov"}
+from apps.courseware.files import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+
+# Same sets staff uploads are validated against (2026-11-26), so every
+# attachment that gets in has a viewer. Audio is kept for rows uploaded
+# before the upload rule existed.
+VIEWABLE_IMAGE = IMAGE_EXTENSIONS
+VIEWABLE_VIDEO = VIDEO_EXTENSIONS
 VIEWABLE_AUDIO = {".mp3", ".wav", ".ogg", ".m4a", ".aac"}
 
 

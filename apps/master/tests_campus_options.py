@@ -43,6 +43,20 @@ class CampusOptionsTests(TestCase):
         self.assertEqual([x["code"] for x in r.json()], ["BLR", "GOA"])
         self.assertEqual(set(r.json()[0]), {"id", "name", "code"})
 
+    def test_program_and_batch_lists_are_open_to_staff_without_keys(self):
+        """The Closing / Module End Report pickers (2026-11-26): a faculty
+        login with no master keys reads programs and batches; writing a
+        program still needs `master.program.add`."""
+        c = APIClient()
+        c.force_authenticate(self.staff)
+        r = c.get(reverse("program-list-create"))
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual([p["code"] for p in r.json()], ["BDES"])
+        self.assertEqual(c.get(reverse("batch-list-create")).status_code, 200)
+        r = c.post(reverse("program-list-create"),
+                   {"name": "X", "code": "X"}, format="json")
+        self.assertEqual(r.status_code, 403)
+
     def test_students_and_anonymous_are_refused(self):
         c = APIClient()
         self.assertIn(c.get(reverse("campus-options")).status_code, (401, 403))

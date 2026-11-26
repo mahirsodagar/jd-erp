@@ -84,9 +84,13 @@ class ExamDetailView(APIView):
                 or has_perm(request.user, "leads.exam.edit_any")):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
-        if exam.status != EntranceExam.Status.DRAFT:
+        # Pass marks only gate the result mail, so they may change on a
+        # published exam; everything else is frozen once published.
+        if (exam.status != EntranceExam.Status.DRAFT
+                and set(request.data.keys()) - {"pass_marks"}):
             return Response(
-                {"detail": "Only DRAFT exams can be edited."},
+                {"detail": "Only DRAFT exams can be edited "
+                           "(pass marks may still be changed)."},
                 status=http.HTTP_400_BAD_REQUEST,
             )
         s = EntranceExamSerializer(exam, data=request.data, partial=True)
@@ -479,6 +483,44 @@ class ExamResponseReviewView(APIView):
             return Response({"detail": str(e)},
                             status=http.HTTP_400_BAD_REQUEST)
         return Response(EntranceExamResponseSerializer(r).data)
+
+
+class ExamAttemptGradeView(APIView):
+    """Grading page's one action (client, 2026-11-26): save every mark +
+    feedback, then record Pass / Fail. The matching result mail goes out
+    once after commit. Same gate as per-response review."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from .exam_serializers import GradeAttemptSerializer
+        from .exam_service import grade_attempt
+
+        try:
+            attempt = EntranceExamAttempt.objects.select_related(
+                "exam", "lead",
+            ).get(pk=pk)
+        except EntranceExamAttempt.DoesNotExist as e:
+            raise Http404 from e
+        u = request.user
+        if not (u.is_superuser
+                or _is_exam_owner(u, attempt.exam)
+                or has_perm(u, "leads.exam.review")):
+            return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        s = GradeAttemptSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        try:
+            grade_attempt(
+                attempt=attempt,
+                marks=s.validated_data.get("marks", []),
+                result=s.validated_data["result"],
+                actor=u,
+            )
+        except ValueError as e:
+            return Response({"detail": str(e)},
+                            status=http.HTTP_400_BAD_REQUEST)
+        attempt.refresh_from_db()
+        return Response(EntranceExamAttemptSerializer(attempt).data)
 
 
 # --- Public candidate endpoints (no auth, by access_token) -----------

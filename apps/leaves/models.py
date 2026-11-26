@@ -39,7 +39,10 @@ class LeaveType(models.Model):
 
 class LeaveAllocation(models.Model):
     """Grant of LEAVE-category days for an employee, valid over an open/close
-    window [start_date, end_date]. Balances are scoped purely to this window."""
+    window [start_date, end_date]. Balances are scoped to this window: a
+    leave is charged to the allocation whose window contains its from_date,
+    and unused days do not carry into the next window (see
+    services.balance.compute_balance)."""
 
     employee = models.ForeignKey(
         "employees.Employee", on_delete=models.CASCADE, related_name="leave_allocations",

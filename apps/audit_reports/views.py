@@ -1038,8 +1038,8 @@ class ZeroHourReportListCreateView(PaginatedAPIViewMixin, APIView):
 
     def get(self, request):
         u = request.user
-        qs = ZeroHourReport.objects.select_related("batch", "mentor",
-                                                    "submitted_by")
+        qs = ZeroHourReport.objects.select_related("batch", "batch__program",
+                                                    "mentor", "submitted_by")
         if not (_zh_can_view_all(u)
                 or has_perm(u, "academics.zero_hour.edit_any")
                 or has_perm(u, "academics.zero_hour.delete_any")):

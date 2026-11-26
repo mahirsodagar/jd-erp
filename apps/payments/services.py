@@ -69,6 +69,24 @@ def _customer_id_for(lead) -> str:
     return f"LEAD{lead.id}"
 
 
+def receipt_issuer(payment_request: PaymentRequest):
+    """The staff member a gateway receipt names as "Issued By": whoever
+    created the payment request, unless that was the payer — a student
+    paying from the portal (or a parent) creates the request themselves
+    and must not appear as the issuer. None when nobody on staff did."""
+    user = payment_request.created_by
+    if user is None:
+        return None
+    student = _student_of(payment_request)
+    if student is not None and user.pk in (
+        student.user_account_id, student.parent_user_account_id,
+    ):
+        return None
+    if getattr(user, "student", None) is not None:
+        return None
+    return user
+
+
 def _student_of(payment_request: PaymentRequest):
     """The Student behind a FEE_INSTALLMENT or REGISTRATION_FEE request,
     or None."""
@@ -761,8 +779,9 @@ def _record_installment_receipt(
             + (f", {order.payment_method}" if order.payment_method else "")
             + ")."
         ),
-        # Left as None deliberately: no human received this one.
-        received_by=None,
+        # The staff member who sent the payment link is the receipt's
+        # issuer; None only for a link nobody on staff created.
+        received_by=receipt_issuer(payment_request),
     )
     # Same as the counter flow: PDF to the student + campus inbox.
     from apps.fees.services.receipt_email import send_receipt_email
@@ -803,7 +822,7 @@ def _record_other_fee_receipt(
             + (f", {order.payment_method}" if order.payment_method else "")
             + ")."
         ),
-        received_by=None,
+        received_by=receipt_issuer(payment_request),
     )
     from apps.fees.services.receipt_email import send_receipt_email
     send_receipt_email(receipt)

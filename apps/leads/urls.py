@@ -3,6 +3,7 @@ from django.urls import path
 from .bulk_message import LeadBulkMessageView
 from .exam_views import (
     ExamAttemptDetailView,
+    ExamAttemptGradeView,
     ExamAttemptSendLinkView,
     ExamAttemptsListView,
     ExamCloseView,
@@ -95,6 +96,9 @@ urlpatterns = [
          name="exam-attempt-detail"),
     path("exam-attempts/<int:pk>/send-link/",
          ExamAttemptSendLinkView.as_view(), name="exam-attempt-send-link"),
+    # Save all marks + decide Pass / Fail in one go (grading page).
+    path("exam-attempts/<int:pk>/grade/",
+         ExamAttemptGradeView.as_view(), name="exam-attempt-grade"),
     path("exam-responses/<int:pk>/review/", ExamResponseReviewView.as_view(),
          name="exam-response-review"),
 

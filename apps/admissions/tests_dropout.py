@@ -120,6 +120,47 @@ class DropoutTests(TestCase):
         self.assertEqual(self._post("student-reactivate", "x").status_code,
                          400)
 
+    def _portal_user(self):
+        user = User.objects.create_user(
+            username="stu@portal", email="stu@example.com", password="x")
+        Student.objects.filter(pk=self.student.pk).update(user_account=user)
+        self.student.refresh_from_db()
+        return user
+
+    def test_dropout_deactivates_portal_login_and_reactivate_restores(self):
+        """Client rule 2026-11-26: a dropout cannot sign in to the portal."""
+        user = self._portal_user()
+        self.assertEqual(self._post("student-dropout", "Left").status_code, 201)
+        user.refresh_from_db()
+        self.assertFalse(user.is_active)
+        # The portal login itself refuses the account.
+        res = APIClient().post(
+            reverse("login"),
+            {"username": "stu@portal", "password": "x"}, format="json")
+        self.assertEqual(res.status_code, 401, res.data)
+        self.assertEqual(self._post("student-reactivate", "Back").status_code, 201)
+        user.refresh_from_db()
+        self.assertTrue(user.is_active)
+
+    def test_manual_drop_from_edit_enrollment_deactivates_login(self):
+        user = self._portal_user()
+        res = self.client.patch(
+            reverse("enrollment-detail", args=[self.live.pk]),
+            {"status": S.DROPPED}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        user.refresh_from_db()
+        self.assertFalse(user.is_active)
+        res = self.client.patch(
+            reverse("enrollment-detail", args=[self.live.pk]),
+            {"status": S.ACTIVE}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        user.refresh_from_db()
+        self.assertTrue(user.is_active)
+
+    def test_dropout_without_portal_account_is_fine(self):
+        self.assertIsNone(self.student.user_account)
+        self.assertEqual(self._post("student-dropout", "Left").status_code, 201)
+
     def test_permission_needed(self):
         staff = User.objects.create_user(
             username="staff", email="s@example.com", password="x")

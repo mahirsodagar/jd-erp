@@ -161,8 +161,7 @@ class IdCardTests(TestCase):
         self.assertEqual(CardData(s, e).address_lines, (
             "2nd Floor, Alfran Plaza",
             "MG Road, Panaji - 403 001",
-            "Contact : 0832 242 0001",
-            "+91 98220 00001",
+            "Contact : 0832 242 0001 / +91 98220 00001",
         ))
         s2, e2 = self._student("H", self.jdsd, self.p_jdsd, self.b_jdsd)
         Enrollment.objects.filter(pk=e2.pk).update(campus=goa)
@@ -170,8 +169,7 @@ class IdCardTests(TestCase):
         self.assertEqual(CardData(s2, e2).address_lines, (
             "2ND FLOOR, ALFRAN PLAZA",
             "MG ROAD, PANAJI - 403 001",
-            "0832 242 0001",
-            "+91 98220 00001",
+            "0832 242 0001 / +91 98220 00001",
             "www.jdsd.in",
         ))
         # Nothing on file (the shared Bengaluru fixture) -> reference block.
@@ -181,6 +179,35 @@ class IdCardTests(TestCase):
         # And both render.
         for student, enrol in ((s, e), (s2, e2)):
             self.assertTrue(render_id_card(student, enrol).startswith(b"%PDF"))
+
+    def test_long_address_wraps_at_fixed_size_to_three_rows(self):
+        """Client 2026-11-26: the font never shrinks for a long address;
+        it wraps onto at most three rows, phones share a fourth."""
+        from fpdf import FPDF
+        from apps.admissions.services_idcard import (
+            CARD_W, ContactBlock, wrap_contact_rows,
+        )
+        block = ContactBlock(
+            ("Third Floor, Sunshine Towers, Opposite Central Mall, "
+             "Banjara Hills Main Road, Road No. 12, Hyderabad - 500 034, "
+             "Telangana, India",),
+            ("Contact : 040 2355 0007 / +91 98490 00007",),
+        )
+        pdf = FPDF(unit="mm", format=(54, 85))
+        pdf.add_page()
+        pdf.set_font("Helvetica", "B", 8.2)
+        rows = wrap_contact_rows(pdf, block, CARD_W - 4)
+        # Three address rows, then the contact row (itself wrapped when
+        # two numbers are too wide), every row inside the width.
+        self.assertTrue(rows[3].startswith("Contact :"))
+        self.assertTrue(block[0].startswith(" ".join(rows[:3])))
+        for row in rows:
+            self.assertLessEqual(pdf.get_string_width(row), CARD_W - 4)
+        self.assertEqual(pdf.font_size_pt, 8.2)
+        # A short block passes through untouched.
+        short = ContactBlock(("No.18, Edward House,",), ("Contact : 080",))
+        self.assertEqual(wrap_contact_rows(pdf, short, CARD_W - 4),
+                         ["No.18, Edward House,", "Contact : 080"])
 
     def test_valid_till_without_duration_uses_year_end(self):
         self.p_jdift.duration_months = None

@@ -179,49 +179,30 @@ class AttendanceReportView(APIView):
     def get(self, request):
         ctx = request.portal_ctx
         student = ctx.student
-        # Current batch only — see DashboardView.
+        # Current batch only — see DashboardView. Same semester → subject
+        # breakdown the staff student page shows (2026-11-26), so the
+        # student and their counsellor read identical numbers; Late
+        # counts as present here too.
+        from apps.academics.attendance_service import semester_subject_breakdown
+
         batch = ctx.enrollment.batch if ctx.enrollment is not None else None
-        rows = (Attendance.objects
-                .filter(student=student, schedule_slot__batch=batch)
-                .select_related("schedule_slot__subject",
-                                 "schedule_slot"))
-        # group by subject
-        agg = {}
-        for a in rows:
-            sub = a.schedule_slot.subject
-            d = agg.setdefault(sub.id, {
-                "subject_id": sub.id,
-                "subject_code": sub.code,
-                "subject_name": sub.name,
-                "present": 0, "absent": 0, "late": 0, "total": 0,
-                "absent_dates": [], "late_dates": [],
-            })
-            d["total"] += 1
-            ds = a.schedule_slot.date.isoformat()
-            if a.status == Attendance.Status.PRESENT:
-                d["present"] += 1
-            elif a.status == Attendance.Status.ABSENT:
-                d["absent"] += 1
-                d["absent_dates"].append(ds)
-            elif a.status == Attendance.Status.LATE:
-                d["late"] += 1
-                d["late_dates"].append(ds)
-        for d in agg.values():
-            d["percentage"] = round(
-                d["present"] / d["total"] * 100 if d["total"] else 0, 1,
-            )
-        rows_out = sorted(agg.values(), key=lambda r: r["subject_code"])
+        semesters = semester_subject_breakdown(student=student, batch=batch)
+        rows_out = sorted(
+            (dict(r, total=r["marked"]) for g in semesters for r in g["subjects"]),
+            key=lambda r: r["subject_code"],
+        )
         totals = {
             "present": sum(r["present"] for r in rows_out),
             "absent": sum(r["absent"] for r in rows_out),
             "late": sum(r["late"] for r in rows_out),
-            "total": sum(r["total"] for r in rows_out),
+            "total": sum(r["marked"] for r in rows_out),
         }
         totals["percentage"] = round(
-            totals["present"] / totals["total"] * 100
+            (totals["present"] + totals["late"]) / totals["total"] * 100
             if totals["total"] else 0, 1,
         )
-        return Response({"subjects": rows_out, "totals": totals})
+        return Response({"semesters": semesters, "subjects": rows_out,
+                         "totals": totals})
 
 
 # --- Timetable -----------------------------------------------------

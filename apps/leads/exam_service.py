@@ -76,6 +76,8 @@ def submit_attempt(*, attempt: EntranceExamAttempt, answers: list[dict]) -> dict
     attempt.save(update_fields=[
         "submitted_at", "status", "total_score", "updated_at",
     ])
+    # No result mail here: even an MCQ-only exam waits for staff to
+    # decide Pass / Fail on the grading page (client, 2026-11-26).
     return {
         "status": attempt.status,
         "auto_score": str(auto_total),
@@ -107,7 +109,8 @@ def review_response(*, response: EntranceExamResponse, marks_awarded: Decimal,
 
 
 def _maybe_finalize(attempt: EntranceExamAttempt) -> None:
-    """Move attempt to GRADED when every response has marks_awarded set."""
+    """Move attempt to GRADED when every response has marks_awarded set.
+    The result (Pass / Fail) and its mail wait for `grade_attempt`."""
     pending = attempt.responses.filter(marks_awarded__isnull=True).count()
     if pending:
         return
@@ -115,6 +118,86 @@ def _maybe_finalize(attempt: EntranceExamAttempt) -> None:
     attempt.total_score = total
     attempt.status = EntranceExamAttempt.Status.GRADED
     attempt.save(update_fields=["total_score", "status", "updated_at"])
+
+
+@transaction.atomic
+def grade_attempt(*, attempt: EntranceExamAttempt, marks: list[dict],
+                  result: str, actor) -> EntranceExamAttempt:
+    """The grading page's single action (client, 2026-11-26): save every
+    short-answer mark + feedback, total the attempt, and record the
+    staff member's Pass / Fail decision — then mail the matching result.
+
+    `marks` = [{"response": id, "marks_awarded": Decimal, "feedback": str}]
+    for the SHORT-answer responses (MCQ rows keep their auto marks; a
+    mark sent for one is applied too, so a staff override is possible).
+    Every short response must end up marked. Once the result mail has
+    gone out the decision is locked — a 400 tells staff so.
+    """
+    if attempt.status not in (EntranceExamAttempt.Status.SUBMITTED,
+                              EntranceExamAttempt.Status.GRADED):
+        raise ValueError("The candidate has not submitted this exam yet.")
+    if result not in EntranceExamAttempt.Result.values:
+        raise ValueError("result must be PASS or FAIL.")
+    if attempt.result_mailed_at is not None and attempt.result != result:
+        raise ValueError(
+            f"The {attempt.get_result_display().lower()} result has already been "
+            "mailed to the candidate; it can't be changed here.")
+
+    by_id = {r.id: r for r in attempt.responses.select_related("question")}
+    now = timezone.now()
+    for m in marks:
+        r = by_id.get(m["response"])
+        if r is None:
+            raise ValueError(f"Response {m['response']} is not part of this attempt.")
+        awarded = Decimal(m["marks_awarded"])
+        if awarded < 0:
+            raise ValueError("Marks must be non-negative.")
+        if awarded > r.question.marks:
+            raise ValueError(
+                f"Q{r.question.sort_order}: {awarded} exceeds the question's "
+                f"maximum of {r.question.marks}.")
+        r.marks_awarded = awarded
+        r.feedback = (m.get("feedback") or "")
+        r.reviewed_by = actor
+        r.reviewed_at = now
+        r.is_auto_graded = False
+        r.save(update_fields=["marks_awarded", "feedback", "reviewed_by",
+                              "reviewed_at", "is_auto_graded", "updated_at"])
+
+    unmarked = [r for r in by_id.values() if r.marks_awarded is None]
+    if unmarked:
+        raise ValueError(
+            "Enter marks for every question before deciding: "
+            + ", ".join(f"Q{r.question.sort_order}" for r in unmarked))
+
+    total = attempt.responses.aggregate(s=Sum("marks_awarded"))["s"] or Decimal("0")
+    attempt.total_score = total
+    attempt.status = EntranceExamAttempt.Status.GRADED
+    attempt.result = result
+    attempt.result_decided_at = now
+    attempt.result_decided_by = actor
+    attempt.save(update_fields=["total_score", "status", "result",
+                                "result_decided_at", "result_decided_by",
+                                "updated_at"])
+    _notify_result(attempt, actor=actor)
+    return attempt
+
+
+def _notify_result(attempt: EntranceExamAttempt, *, actor=None) -> None:
+    """Mail the Pass or Fail result once staff have decided it. Runs after
+    the grading transaction commits so a rollback never leaves a mail
+    behind, and a mail failure never undoes the grading."""
+    from .send_links import send_entrance_exam_result
+
+    def _go():
+        try:
+            send_entrance_exam_result(attempt=attempt, actor=actor)
+        except Exception:  # noqa: BLE001 — logged; grading must stand
+            import logging
+            logging.getLogger("apps.leads").exception(
+                "entrance exam result mail failed for attempt %s", attempt.pk)
+
+    transaction.on_commit(_go)
 
 
 # --- Window helpers --------------------------------------------------

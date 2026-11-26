@@ -28,6 +28,7 @@ from .serializers import (
 )
 from .services import (
     LIVE_STATUSES, StatusChangeError, can_enroll, drop_out_student,
+    sync_portal_access,
     graduate_batch, promote_batch, reactivate_student,
     provision_student_portal_credentials,
     sync_student_placement_from_enrollment, transfer_enrollment,
@@ -500,6 +501,8 @@ class EnrollmentListCreateView(APIView):
             # Enrolling into a different program than the one applied for
             # is allowed and common; the student profile has to follow it.
             sync_student_placement_from_enrollment(student, actor=request.user)
+            # A fresh live enrollment ends a dropout: portal login returns.
+            sync_portal_access(student)
             # Fees paid online right after the application form become
             # receipts on this enrollment (registration against its
             # installment, other fee against a new OtherFee row), so the
@@ -541,6 +544,9 @@ class EnrollmentDetailView(APIView):
         with transaction.atomic():
             s.save()
             sync_student_placement_from_enrollment(obj.student, actor=request.user)
+            # Setting / clearing DROPPED here makes or unmakes a dropout
+            # just like the Drop Out action, so the portal login follows.
+            sync_portal_access(obj.student)
         return Response(s.data)
 
 

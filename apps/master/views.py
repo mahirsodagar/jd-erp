@@ -136,8 +136,18 @@ class CampusOptionsView(APIView):
 # --- Program ------------------------------------------------------------
 
 class ProgramListCreateView(APIView):
-    permission_classes = [IsAuthenticated, HasPerm]
+    """Programs. The read is OPEN to any authenticated user, like every
+    other picker list (see `_ListCreateBase`): the Closing Report, Module
+    End Report, timetable and enrolment pages all need the program list
+    and most of their users hold no `master.program` key (faculty got a
+    403 here, 2026-11-26). Create / edit / delete stay gated."""
+
     perm_base = "master.program"
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), HasPerm()]
 
     def get(self, request):
         qs = Program.objects.all()

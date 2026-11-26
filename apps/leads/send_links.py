@@ -92,6 +92,23 @@ def _first_name(full_name: str) -> str:
 
 # --- Institute lookup -------------------------------------------------------
 
+def lead_institute_key(lead: Lead) -> str:
+    """The institute code the Send box mails for — the one owning the
+    lead's program (2026-11-26: the Institute dropdown on the lead page
+    was removed; the program decides). Raises ValueError when the program
+    has no owning institute (legacy rows), so the caller can say so."""
+    program = lead.program if lead.program_id else None
+    code = (getattr(getattr(program, "institute", None), "code", "") or "").strip()
+    if not code:
+        name = getattr(program, "name", "") or "this lead's program"
+        raise ValueError(
+            f"{name} has no owning institute in Programs master — set it "
+            "there first; the institute (and its payment details) follow "
+            "the program.",
+        )
+    return code
+
+
 def _payment_details(institute_key: str) -> dict:
     """Return UPI / bank details for the institute. Raises if not configured."""
     cfg = getattr(settings, "INSTITUTE_PAYMENT_DETAILS", {})
@@ -728,3 +745,79 @@ def send_welcome_message(*, lead: Lead, actor=None) -> dict:
         "email_log_id": getattr(email_log, "id", None),
         "communication_id": comm.id,
     }
+
+
+def exam_result_contact(lead) -> str:
+    """The {{Contact}} the result mail points candidates at: the lead's
+    campus phone, else the institute phone, else the institute email."""
+    campus = lead.campus if getattr(lead, "campus_id", None) else None
+    phone = (getattr(campus, "phone", "") or "").strip()
+    if phone:
+        return phone
+    program = lead.program if getattr(lead, "program_id", None) else None
+    institute = getattr(program, "institute", None) if program is not None else None
+    return ((getattr(institute, "phone", "") or "").strip()
+            or (getattr(institute, "email", "") or "").strip())
+
+
+EXAM_RESULT_TEMPLATES = {
+    "PASS": "lead.entrance_exam_result.email",
+    "FAIL": "lead.entrance_exam_fail.email",
+}
+
+
+def send_entrance_exam_result(*, attempt, actor=None) -> dict | None:
+    """Email the Entrance Exam Result to a candidate — once — after staff
+    have decided Pass / Fail on the grading page (client 2026-11-26).
+    Pass gets the "congratulations on clearing" note, Fail the "regret to
+    inform you" note.
+
+    Returns None without sending when no result has been decided, the
+    lead has no email, or a result mail already went out. Never raises
+    past the dispatch log: a failed send is visible there and the attempt
+    stays unmailed so deciding again can retry it.
+    """
+    if attempt.status != attempt.Status.GRADED or attempt.total_score is None:
+        return None
+    if attempt.result_mailed_at is not None:
+        return None
+    template_key = EXAM_RESULT_TEMPLATES.get(attempt.result)
+    if template_key is None:
+        return None
+    exam = attempt.exam
+    lead = attempt.lead
+    if not lead.email:
+        return None
+
+    exam_day = timezone.localdate(attempt.submitted_at or attempt.start_dt)
+    email_log = queue_notification(
+        template_key=template_key,
+        recipient=lead.email,
+        context={
+            **lead_vars(lead),
+            "Exam_Name": exam.name,
+            "Exam_Date": exam_day.strftime("%d-%m-%Y"),
+            "Score": str(attempt.total_score),
+            "Total_Marks": str(exam.total_marks),
+            "Contact": exam_result_contact(lead),
+            **_reply_context(lead),
+        },
+        related=lead,
+    )
+    result = _email_result(email_log)
+    if result["email_sent"]:
+        attempt.result_mailed_at = timezone.now()
+        attempt.save(update_fields=["result_mailed_at", "updated_at"])
+        verdict = attempt.get_result_display()
+        LeadCommunication.objects.create(
+            lead=lead,
+            type=LeadCommunication.Type.EMAIL,
+            subject=f"Entrance exam result ({verdict}) — {exam.name}",
+            message=(
+                f"Entrance exam {verdict.lower()} result sent to {lead.email} for "
+                f"'{exam.name}' (score {attempt.total_score} / {exam.total_marks})."
+            ),
+            sent_at=timezone.now(),
+            logged_by=actor,
+        )
+    return result

@@ -460,8 +460,13 @@ def _receipt_notes(kind: FeeKind, payment_request: PaymentRequest,
     )
 
 
+def _receipt_issuer(payment_request):
+    from .services import receipt_issuer
+    return receipt_issuer(payment_request)
+
+
 def _create_receipt(payment_request, order, enrollment, *, receipt_no,
-                    amount, notes, installment=None, other_fee=None):
+                    amount, notes, installment=None, other_fee=None, actor=None):
     from apps.fees.models import FeeReceipt
 
     charged_at = order.charged_at or timezone.now()
@@ -477,7 +482,10 @@ def _create_receipt(payment_request, order, enrollment, *, receipt_no,
         bank=_gateway_label(payment_request)[:120],
         received_date=timezone.localtime(charged_at).date(),
         notes=notes,
-        received_by=None,
+        # Issuer = whoever sent the payment link; for a public-form
+        # payment nobody did, so the staff member enrolling the student
+        # (who triggers this write) stands in.
+        received_by=_receipt_issuer(payment_request) or actor,
     )
 
 
@@ -504,6 +512,7 @@ def write_registration_receipt(payment_request: PaymentRequest, order: PaymentOr
         payment_request, order, enrollment, receipt_no=receipt_no,
         amount=order.amount, installment=installment,
         notes=_receipt_notes(REGISTRATION, payment_request, order),
+        actor=actor,
     )
 
 
@@ -553,6 +562,7 @@ def write_course_fee_receipts(payment_request: PaymentRequest, order: PaymentOrd
                 COURSE, payment_request, order,
                 suffix=f"; applied to installment #{installment.sequence}",
             ),
+            actor=actor,
         ))
         remaining -= part
     return receipts
@@ -575,6 +585,7 @@ def write_other_fee_receipt(payment_request: PaymentRequest, order: PaymentOrder
         payment_request, order, enrollment, receipt_no=receipt_no,
         amount=order.amount, other_fee=other_fee,
         notes=_receipt_notes(OTHER, payment_request, order),
+        actor=actor,
     )
 
 

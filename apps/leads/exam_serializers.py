@@ -94,7 +94,7 @@ class EntranceExamSerializer(serializers.ModelSerializer):
         model = EntranceExam
         fields = ["id", "name", "instructions", "duration_min",
                   "program", "program_name", "academic_year",
-                  "status", "total_marks", "question_count",
+                  "status", "total_marks", "pass_marks", "question_count",
                   "created_by", "created_at", "updated_at"]
         read_only_fields = ["id", "program_name",
                             "status", "total_marks", "question_count",
@@ -112,18 +112,47 @@ class EntranceExamAttemptSerializer(serializers.ModelSerializer):
     total_marks = serializers.DecimalField(
         source="exam.total_marks", max_digits=5, decimal_places=1, read_only=True,
     )
+    pass_marks = serializers.DecimalField(
+        source="exam.pass_marks", max_digits=5, decimal_places=1,
+        read_only=True, allow_null=True,
+    )
+    result_decided_by_name = serializers.SerializerMethodField()
+
+    def get_result_decided_by_name(self, obj):
+        u = obj.result_decided_by
+        if u is None:
+            return ""
+        return (getattr(u, "full_name", "") or u.username)
 
     class Meta:
         model = EntranceExamAttempt
         fields = ["id", "exam", "exam_name", "duration_min", "total_marks",
+                  "pass_marks",
                   "lead", "lead_name", "lead_email", "access_token",
                   "start_dt", "end_dt",
                   "started_at", "submitted_at", "status", "total_score",
-                  "created_at", "updated_at"]
+                  "result", "result_decided_at", "result_decided_by_name",
+                  "result_mailed_at", "created_at", "updated_at"]
         read_only_fields = ["id", "exam_name", "duration_min", "total_marks",
+                            "pass_marks",
                             "lead_name", "lead_email", "access_token",
                             "started_at", "submitted_at", "status", "total_score",
-                            "created_at", "updated_at"]
+                            "result", "result_decided_at", "result_decided_by_name",
+                            "result_mailed_at", "created_at", "updated_at"]
+
+
+class GradeAttemptSerializer(serializers.Serializer):
+    """Body of POST /exam-attempts/<id>/grade/ — every mark plus the
+    Pass / Fail decision in one go (client, 2026-11-26)."""
+
+    class MarkSerializer(serializers.Serializer):
+        response = serializers.IntegerField()
+        marks_awarded = serializers.DecimalField(max_digits=5, decimal_places=1)
+        feedback = serializers.CharField(required=False, allow_blank=True,
+                                         max_length=2000)
+
+    result = serializers.ChoiceField(choices=EntranceExamAttempt.Result.choices)
+    marks = MarkSerializer(many=True, required=False)
 
 
 class SendExamLinksSerializer(serializers.Serializer):

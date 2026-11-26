@@ -47,6 +47,12 @@ class EntranceExam(models.Model):
         max_digits=5, decimal_places=1, default=0,
         help_text="Auto-recomputed from sum(question.marks).",
     )
+    pass_marks = models.DecimalField(
+        max_digits=5, decimal_places=1, null=True, blank=True,
+        help_text="Minimum total_score that clears the exam. The result "
+                  "mail goes only to candidates at or above it; blank "
+                  "means every graded candidate gets it.",
+    )
 
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True,
@@ -133,6 +139,26 @@ class EntranceExamAttempt(models.Model):
     )
     total_score = models.DecimalField(
         max_digits=5, decimal_places=1, null=True, blank=True,
+    )
+    result_mailed_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="When the Entrance Exam Result mail (pass or fail) went out (once).",
+    )
+
+    class Result(models.TextChoices):
+        PASS = "PASS", "Pass"
+        FAIL = "FAIL", "Fail"
+
+    # Staff decide Pass / Fail on the grading page after entering every
+    # mark (client, 2026-11-26). Blank until they do — a GRADED attempt
+    # with no result is "marks in, decision pending".
+    result = models.CharField(
+        max_length=4, choices=Result.choices, blank=True, default="",
+    )
+    result_decided_at = models.DateTimeField(null=True, blank=True)
+    result_decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="exam_results_decided",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)

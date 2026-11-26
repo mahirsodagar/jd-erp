@@ -128,14 +128,17 @@ class AllocationDetailView(APIView):
             alloc = LeaveAllocation.objects.get(pk=pk)
         except LeaveAllocation.DoesNotExist as e:
             raise Http404 from e
+        # Balances are scoped to the window, so any pending or approved
+        # leave dated inside it is charged against this grant.
         consumed = LeaveApplication.objects.filter(
             employee=alloc.employee, leave_type=alloc.leave_type,
             from_date__gte=alloc.start_date, from_date__lte=alloc.end_date,
-            status=LeaveApplication.Status.APPROVED,
+            status__in=(LeaveApplication.Status.PENDING,
+                        LeaveApplication.Status.APPROVED),
         ).exists()
         if consumed:
             return Response(
-                {"detail": "Allocation already consumed by approved leaves."},
+                {"detail": "Allocation already consumed by pending or approved leaves."},
                 status=http.HTTP_400_BAD_REQUEST,
             )
         alloc.delete()
@@ -248,6 +251,9 @@ class LeaveApplicationListCreateView(APIView):
                 {"manager_email": "No manager email available."},
                 status=http.HTTP_400_BAD_REQUEST,
             )
+        if guards.routes_to_self(target, manager_email):
+            return Response({"manager_email": guards.SELF_ROUTE_MESSAGE},
+                            status=http.HTTP_400_BAD_REQUEST)
 
         with transaction.atomic():
             # Serialise concurrent applies by the same employee so two
@@ -262,7 +268,16 @@ class LeaveApplicationListCreateView(APIView):
                 return Response({"detail": guards.overlap_message(clash)},
                                 status=http.HTTP_400_BAD_REQUEST)
 
-            available = guards.available_balance(target, d["leave_type"])
+            # The leave is charged to the allocation window covering its
+            # from_date; an enforced type with no such window is refused.
+            if not guards.has_allocation_for(target, d["leave_type"], d["from_date"]):
+                return Response(
+                    {"detail": guards.no_allocation_message(d["leave_type"], d["from_date"])},
+                    status=http.HTTP_400_BAD_REQUEST,
+                )
+            available = guards.available_balance(
+                target, d["leave_type"], on_date=d["from_date"],
+            )
             if available is not None and days > available:
                 return Response(
                     {"detail": guards.balance_message(d["leave_type"], days, available)},
@@ -324,7 +339,7 @@ class LeaveDecisionView(APIView):
 
     def patch(self, request, pk):
         try:
-            app = LeaveApplication.objects.select_related("employee").get(pk=pk)
+            app = LeaveApplication.objects.select_related("employee", "leave_type").get(pk=pk)
         except LeaveApplication.DoesNotExist as e:
             raise Http404 from e
         u = request.user
@@ -334,45 +349,69 @@ class LeaveDecisionView(APIView):
 
         s = DecisionSerializer(data=request.data)
         s.is_valid(raise_exception=True)
+        decision = s.validated_data["status"]
 
         # The applicant's own manager decides without any key; anyone
-        # else needs the matching override for that outcome.
+        # else needs the matching override for that outcome. Nobody
+        # decides their own request, override key or not.
+        me = get_employee_for(u)
+        if me is not None and me.pk == app.employee_id:
+            return Response({"detail": "You cannot decide your own leave."},
+                            status=http.HTTP_403_FORBIDDEN)
         is_manager = is_manager_for(u, app)
         override = (
             "leaves.application.approve_any"
-            if s.validated_data["status"] == LeaveApplication.Status.APPROVED
+            if decision == LeaveApplication.Status.APPROVED
             else "leaves.application.reject_any"
         )
         if not (is_manager or has_perm(u, override)):
             return Response({"detail": "Not the manager for this leave."},
                             status=http.HTTP_403_FORBIDDEN)
 
-        # Re-check on approve: pending rows filed before these guards
-        # existed, or an allocation deleted since apply, could otherwise
-        # still overdraw the balance or double-book a day.
-        if s.validated_data["status"] == LeaveApplication.Status.APPROVED:
-            clash = guards.find_overlap(
-                employee=app.employee, from_date=app.from_date, to_date=app.to_date,
-                from_session=app.from_session, exclude_id=app.id,
-                statuses=(LeaveApplication.Status.APPROVED,),
-            )
-            if clash:
-                return Response({"detail": guards.overlap_message(clash)},
+        with transaction.atomic():
+            # Same lock as apply: two approvals for one employee are
+            # serialised so both can't pass the balance re-check.
+            Employee.objects.select_for_update().filter(pk=app.employee_id).first()
+            app.refresh_from_db(fields=["status"])
+            if app.status != LeaveApplication.Status.PENDING:
+                return Response({"detail": "Application is not pending."},
                                 status=http.HTTP_400_BAD_REQUEST)
-            available = guards.available_balance(
-                app.employee, app.leave_type, include_pending=False,
-            )
-            if available is not None and app.count > available:
-                return Response(
-                    {"detail": guards.balance_message(app.leave_type, app.count, available)},
-                    status=http.HTTP_400_BAD_REQUEST,
-                )
 
-        app.status = s.validated_data["status"]
-        app.approver_remarks = s.validated_data.get("remarks", "")
-        app.approved_by = get_employee_for(u)
-        app.decided_on = timezone.now()
-        app.save(update_fields=["status", "approver_remarks", "approved_by", "decided_on"])
+            # Re-check on approve: pending rows filed before these guards
+            # existed, or an allocation deleted since apply, could
+            # otherwise still overdraw the balance or double-book a day.
+            if decision == LeaveApplication.Status.APPROVED:
+                clash = guards.find_overlap(
+                    employee=app.employee, from_date=app.from_date, to_date=app.to_date,
+                    from_session=app.from_session, exclude_id=app.id,
+                    statuses=(LeaveApplication.Status.APPROVED,),
+                )
+                if clash:
+                    return Response({"detail": guards.overlap_message(clash)},
+                                    status=http.HTTP_400_BAD_REQUEST)
+                if not guards.has_allocation_for(app.employee, app.leave_type, app.from_date):
+                    return Response(
+                        {"detail": guards.no_allocation_message(app.leave_type, app.from_date)},
+                        status=http.HTTP_400_BAD_REQUEST,
+                    )
+                # Apply already reserved this request against the other
+                # pendings, and the lock above serialises approvals, so
+                # here it only has to fit in granted − approved.
+                available = guards.available_balance(
+                    app.employee, app.leave_type, on_date=app.from_date,
+                    include_pending=False,
+                )
+                if available is not None and app.count > available:
+                    return Response(
+                        {"detail": guards.balance_message(app.leave_type, app.count, available)},
+                        status=http.HTTP_400_BAD_REQUEST,
+                    )
+
+            app.status = decision
+            app.approver_remarks = s.validated_data.get("remarks", "")
+            app.approved_by = me
+            app.decided_on = timezone.now()
+            app.save(update_fields=["status", "approver_remarks", "approved_by", "decided_on"])
 
         notifications.notify_leave_decision(app)
         return Response(LeaveApplicationSerializer(app).data)
@@ -397,7 +436,9 @@ class LeaveBalancesView(APIView):
             if emp is None:
                 return Response({"detail": "No employee profile linked to this user."},
                                 status=http.HTTP_400_BAD_REQUEST)
-        return Response(all_balances(emp))
+        # Optional ?on=YYYY-MM-DD picks the allocation window (default today).
+        on_date = parse_date(request.query_params.get("on") or "") or None
+        return Response(all_balances(emp, on_date))
 
 
 class LeaveDashboardView(APIView):
@@ -453,17 +494,33 @@ class CompOffListCreateView(APIView):
                                   "your manager's email."},
                 status=http.HTTP_400_BAD_REQUEST,
             )
+        if guards.routes_to_self(target, manager_email):
+            return Response({"manager_email": guards.SELF_ROUTE_MESSAGE},
+                            status=http.HTTP_400_BAD_REQUEST)
+        if guards.compoff_in_future(d["worked_date"]):
+            return Response({"worked_date": guards.COMPOFF_FUTURE_MESSAGE},
+                            status=http.HTTP_400_BAD_REQUEST)
         count = Decimal("1.0") if (d["worked_session_1"] + d["worked_session_2"] == 2) else Decimal("0.5")
-        co = CompOffApplication.objects.create(
-            employee=target,
-            worked_date=d["worked_date"],
-            worked_session_1=d["worked_session_1"],
-            worked_session_2=d["worked_session_2"],
-            count=count,
-            reason=d["reason"],
-            manager_email=manager_email,
-            cc_emails=d.get("cc_emails", "") or "",
-        )
+        with transaction.atomic():
+            Employee.objects.select_for_update().filter(pk=target.pk).first()
+            # One worked session earns comp-off once.
+            clash = guards.find_compoff_clash(
+                employee=target, worked_date=d["worked_date"],
+                session_1=d["worked_session_1"], session_2=d["worked_session_2"],
+            )
+            if clash:
+                return Response({"detail": guards.compoff_clash_message(clash)},
+                                status=http.HTTP_400_BAD_REQUEST)
+            co = CompOffApplication.objects.create(
+                employee=target,
+                worked_date=d["worked_date"],
+                worked_session_1=d["worked_session_1"],
+                worked_session_2=d["worked_session_2"],
+                count=count,
+                reason=d["reason"],
+                manager_email=manager_email,
+                cc_emails=d.get("cc_emails", "") or "",
+            )
         notifications.notify_compoff_applied(co)
         return Response(CompOffApplicationSerializer(co).data,
                         status=http.HTTP_201_CREATED)
@@ -483,21 +540,41 @@ class CompOffDecisionView(APIView):
                             status=http.HTTP_400_BAD_REQUEST)
         s = DecisionSerializer(data=request.data)
         s.is_valid(raise_exception=True)
+        decision = s.validated_data["status"]
 
+        me = get_employee_for(u)
+        if me is not None and me.pk == co.employee_id:
+            return Response({"detail": "You cannot decide your own comp-off."},
+                            status=http.HTTP_403_FORBIDDEN)
         is_manager = is_manager_for(u, co)
         override = (
             "leaves.compoff.approve_any"
-            if s.validated_data["status"] == CompOffApplication.Status.APPROVED
+            if decision == CompOffApplication.Status.APPROVED
             else "leaves.compoff.reject_any"
         )
         if not (is_manager or has_perm(u, override)):
             return Response({"detail": "Not the manager for this comp-off."},
                             status=http.HTTP_403_FORBIDDEN)
-        co.status = s.validated_data["status"]
-        co.approver = get_employee_for(u)
-        co.approver_remarks = s.validated_data.get("remarks", "")
-        co.decided_on = timezone.now()
-        co.save(update_fields=["status", "approver", "approver_remarks", "decided_on"])
+        with transaction.atomic():
+            Employee.objects.select_for_update().filter(pk=co.employee_id).first()
+            co.refresh_from_db(fields=["status"])
+            if co.status != CompOffApplication.Status.PENDING:
+                return Response({"detail": "Already decided."},
+                                status=http.HTTP_400_BAD_REQUEST)
+            if decision == CompOffApplication.Status.APPROVED:
+                clash = guards.find_compoff_clash(
+                    employee=co.employee, worked_date=co.worked_date,
+                    session_1=co.worked_session_1, session_2=co.worked_session_2,
+                    exclude_id=co.id,
+                )
+                if clash and clash.status == CompOffApplication.Status.APPROVED:
+                    return Response({"detail": guards.compoff_clash_message(clash)},
+                                    status=http.HTTP_400_BAD_REQUEST)
+            co.status = decision
+            co.approver = me
+            co.approver_remarks = s.validated_data.get("remarks", "")
+            co.decided_on = timezone.now()
+            co.save(update_fields=["status", "approver", "approver_remarks", "decided_on"])
         notifications.notify_compoff_decision(co)
         return Response(CompOffApplicationSerializer(co).data)
 
@@ -586,10 +663,13 @@ class LeaveReportSummaryView(APIView):
             return Response({"detail": "start_date and end_date are required."},
                             status=http.HTTP_400_BAD_REQUEST)
 
+        # Any leave touching the range, including ones that start before
+        # it or end after it, so a month-straddling leave shows up in
+        # both months' reports.
         qs = LeaveApplication.objects.select_related(
             "employee", "employee__campus", "employee__department",
             "leave_type", "approved_by",
-        ).filter(from_date__gte=start, to_date__lte=end)
+        ).filter(from_date__lte=end, to_date__gte=start)
         qs = _scope_report(qs, u)
         if v := params.get("campus"):
             qs = qs.filter(employee__campus_id=v)

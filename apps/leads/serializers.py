@@ -175,6 +175,12 @@ class LeadUpdateSerializer(_LeadBaseSerializer):
 class LeadDetailSerializer(serializers.ModelSerializer):
     campus_name = serializers.CharField(source="campus.name", read_only=True)
     program_name = serializers.CharField(source="program.name", read_only=True)
+    # The institute the Send box mails for: it follows the program
+    # (2026-11-26, the Institute dropdown was removed from the lead page).
+    institute_code = serializers.CharField(
+        source="program.institute.code", read_only=True, default="")
+    institute_name = serializers.CharField(
+        source="program.institute.name", read_only=True, default="")
     source_name = serializers.CharField(source="source.name", read_only=True)
     assign_to_name = serializers.CharField(source="assign_to.username", read_only=True)
     created_by_name = serializers.CharField(source="created_by.username", read_only=True)
@@ -247,6 +253,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
             "father_mobile", "father_email",
             "campus", "campus_name",
             "program", "program_name",
+            "institute_code", "institute_name",
             "source", "source_name",
             "assign_to", "assign_to_name",
             "status", "remarks", "city", "state",

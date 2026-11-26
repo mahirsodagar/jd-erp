@@ -45,11 +45,13 @@ JDIFT_ADDRESS = (
     "Brigade Road, Bengaluru - 560 001.",
 )
 JDIFT_OFFICE_CONTACTS = ("+91 99450 31100", "+91 94803 23232")
-JDIFT_FALLBACK_BLOCK = (
-    *JDIFT_ADDRESS,
-    f"Contact : {JDIFT_OFFICE_CONTACTS[0]}",
-    JDIFT_OFFICE_CONTACTS[1],
-)
+
+
+def _fallback_block():
+    return _lib().ContactBlock(
+        JDIFT_ADDRESS,
+        (f"Contact : {JDIFT_OFFICE_CONTACTS[0]}", JDIFT_OFFICE_CONTACTS[1]),
+    )
 
 
 def _lib():
@@ -109,7 +111,7 @@ class StaffCardData:
         campus = self.employee.campus
         if self.institute_code == "JDSD":
             return lib.contact_block(campus, "JDSD", fallback=lib.JDSD_ADDRESS)
-        return lib.contact_block(campus, "JDIFT", fallback=JDIFT_FALLBACK_BLOCK)
+        return lib.contact_block(campus, "JDIFT", fallback=_fallback_block())
 
     def photo_bytes(self) -> bytes | None:
         photo = self.employee.photo
@@ -249,20 +251,21 @@ def _jdift_back(pdf: FPDF, d: StaffCardData) -> None:
 
     y += 2.0
     pdf.set_font("Helvetica", "B", 7.0)
-    # Five rows at most (3 address + 2 phones) fit above the rule at 50.
-    lines = d.address_lines
-    pitch = min(4.1, (49.0 - y) / max(len(lines), 1))
-    for line in lines:
+    # Fixed 7 pt: a long address wraps onto up to three rows rather than
+    # shrinking; with the contact row that is four rows at most, and the
+    # pitch tightens so the block ends above the rule at 50.
+    rows = lib.wrap_contact_rows(pdf, d.address_lines, 48)
+    pitch = max(2.7, min(4.1, (49.0 - y) / max(len(rows), 1)))
+    for row in rows:
         pdf.set_xy(3, y)
-        lib._fit_size(pdf, safe(line), 48, 7.0)
-        pdf.cell(48, 3.5, safe(line), align="C")
+        pdf.cell(48, 3.5, safe(row), align="C")
         y += pitch
-    pdf.set_font("Helvetica", "B", 7.0)
-
-    lib._hrule(pdf, 50.0, x0=0, x1=CARD_W, width=0.35)
+    # The rule (and the rules under it) float down if the block overran.
+    rule_y = max(50.0, y - pitch + 3.0 + 0.3)
+    lib._hrule(pdf, rule_y, x0=0, x1=CARD_W, width=0.35)
 
     pdf.set_font("Helvetica", "B", 5.8)
-    lib._numbered_rules(pdf, 52.5, 5.8, 2.8, x=4, width=47, gap=0.6)
+    lib._numbered_rules(pdf, rule_y + 2.5, 5.8, 2.8, x=4, width=47, gap=0.6)
 
     bx, by, bw, bh = JDIFT_BARCODE
     _barcode(pdf, d.emp_code, bx, by, bw, bh)
@@ -319,9 +322,9 @@ def _jdsd_back(pdf: FPDF, d: StaffCardData) -> None:
     pdf.set_text_color(*lib.JDSD_PINK)
     pdf.set_xy(16.4, 5.6)
     pdf.cell(35, 3.4, "JD SCHOOL OF DESIGN")
-    lib._jdsd_address(pdf, d.address_lines)
+    rule_y = lib._jdsd_address(pdf, d.address_lines)
 
-    lib._centred(pdf, 24.0, f"ID : {d.emp_code}", 8.6, family="AvenirM",
+    lib._centred(pdf, 24.0 + (rule_y - 21.0), f"ID : {d.emp_code}", 8.6, family="AvenirM",
                  color=lib.JDSD_PINK)
 
     pdf.set_font("AvenirM", "", 6.2)

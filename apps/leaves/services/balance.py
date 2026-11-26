@@ -1,19 +1,25 @@
-"""Per-employee leave balance computation — legacy JD_ERP model.
+"""Per-employee leave balance computation.
 
-Balances are a straight lifetime ``granted − availed`` per leave type
-(mirroring ``leave_balances.php``): granted comes from every allocation in
-``emp_leave_master``, availed from approved applications. Comp-off is a
-derived pool (earned via comp-off requests, spent via COMP_OFF leaves).
+Balances are scoped to the allocation window that covers a reference date
+(default: today). ``granted`` is the sum of every allocation whose
+[start_date, end_date] contains that date; ``availed`` / ``pending`` are
+the approved / pending applications whose ``from_date`` falls inside the
+union of those windows. Days granted for an earlier window therefore do
+not carry forward once HR opens the next one.
 
-The Apply dashboard uses a different, legacy-specific model for Casual
-Leave: a fixed 12-per-year monthly accrual (``cl_dashboard``).
+``balance`` is what the employee can still spend: granted − availed −
+pending. The Apply guards, the Balances page and the Apply dashboard all
+read this same number.
+
+Comp-off is a derived lifetime pool (earned via approved comp-off
+requests, spent via approved COMP_OFF leaves); it has no allocation.
 """
 
 from datetime import date as _date
 from datetime import timedelta
 from decimal import Decimal
 
-from django.db.models import Sum
+from django.db.models import Max, Min, Sum
 from django.utils import timezone
 
 from apps.leaves.models import (
@@ -28,7 +34,6 @@ CASUAL_CODE = "CASUAL"
 # one such window ('2025-06-01'..'2026-05-31') and needed a yearly edit;
 # here it is derived from the date so it rolls over on its own.
 LEAVE_YEAR_START_MONTH = 6
-CL_PER_YEAR = Decimal("12")
 
 
 def leave_year(on_date=None) -> tuple[_date, _date]:
@@ -48,18 +53,41 @@ def _zero() -> Decimal:
     return Decimal("0.0")
 
 
+def allocation_window(employee, leave_type: LeaveType, on_date=None):
+    """``(start, end, granted)`` for the allocations of ``leave_type``
+    covering ``on_date`` (default today), or ``None`` when no allocation
+    covers that date. Overlapping allocations are merged into one window
+    spanning the earliest start and latest end."""
+    on_date = on_date or timezone.localdate()
+    agg = (
+        LeaveAllocation.objects
+        .filter(employee=employee, leave_type=leave_type,
+                start_date__lte=on_date, end_date__gte=on_date)
+        .aggregate(start=Min("start_date"), end=Max("end_date"), granted=Sum("count"))
+    )
+    if agg["start"] is None:
+        return None
+    return agg["start"], agg["end"], agg["granted"] or _zero()
+
+
 def compute_balance(employee, leave_type: LeaveType, on_date=None) -> dict:
     """Return a balance row for one leave type.
 
-    - COMP_OFF: ``{earned, used, balance}`` — lifetime derived pool.
-    - other LEAVE types: ``{granted, pending, availed, balance}`` where
-      ``granted`` is the sum of all allocations and ``availed`` the sum of
-      approved applications (legacy ``leave_balances.php``).
+    - COMP_OFF: ``{earned, used, pending, balance}`` — lifetime derived pool.
+    - other LEAVE types: ``{granted, pending, availed, balance,
+      window_start, window_end}`` scoped to the allocation window that
+      covers ``on_date`` (see ``allocation_window``). With no covering
+      allocation every figure is 0 and the window is null.
     - ON_DUTY types: unlimited — nulls, returned only for parity.
 
-    ``on_date`` is accepted for signature compatibility but ignored: legacy
-    balances are lifetime, not window-scoped.
+    ``balance`` = granted − availed − pending in every case.
     """
+
+    base = {
+        "leave_type_id": leave_type.id,
+        "leave_type_code": leave_type.code,
+        "leave_type_name": leave_type.name,
+    }
 
     if leave_type.code == COMP_OFF_CODE:
         earned = (
@@ -67,29 +95,28 @@ def compute_balance(employee, leave_type: LeaveType, on_date=None) -> dict:
             .filter(employee=employee, status=CompOffApplication.Status.APPROVED)
             .aggregate(s=Sum("count"))["s"] or _zero()
         )
+        spend = LeaveApplication.objects.filter(
+            employee=employee, leave_type__code=COMP_OFF_CODE,
+        )
         used = (
-            LeaveApplication.objects
-            .filter(
-                employee=employee,
-                leave_type__code=COMP_OFF_CODE,
-                status=LeaveApplication.Status.APPROVED,
-            )
+            spend.filter(status=LeaveApplication.Status.APPROVED)
+            .aggregate(s=Sum("count"))["s"] or _zero()
+        )
+        pending = (
+            spend.filter(status=LeaveApplication.Status.PENDING)
             .aggregate(s=Sum("count"))["s"] or _zero()
         )
         return {
-            "leave_type_id": leave_type.id,
-            "leave_type_code": leave_type.code,
-            "leave_type_name": leave_type.name,
+            **base,
             "earned": earned,
             "used": used,
-            "balance": earned - used,
+            "pending": pending,
+            "balance": earned - used - pending,
         }
 
     if leave_type.category != LeaveType.Category.LEAVE:
         return {
-            "leave_type_id": leave_type.id,
-            "leave_type_code": leave_type.code,
-            "leave_type_name": leave_type.name,
+            **base,
             "category": leave_type.category,
             "granted": None,
             "pending": None,
@@ -97,12 +124,22 @@ def compute_balance(employee, leave_type: LeaveType, on_date=None) -> dict:
             "balance": None,
         }
 
-    granted = (
-        LeaveAllocation.objects
-        .filter(employee=employee, leave_type=leave_type)
-        .aggregate(s=Sum("count"))["s"] or _zero()
+    window = allocation_window(employee, leave_type, on_date)
+    if window is None:
+        return {
+            **base,
+            "granted": _zero(),
+            "pending": _zero(),
+            "availed": _zero(),
+            "balance": _zero(),
+            "window_start": None,
+            "window_end": None,
+        }
+    w_start, w_end, granted = window
+    apps_qs = LeaveApplication.objects.filter(
+        employee=employee, leave_type=leave_type,
+        from_date__gte=w_start, from_date__lte=w_end,
     )
-    apps_qs = LeaveApplication.objects.filter(employee=employee, leave_type=leave_type)
     pending = (
         apps_qs.filter(status=LeaveApplication.Status.PENDING)
         .aggregate(s=Sum("count"))["s"] or _zero()
@@ -112,13 +149,13 @@ def compute_balance(employee, leave_type: LeaveType, on_date=None) -> dict:
         .aggregate(s=Sum("count"))["s"] or _zero()
     )
     return {
-        "leave_type_id": leave_type.id,
-        "leave_type_code": leave_type.code,
-        "leave_type_name": leave_type.name,
+        **base,
         "granted": granted,
         "pending": pending,
         "availed": availed,
-        "balance": granted - availed,
+        "balance": granted - availed - pending,
+        "window_start": str(w_start),
+        "window_end": str(w_end),
     }
 
 
@@ -130,11 +167,12 @@ def all_balances(employee, on_date=None) -> list[dict]:
 
 
 def cl_dashboard(employee, on_date=None) -> dict:
-    """Legacy leave_apply.php dashboard counters over the current leave
-    year (see ``leave_year``).
+    """Apply-page counters: totals taken over the current Jun–May leave
+    year, plus the Casual Leave balance.
 
-    CL Balance follows the 1-CL-per-month accrual: ``12 − (# distinct
-    months in which a Casual Leave was approved)``.
+    ``cl_balance`` is the same figure the Balances page and the apply
+    guard use (``compute_balance`` for CASUAL as of ``on_date``), so the
+    employee never sees two different CL numbers.
     """
     year_start, year_end = leave_year(on_date)
     approved = LeaveApplication.objects.filter(
@@ -157,12 +195,11 @@ def cl_dashboard(employee, on_date=None) -> dict:
         .aggregate(s=Sum("count"))["s"] or _zero()
     )
 
-    cl_months = {
-        d.month
-        for d in approved.filter(leave_type__code=CASUAL_CODE)
-        .values_list("from_date", flat=True)
-    }
-    cl_balance = CL_PER_YEAR - Decimal(len(cl_months))
+    cl_type = LeaveType.objects.filter(code=CASUAL_CODE).first()
+    cl_balance = (
+        compute_balance(employee, cl_type, on_date)["balance"]
+        if cl_type is not None else _zero()
+    )
 
     return {
         "leave_year_start": str(year_start),

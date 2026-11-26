@@ -39,11 +39,8 @@ RULES: dict[str, tuple[str, ...]] = {
         "admissions.enrollment.edit",
     ),
     "dashboard.students.view": ("admissions.student.view",),
-    # Engagement mixes lead, enrolment and student figures — a
-    # manager-level view, so key it off the cross-campus lead grant.
-    "dashboard.engagement.view": (
-        "leads.lead.view_all", "leads.report.view",
-    ),
+    # `dashboard.engagement.view` was dropped with the Engagement Metrics
+    # tile (2026-11-26); existing prod rows are harmless and unused.
 
     # --- Module 2: Leads -----------------------------------------------
     "leads.lead.view_history": ("leads.lead.view", "leads.lead.view_all"),

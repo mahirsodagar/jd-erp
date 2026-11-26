@@ -158,6 +158,19 @@ class IssuedByTests(TestCase):
         r = _receipt(_fixture(), received_by=user)
         self.assertEqual(issued_by_label(r), "cashier2")
 
+    def test_employee_name_when_account_has_no_full_name(self):
+        # Staff accounts seeded from the Employee Master carry a blank
+        # full_name; the name on the linked Employee row wins over the
+        # username (client: issuer must be a person's name, 2026-11-26).
+        from types import SimpleNamespace
+        from apps.fees.services.pdf import user_display_name
+        user = SimpleNamespace(
+            full_name="", username="emp042",
+            employee=SimpleNamespace(full_name="Rahul Menon"),
+        )
+        self.assertEqual(user_display_name(user), "Rahul Menon")
+        self.assertEqual(user_display_name(None), "")
+
     def test_accounts_office_fallback_for_online_receipts(self):
         base = _fixture()
         r = _receipt(base, received_by=None)

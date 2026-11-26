@@ -78,6 +78,9 @@ class RegistrationReceipt:
         self.particular = particular_for(payment_request.purpose)
         self.receipt_no = payment_request.receipt_no
         self.enrollment = _Placement(payment_request.student)
+        from apps.payments.services import receipt_issuer
+        self.received_by = receipt_issuer(payment_request)
+        self.received_by_id = getattr(self.received_by, "pk", None)
         self.basic_fee = order.amount
         self.amount = order.amount
         self._mode = _payment_mode(order)

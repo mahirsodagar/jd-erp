@@ -46,54 +46,109 @@ JDIFT_MAGENTA = (192, 40, 124)
 JDSD_PINK = (227, 28, 95)
 JDSD_GREY = (70, 70, 70)
 
+class ContactBlock(tuple):
+    """The rows printed as the contact block on the back of a card: the
+    street address first, then phone / website. A plain tuple of rows for
+    everything that iterates it; `n_address` says how many leading rows
+    are the address, which is the part a renderer may wrap and cap."""
+
+    n_address: int
+
+    def __new__(cls, address, extras=()):
+        self = super().__new__(cls, (*address, *extras))
+        self.n_address = len(address)
+        return self
+
+
 #: Printed on the reference cards; the fallback for a campus with no
 #: address on file.
-JDIFT_ADDRESS = (
-    "No.18, Edward House,",
-    "Brigade Road, Bangalore - 560 001.",
-    "Contact : 080 22279927",
+JDIFT_ADDRESS = ContactBlock(
+    ("No.18, Edward House,", "Brigade Road, Bangalore - 560 001."),
+    ("Contact : 080 22279927",),
 )
-JDSD_ADDRESS = (
-    "NO. 18 EDWARD HOUSE",
-    "BRIGADE RD, BENGALURU 560001",
-    "+91 80 2559 4142",
-    "www.jdsd.in",
+JDSD_ADDRESS = ContactBlock(
+    ("NO. 18 EDWARD HOUSE", "BRIGADE RD, BENGALURU 560001"),
+    ("+91 80 2559 4142", "www.jdsd.in"),
 )
 JDSD_WEBSITE = "www.jdsd.in"
 
+#: An address never prints on more than this many rows (client,
+#: 2026-11-26: keep the font size, wrap a long address onto up to three
+#: lines instead of shrinking it).
+MAX_ADDRESS_ROWS = 3
 
-def campus_address_lines(campus, *, limit: int = 3) -> list[str]:
-    """`Campus.address` split into its rows, blanks dropped, at most
-    `limit` of them (the card has fixed room)."""
+
+def campus_address_lines(campus) -> list[str]:
+    """`Campus.address` split into its typed rows, blanks dropped. Not
+    capped here: the renderer wraps each row to the card's width at the
+    fixed font size and caps the result at `MAX_ADDRESS_ROWS`."""
     text = (getattr(campus, "address", "") or "").strip()
-    return [ln.strip() for ln in text.splitlines() if ln.strip()][:limit]
+    return [ln.strip() for ln in text.splitlines() if ln.strip()]
 
 
-def contact_block(campus, institute_code: str, *, fallback: tuple[str, ...],
-                  address_lines: int = 3) -> tuple[str, ...]:
+def contact_block(campus, institute_code: str, *,
+                  fallback: ContactBlock) -> ContactBlock:
     """The address / phone block printed on the back of a card, built
     from the centre; `fallback` when the centre has no address on file.
 
     JDSD cards set the address in capitals and close with the website;
-    JDIFT cards print it as typed with a "Contact :" phone line. A second
-    number prints on its own line on both when the centre has one.
+    JDIFT cards print it as typed with a "Contact :" phone line. Both
+    phone numbers share one row ("A / B") so the block stays short
+    enough to print at full size.
     """
-    lines = campus_address_lines(campus, limit=address_lines)
+    lines = campus_address_lines(campus)
     if not lines:
         return fallback
     phone = (getattr(campus, "phone", "") or "").strip()
     alt = (getattr(campus, "phone_alt", "") or "").strip()
+    contacts = " / ".join(p for p in (phone, alt) if p)
     if institute_code == "JDSD":
-        out = [ln.upper() for ln in lines]
-        out += [p for p in (phone, alt) if p]
-        out.append(JDSD_WEBSITE)
-        return tuple(out)
-    out = list(lines)
-    if phone:
-        out.append(f"Contact : {phone}")
-    if alt:
-        out.append(alt)
-    return tuple(out)
+        extras = [contacts] if contacts else []
+        extras.append(JDSD_WEBSITE)
+        return ContactBlock([ln.upper() for ln in lines], extras)
+    extras = [f"Contact : {contacts}"] if contacts else []
+    return ContactBlock(lines, extras)
+
+
+def _wrap_words(pdf: FPDF, text: str, max_w: float) -> list[str]:
+    """Greedy word wrap of `text` to `max_w` at the CURRENT font. A single
+    word wider than the row is kept whole rather than shrunk."""
+    rows: list[str] = []
+    cur = ""
+    for word in text.split():
+        trial = f"{cur} {word}" if cur else word
+        if cur and pdf.get_string_width(trial) > max_w:
+            rows.append(cur)
+            cur = word
+        else:
+            cur = trial
+    if cur:
+        rows.append(cur)
+    return rows
+
+
+def wrap_contact_rows(pdf: FPDF, block, max_w: float, *,
+                      max_address_rows: int = MAX_ADDRESS_ROWS) -> list[str]:
+    """The rows to print for a contact block at the current font: the
+    address wrapped to `max_w` and capped at `max_address_rows`, then the
+    phone / website rows (short; wrapped too, never dropped)."""
+    n = getattr(block, "n_address", len(block))
+    rows: list[str] = []
+    for line in block[:n]:
+        rows += _wrap_words(pdf, line, max_w)
+    rows = rows[:max_address_rows]
+    for line in block[n:]:
+        if pdf.get_string_width(line) <= max_w or " / " not in line:
+            rows += _wrap_words(pdf, line, max_w)
+            continue
+        # Two numbers too wide for one row: one number per row rather
+        # than a break in the middle of a number.
+        first, *more = line.split(" / ")
+        rows += _wrap_words(pdf, first, max_w)
+        for num in more:
+            rows += _wrap_words(pdf, num, max_w)
+    return rows
+
 
 RULES = (
     "Identity card must be carried for all official duties in & outside "
@@ -170,9 +225,7 @@ class CardData:
         """Back-of-card contact block from the student's centre."""
         if self.institute_code == "JDSD":
             return contact_block(self.campus, "JDSD", fallback=JDSD_ADDRESS)
-        # The JDIFT back has room for four short rows above the rule.
-        return contact_block(self.campus, "JDIFT", fallback=JDIFT_ADDRESS,
-                             address_lines=2)
+        return contact_block(self.campus, "JDIFT", fallback=JDIFT_ADDRESS)
 
     @property
     def valid_till(self) -> date | None:
@@ -374,20 +427,21 @@ def _jdift_back(pdf: FPDF, d: CardData) -> None:
     pdf.set_xy(2, y)
     pdf.cell(CARD_W - 4, 3.4, safe(f"Blood Group : {d.blood_group}"), align="C")
     y += 3.5
-    # The block must end above the rule at 19.5 whatever the centre's
-    # address runs to, so the row pitch tightens for a longer block.
-    lines = d.address_lines
-    pitch = min(3.2, 11.0 / max(len(lines), 1))
-    for line in lines:
+    # Fixed 8.2 pt (2.9 mm tall): a long address wraps onto up to three
+    # rows and never shrinks. The reference block (three rows) ends above
+    # the rule at 19.5; a longer block pushes the rule and the rules
+    # below it down by the overflow instead.
+    rows = wrap_contact_rows(pdf, d.address_lines, CARD_W - 4)
+    pitch = max(2.9, min(3.2, 11.6 / max(len(rows), 1)))
+    for row in rows:
         pdf.set_xy(2, y)
-        _fit_size(pdf, safe(line), CARD_W - 4, 8.2)
-        pdf.cell(CARD_W - 4, 3.0, safe(line), align="C")
+        pdf.cell(CARD_W - 4, 3.0, safe(row), align="C")
         y += pitch
-    pdf.set_font("Helvetica", "B", 8.2)
-    _hrule(pdf, 19.5, x0=0, x1=CARD_W, width=0.8)
+    rule_y = max(19.5, y - pitch + 3.0 + 0.3)
+    _hrule(pdf, rule_y, x0=0, x1=CARD_W, width=0.8)
 
     pdf.set_font("Helvetica", "B", 6.8)
-    _numbered_rules(pdf, 22.4, 6.8, 2.9)
+    _numbered_rules(pdf, rule_y + 2.9, 6.8, 2.9)
 
     pdf.image(str(_ASSETS / "principal-signature.png"), x=37.5, y=66.8, w=11.0)
     pdf.set_font("Helvetica", "B", 9)
@@ -434,21 +488,25 @@ def _jdsd_front(pdf: FPDF, d: CardData) -> None:
     _hrule(pdf, 81.0, x0=4.3, x1=CARD_W - 4.3, width=0.3, color=JDSD_GREY)
 
 
-def _jdsd_address(pdf: FPDF, lines: tuple[str, ...]) -> None:
+def _jdsd_address(pdf: FPDF, lines: tuple[str, ...]) -> float:
     """The small grey address block beside the mark on the JDSD back,
-    closed by the rule at 21 mm. Shared with the staff card. The row
-    pitch tightens for a longer block so it never crosses the rule."""
+    closed by a rule. Shared with the staff card. Fixed 5.7 pt (2.0 mm
+    tall): a long address wraps onto up to three rows instead of
+    shrinking. The rule sits at 21 mm for the reference block and floats
+    down when a longer block needs the room. Returns the rule's y so the
+    caller can shift what follows by the same amount."""
     pdf.set_font("AvenirM", "", 5.7)
     pdf.set_text_color(*JDSD_GREY)
     y = 9.4
-    pitch = min(2.55, 11.4 / max(len(lines), 1))
-    for line in lines:
+    rows = wrap_contact_rows(pdf, lines, 35)
+    pitch = max(2.15, min(2.55, 11.4 / max(len(rows), 1)))
+    for row in rows:
         pdf.set_xy(16.4, y)
-        _fit_size(pdf, line, 35, 5.7, min_size=4.0)
-        pdf.cell(35, 2.6, line)
+        pdf.cell(35, 2.6, row)
         y += pitch
-    pdf.set_font("AvenirM", "", 5.7)
-    _hrule(pdf, 21.0, x0=5.0, x1=CARD_W - 5.0, width=0.3, color=JDSD_GREY)
+    rule_y = max(21.0, y - pitch + 2.3 + 0.4)
+    _hrule(pdf, rule_y, x0=5.0, x1=CARD_W - 5.0, width=0.3, color=JDSD_GREY)
+    return rule_y
 
 
 def _jdsd_back(pdf: FPDF, d: CardData) -> None:
@@ -458,7 +516,7 @@ def _jdsd_back(pdf: FPDF, d: CardData) -> None:
     pdf.set_text_color(*JDSD_PINK)
     pdf.set_xy(16.4, 5.6)
     pdf.cell(35, 3.4, "JD SCHOOL OF DESIGN")
-    _jdsd_address(pdf, d.address_lines)
+    rule_y = _jdsd_address(pdf, d.address_lines)
 
     valid = _mon_year(d.valid_till).upper()
     rows = (
@@ -466,7 +524,7 @@ def _jdsd_back(pdf: FPDF, d: CardData) -> None:
         f"VALID TILL : {valid}",
         f"BLOOD GROUP :  {d.blood_group}",
     )
-    y = 24.0
+    y = 24.0 + (rule_y - 21.0)
     for row in rows:
         _centred(pdf, y, row, 8.2, family="AvenirM", color=JDSD_GREY)
         y += 3.1

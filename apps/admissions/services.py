@@ -998,13 +998,36 @@ class StatusChangeError(Exception):
     pass
 
 
+def sync_portal_access(student: Student) -> bool | None:
+    """Keep the student's portal login in step with their status: a
+    dropout's account is deactivated (client rule 2026-11-26: a student
+    marked Dropout must not be able to sign in to the portal), and it is
+    switched back on when they stop being one. Returns the new
+    `is_active` when it changed, None when nothing had to change.
+
+    Every path that can make or unmake a dropout calls this — the Drop
+    Out / Re-activate actions and any enrollment edit that sets or clears
+    DROPPED. Existing JWTs stop working at once: simplejwt rejects an
+    inactive user on every request.
+    """
+    user = student.user_account
+    if user is None:
+        return None
+    should_be_active = not is_dropout(student)
+    if user.is_active == should_be_active:
+        return None
+    user.is_active = should_be_active
+    user.save(update_fields=["is_active"])
+    return should_be_active
+
+
 @transaction.atomic
 def drop_out_student(*, student: Student, remarks: str, by) -> StudentStatusChange:
     """Move every live enrollment to DROPPED and log the change.
 
     Fees are left untouched (legacy did the same); collection already
-    refuses DROPPED enrollments. Portal login is kept so the student can
-    still reach receipts, documents and a transfer certificate.
+    refuses DROPPED enrollments. The portal login is deactivated (client
+    rule 2026-11-26); Re-activate switches it back on.
     """
     remarks = (remarks or "").strip()
     if not remarks:
@@ -1020,6 +1043,7 @@ def drop_out_student(*, student: Student, remarks: str, by) -> StudentStatusChan
                       "to": Enrollment.Status.DROPPED})
         e.status = Enrollment.Status.DROPPED
         e.save(update_fields=["status", "updated_on"])
+    sync_portal_access(student)
     return StudentStatusChange.objects.create(
         student=student, action=StudentStatusChange.Action.DROPOUT,
         remarks=remarks, enrollments=moved, created_by=by,
@@ -1055,6 +1079,7 @@ def reactivate_student(*, student: Student, remarks: str, by) -> StudentStatusCh
                       "to": targets[e.id]})
         e.status = targets[e.id]
         e.save(update_fields=["status", "updated_on"])
+    sync_portal_access(student)
     return StudentStatusChange.objects.create(
         student=student, action=StudentStatusChange.Action.REACTIVATE,
         remarks=remarks, enrollments=moved, created_by=by,

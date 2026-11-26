@@ -20,24 +20,35 @@ class LeaveTypeSerializer(serializers.ModelSerializer):
                   "is_permission", "created_at", "updated_at"]
         read_only_fields = ["id", "is_permission", "created_at", "updated_at"]
 
+    def validate_code(self, value):
+        # CASUAL / COMP_OFF / SATURDAY_OFF / PERMISSION are matched by
+        # literal code in the balance, dashboard and apply rules, so a
+        # code can't change once the type exists.
+        if self.instance is not None and value != self.instance.code:
+            raise serializers.ValidationError(
+                "Code cannot be changed after creation; create a new type instead."
+            )
+        return value
+
 
 # --- Allocations -------------------------------------------------------
 
 class LeaveAllocationSerializer(serializers.ModelSerializer):
     employee_name = serializers.CharField(source="employee.full_name", read_only=True)
     leave_type_code = serializers.CharField(source="leave_type.code", read_only=True)
+    leave_type_name = serializers.CharField(source="leave_type.name", read_only=True)
     created_by_name = serializers.CharField(source="created_by.username", read_only=True)
 
     class Meta:
         model = LeaveAllocation
         fields = [
             "id", "employee", "employee_name",
-            "leave_type", "leave_type_code",
+            "leave_type", "leave_type_code", "leave_type_name",
             "count", "start_date", "end_date",
             "created_by", "created_by_name", "created_on",
         ]
         read_only_fields = [
-            "id", "employee_name", "leave_type_code",
+            "id", "employee_name", "leave_type_code", "leave_type_name",
             "created_by", "created_by_name", "created_on",
         ]
 

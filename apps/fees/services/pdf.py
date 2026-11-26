@@ -194,17 +194,34 @@ def _particular(receipt) -> str:
     return getattr(receipt, "particular", "") or "Fee"
 
 
-def issued_by_label(receipt) -> str:
-    """Who the receipt says issued it. The cashier when a staff member
-    recorded the payment; otherwise (gateway settlements, registration and
-    online application fees have no human behind them) the institute's
-    accounts office, so the line is never blank — every receipt carries
-    an issuer (client request, 2026-11-25)."""
-    user = receipt.received_by if getattr(receipt, "received_by_id", None) else None
-    if user is not None:
-        name = (user.full_name or "").strip() or user.username
+def user_display_name(user) -> str:
+    """A person's name for a document: the account's full name, else the
+    name on the linked Employee record (many staff accounts were created
+    with a blank full_name), else the username. Empty only for None."""
+    if user is None:
+        return ""
+    name = (getattr(user, "full_name", "") or "").strip()
+    if name:
+        return name
+    employee = getattr(user, "employee", None)
+    if employee is not None:
+        name = (getattr(employee, "full_name", "") or "").strip()
         if name:
             return name
+    return (getattr(user, "username", "") or "").strip()
+
+
+def issued_by_label(receipt) -> str:
+    """Who the receipt says issued it: the person behind the receipt
+    (client request, 2026-11-26) — the cashier who recorded a counter
+    payment, or the staff member who sent the payment link that settled
+    online. Only when nobody at all is on record (a student paying from
+    the public application form) does it fall back to the institute's
+    accounts office, so the line is never blank."""
+    user = receipt.received_by if getattr(receipt, "received_by_id", None) else None
+    name = user_display_name(user)
+    if name:
+        return name
     institute = None
     try:
         institute = receipt.enrollment.student.institute

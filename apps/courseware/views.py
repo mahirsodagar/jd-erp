@@ -2,6 +2,7 @@
 
 from django.http import Http404
 from rest_framework import status as http
+from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -10,6 +11,7 @@ from rest_framework.views import APIView
 from apps.master.models import Batch, Subject
 
 from . import services
+from .files import validate_attachment
 from .models import CoursewareAttachment, CoursewareTopic
 from .permissions import has_perm
 from .serializers import (
@@ -196,6 +198,10 @@ class CoursewareAttachmentAddView(APIView):
         if not file:
             return Response({"file": "Required."},
                             status=http.HTTP_400_BAD_REQUEST)
+        try:
+            validate_attachment(file)  # PDF / image / video only
+        except ValidationError as e:
+            return Response({"file": e.detail}, status=http.HTTP_400_BAD_REQUEST)
         att = CoursewareAttachment.objects.create(
             topic=topic, name=request.data.get("name", file.name),
             file=file, uploaded_by=request.user,

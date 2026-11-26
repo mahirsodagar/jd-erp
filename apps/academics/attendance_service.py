@@ -298,6 +298,98 @@ def current_batch(student):
     return enrollment.batch if enrollment and enrollment.batch_id else None
 
 
+def semester_subject_breakdown(*, student, batch, from_date=None,
+                               to_date=None) -> list[dict]:
+    """Attendance of one student grouped semester → subject (client,
+    2026-11-26 — the layout of the legacy "Advanced Student Search").
+
+    Scope is the given batch only (the caller passes `current_batch`).
+    A class belongs to the semester of its SUBJECT (legacy
+    `subject_master.sem_id`); subjects with no semester land in a final
+    "Unassigned" group. Per subject:
+
+      held     — non-cancelled slots in the range
+      marked   — attendance rows for this student (present+absent+late)
+      unmarked — held − marked: classes where attendance wasn't taken
+      percentage — (present + late) ÷ marked, late counting as present
+                   like every other student-level figure here (NOT the
+                   legacy formula, which excluded Late — client call).
+      absent_dates / late_dates — ISO dates, oldest first.
+    """
+    if batch is None:
+        return []
+    slots = ScheduleSlot.objects.filter(batch=batch).exclude(
+        status=ScheduleSlot.Status.CANCELLED,
+    ).select_related("subject", "subject__semester")
+    marks = Attendance.objects.filter(
+        student=student, schedule_slot__batch=batch,
+    ).select_related("schedule_slot", "schedule_slot__subject",
+                     "schedule_slot__subject__semester")
+    if from_date:
+        slots = slots.filter(date__gte=from_date)
+        marks = marks.filter(schedule_slot__date__gte=from_date)
+    if to_date:
+        slots = slots.filter(date__lte=to_date)
+        marks = marks.filter(schedule_slot__date__lte=to_date)
+
+    semesters: dict = {}
+
+    def _subject_row(subject):
+        sem = subject.semester
+        sem_key = sem.id if sem else None
+        group = semesters.setdefault(sem_key, {
+            "semester_id": sem_key,
+            "semester_name": sem.name if sem else "Unassigned semester",
+            "semester_number": sem.number if sem else None,
+            "subjects": {},
+        })
+        return group["subjects"].setdefault(subject.id, {
+            "subject_id": subject.id,
+            "subject_code": subject.code,
+            "subject_name": subject.name,
+            "held": 0, "marked": 0,
+            "present": 0, "absent": 0, "late": 0, "unmarked": 0,
+            "percentage": 0.0,
+            "absent_dates": [], "late_dates": [],
+        })
+
+    for slot in slots:
+        _subject_row(slot.subject)["held"] += 1
+    for a in marks.order_by("schedule_slot__date"):
+        row = _subject_row(a.schedule_slot.subject)
+        row["marked"] += 1
+        day = a.schedule_slot.date.isoformat()
+        if a.status == Attendance.Status.PRESENT:
+            row["present"] += 1
+        elif a.status == Attendance.Status.ABSENT:
+            row["absent"] += 1
+            row["absent_dates"].append(day)
+        elif a.status == Attendance.Status.LATE:
+            row["late"] += 1
+            row["late_dates"].append(day)
+
+    def _pct(present_like, marked):
+        return round(present_like / marked * 100, 1) if marked else 0.0
+
+    out = []
+    for group in semesters.values():
+        rows = sorted(group["subjects"].values(),
+                      key=lambda r: (r["subject_code"], r["subject_name"]))
+        for r in rows:
+            r["unmarked"] = max(r["held"] - r["marked"], 0)
+            r["percentage"] = _pct(r["present"] + r["late"], r["marked"])
+        totals = {k: sum(r[k] for r in rows)
+                  for k in ("held", "marked", "present", "absent", "late",
+                            "unmarked")}
+        totals["percentage"] = _pct(totals["present"] + totals["late"],
+                                    totals["marked"])
+        out.append({**group, "subjects": rows, "totals": totals})
+    # Semester 1, 2, … then the unassigned group last.
+    out.sort(key=lambda g: (g["semester_number"] is None,
+                            g["semester_number"] or 0))
+    return out
+
+
 def student_attendance_summary(*, student, from_date=None, to_date=None) -> dict:
     """One student's attendance in their CURRENT batch over the range
     (see `current_batch`). Earlier batches are excluded on purpose."""
@@ -355,5 +447,9 @@ def student_attendance_summary(*, student, from_date=None, to_date=None) -> dict
         **per_status,
         "present_pct": round((present_like / total_slots) * 100, 2)
                         if total_slots else 0.0,
+        # Semester → subject tables (legacy Advanced Student Search layout).
+        "semesters": semester_subject_breakdown(
+            student=student, batch=batch, from_date=from_date, to_date=to_date,
+        ),
         "sessions": sessions,
     }

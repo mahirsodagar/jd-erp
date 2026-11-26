@@ -13,13 +13,26 @@ def apply_leave(*, student, leave_date: date, leave_edate: date,
                 cc_emails: list[str] | None = None) -> StudentLeaveApplication:
     if leave_edate < leave_date:
         raise ValueError("leave_edate must be on or after leave_date.")
-    # Block duplicate active application for the same start date
-    if StudentLeaveApplication.objects.filter(
-        student=student, leave_date=leave_date,
-        status=StudentLeaveApplication.Status.SUBMITTED,
-    ).exists():
+    # No overlap with a pending or approved leave: the same day can't be
+    # applied for twice (and the report would otherwise count it twice).
+    clash = (
+        StudentLeaveApplication.objects
+        .filter(
+            student=student,
+            status__in=(StudentLeaveApplication.Status.SUBMITTED,
+                        StudentLeaveApplication.Status.APPROVED),
+            leave_date__lte=leave_edate, leave_edate__gte=leave_date,
+        )
+        .order_by("leave_date")
+        .first()
+    )
+    if clash is not None:
+        span = (
+            f"{clash.leave_date:%d %b %Y}" if clash.leave_date == clash.leave_edate
+            else f"{clash.leave_date:%d %b %Y} – {clash.leave_edate:%d %b %Y}"
+        )
         raise ValueError(
-            "You already have a pending leave for this start date."
+            f"Overlaps your {clash.get_status_display().lower()} leave ({span})."
         )
     app = StudentLeaveApplication.objects.create(
         student=student,
