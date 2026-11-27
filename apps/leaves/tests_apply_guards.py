@@ -139,14 +139,12 @@ class ApplyGuardTests(TestCase):
         self.assertEqual(self._apply(self.cl, "2026-10-12", "2026-10-13").status_code, 400)
         self.assertEqual(self._apply(self.cl, "2026-10-12").status_code, 201)
 
-    def test_comp_off_limited_to_earned(self):
-        self.assertEqual(self._apply(self.co, "2026-10-05").status_code, 400)
-        CompOffApplication.objects.create(
-            employee=self.emp, worked_date=date(2026, 9, 6),
-            worked_session_1=1, worked_session_2=1, count=Decimal("1"),
-            reason="x", status=CompOffApplication.Status.APPROVED,
-        )
+    def test_comp_off_is_unlimited_like_on_duty(self):
+        # Client (2026-11-27): the earned pool is informational only, so a
+        # comp-off leave goes through even with nothing earned and even
+        # though the type is flagged enforce_balance.
         self.assertEqual(self._apply(self.co, "2026-10-05").status_code, 201)
+        self.assertEqual(self._apply(self.co, "2026-10-12", "2026-10-16").status_code, 201)
 
     def test_unenforced_types_are_unlimited(self):
         self.assertEqual(self._apply(self.visit, "2026-10-01", "2026-10-20").status_code, 201)

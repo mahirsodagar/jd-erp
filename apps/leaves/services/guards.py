@@ -71,14 +71,17 @@ def available_balance(employee, leave_type: LeaveType, *, on_date=None,
                       include_pending=True, exclude_id=None) -> Decimal | None:
     """Days still spendable on ``leave_type`` in the allocation window
     covering ``on_date`` (the leave's from_date), or None if the type
-    isn't balance-enforced or has no balance (ON_DUTY).
+    isn't balance-enforced, is comp-off, or has no balance (ON_DUTY).
 
     ``include_pending`` reserves days already requested but undecided so
     that several pending applies can't jointly overdraw the balance.
     ``exclude_id`` drops one pending application from that reservation
     (the one being approved).
     """
-    if not leave_type.enforce_balance:
+    # Comp-off is unlimited like ON_DUTY (client, 2026-11-27): the
+    # earned/used pool is shown for information but never blocks a
+    # request, whatever ``enforce_balance`` says.
+    if not leave_type.enforce_balance or leave_type.is_comp_off:
         return None
     row = compute_balance(employee, leave_type, on_date)
     if row["balance"] is None:

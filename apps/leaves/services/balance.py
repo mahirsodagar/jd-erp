@@ -12,7 +12,9 @@ pending. The Apply guards, the Balances page and the Apply dashboard all
 read this same number.
 
 Comp-off is a derived lifetime pool (earned via approved comp-off
-requests, spent via approved COMP_OFF leaves); it has no allocation.
+requests, spent via approved COMP_OFF leaves); it has no allocation and,
+since 2026-11-27, is informational only — applying comp-off is unlimited
+like ON_DUTY (see ``guards.available_balance``).
 """
 
 from datetime import date as _date
