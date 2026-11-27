@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from apps.common.upload_paths import courseware_file_path, courseware_image_path
 
 
 class CoursewareTopic(models.Model):
@@ -18,7 +19,7 @@ class CoursewareTopic(models.Model):
     description = models.TextField(blank=True)
     # Cover image shown on the courseware grid card.
     image = models.ImageField(
-        upload_to="courseware/images/", blank=True, null=True,
+        upload_to=courseware_image_path, blank=True, null=True,
     )
     is_published = models.BooleanField(default=True)
 
@@ -46,7 +47,7 @@ class CoursewareAttachment(models.Model):
         CoursewareTopic, on_delete=models.CASCADE, related_name="attachments",
     )
     name = models.CharField(max_length=200)
-    file = models.FileField(upload_to="courseware/")
+    file = models.FileField(upload_to=courseware_file_path)
 
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True,

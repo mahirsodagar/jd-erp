@@ -2,6 +2,8 @@ import os
 
 from rest_framework import serializers
 
+from apps.common.media_urls import signed_media_url
+
 from apps.common.file_validation import (
     DOCUMENT_MIMES, IMAGE_MIMES, SecureFileField,
 )
@@ -54,11 +56,56 @@ class TaskSerializer(serializers.ModelSerializer):
         if not obj.attachment:
             return None
         request = self.context.get("request")
-        url = obj.attachment.url
-        return request.build_absolute_uri(url) if request else url
+        return signed_media_url(
+            request, obj.attachment, download_name=self.get_attachment_name(obj),
+        )
 
     def get_attachment_name(self, obj):
         return os.path.basename(obj.attachment.name) if obj.attachment else ""
+
+
+def is_portal_account(user) -> bool:
+    """Student or parent login (admissions.Student.user_account /
+    parent_user_account) — not staff."""
+    if user is None or not getattr(user, "is_authenticated", False):
+        return False
+    from apps.admissions.models import Student
+    return (
+        hasattr(user, "student")
+        or Student.objects.filter(parent_user_account=user).exists()
+    )
+
+
+def _validate_staff_assignee(user):
+    if user is not None and is_portal_account(user):
+        raise serializers.ValidationError(
+            "Tasks can only be assigned to staff accounts.",
+        )
+    return user
+
+
+class TaskPatchSerializer(serializers.ModelSerializer):
+    """Inline edit — the view decides per field who may send what; this
+    only validates types (date parsing, assignee must be a real user)."""
+
+    class Meta:
+        model = Task
+        fields = ["name", "description", "end_date", "assignee", "assignee_remarks"]
+        extra_kwargs = {f: {"required": False} for f in fields}
+
+    def validate_assignee(self, user):
+        return _validate_staff_assignee(user)
+
+    def validate(self, attrs):
+        # Keep the create-time uniqueness rule when name / assignee move.
+        name = attrs.get("name", self.instance.name)
+        assignee = attrs.get("assignee", self.instance.assignee)
+        clash = Task.objects.filter(name=name, assignee=assignee).exclude(pk=self.instance.pk)
+        if clash.exists():
+            raise serializers.ValidationError(
+                {"name": "Task with this name already assigned to that user."},
+            )
+        return attrs
 
 
 class TaskCreateSerializer(serializers.ModelSerializer):
@@ -72,6 +119,9 @@ class TaskCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Task
         fields = ["name", "description", "end_date", "assignee", "attachment"]
+
+    def validate_assignee(self, user):
+        return _validate_staff_assignee(user)
 
     def validate(self, attrs):
         # Block "Task Name Already Submitted" early with a clean field

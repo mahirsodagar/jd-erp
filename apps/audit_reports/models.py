@@ -193,6 +193,18 @@ class CourseEndReport(models.Model):
     )
     completed_on = models.DateField()
 
+    class ReportType(models.TextChoices):
+        MID_MODULE = "MID_MODULE", "Mid Module"
+        END_MODULE = "END_MODULE", "End Module"
+        EMERGENCY_STOP = "EMERGENCY_STOP", "Emergency Stop"
+
+    # Where in the module this report is filed (client, 2026-11-27).
+    # Rows filed before the field existed are all end-of-module reports.
+    report_type = models.CharField(
+        max_length=20, choices=ReportType.choices,
+        default=ReportType.END_MODULE,
+    )
+
     summary = models.TextField()
     learning_outcomes = models.TextField(blank=True)
     challenges = models.TextField(blank=True)
@@ -227,7 +239,9 @@ class CourseEndReport(models.Model):
 
     class Meta:
         ordering = ("-completed_on",)
-        unique_together = (("instructor", "subject", "batch"),)
+        # One report per type: a mid-module report must not block the
+        # end-module one for the same subject and batch.
+        unique_together = (("instructor", "subject", "batch", "report_type"),)
 
     def __str__(self):
         return f"CourseEnd {self.subject_id}/{self.batch_id} by {self.instructor_id}"

@@ -12,14 +12,20 @@ apps/leads/views.py — once closed, POSTs here return 403.
 
 import json
 import re
+from datetime import timedelta
 
+from django.conf import settings
 from django.http import Http404
+from django.utils import timezone
 from rest_framework import status as http
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.common.file_validation import (
+    PHOTO_OR_PDF_MIMES, PILLOW_IMAGE_MIMES, validate_upload_for_api,
+)
 from apps.leads.models import Lead
 
 from .application_terms import terms_for
@@ -138,6 +144,14 @@ def _resolve_lead(token: str) -> Lead:
         ).get(application_token=token)
     except (Lead.DoesNotExist, ValueError):
         raise Http404("Invalid or expired application link.")
+    # A link stops working APPLICATION_LINK_VALID_DAYS after it was last
+    # (re)sent or re-opened by a counsellor; re-sending issues a fresh
+    # window. Enrolment locks the form outright (see enrollment create).
+    days = getattr(settings, "APPLICATION_LINK_VALID_DAYS", 0)
+    issued = lead.application_token_sent_at
+    if days and issued and timezone.now() > issued + timedelta(days=days):
+        raise Http404("This application link has expired. Please ask the "
+                      "admissions team to send a new one.")
     return lead
 
 
@@ -232,6 +246,21 @@ class PublicApplicationView(APIView):
                 for i in range(len(documents))
             ],
         }
+
+        # Unauthenticated uploads: check the bytes, not the name. Photo
+        # must be a real image Pillow can open (it is drawn on the ID
+        # card); certificates a PDF or a photo of one.
+        if payload["_photo_file"] is not None:
+            validate_upload_for_api(
+                payload["_photo_file"], allowed_mimes=PILLOW_IMAGE_MIMES,
+                max_size_mb=5, field="photo",
+            )
+        for i, f in enumerate(payload["_document_files"]):
+            if f is not None:
+                validate_upload_for_api(
+                    f, allowed_mimes=PHOTO_OR_PDF_MIMES, max_size_mb=10,
+                    field=f"document_file_{i}",
+                )
 
         # A closed form answers 403 below, whatever was left blank.
         if not lead.application_locked_for_student:

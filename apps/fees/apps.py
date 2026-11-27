@@ -8,10 +8,11 @@ class FeesConfig(AppConfig):
 
     def ready(self):
         from auditlog.registry import auditlog
-        from .models import Concession, FeeReceipt, Installment
+        from .models import Concession, FeeReceipt, Installment, OtherFee
         auditlog.register(Installment)
         auditlog.register(FeeReceipt)
         auditlog.register(Concession)
+        auditlog.register(OtherFee)
         # Importing the module registers the post_save signal that
         # fires payment-confirmation SMS on FeeReceipt creation.
         from . import notifications  # noqa: F401

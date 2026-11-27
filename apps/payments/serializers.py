@@ -15,7 +15,7 @@ class PaymentOrderSerializer(serializers.ModelSerializer):
             "id", "order_id", "sg_order_ref", "status", "amount",
             "txn_id", "payment_method", "payment_method_type",
             "bank_error_code", "bank_error_message",
-            "session_expires_at", "charged_at",
+            "session_expires_at", "charged_at", "review_note",
             "is_paid", "is_terminal", "created_on", "updated_on",
         )
         read_only_fields = fields

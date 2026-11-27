@@ -8,6 +8,8 @@ class RelievingConfig(AppConfig):
 
     def ready(self):
         from auditlog.registry import auditlog
-        from .models import RelievingApplication, RelievingApproval
+        from .models import RelievingApplication, RelievingApproval, RelievingManager
         auditlog.register(RelievingApplication)
         auditlog.register(RelievingApproval)
+        # The approver master decides who can sign off relieving.
+        auditlog.register(RelievingManager)

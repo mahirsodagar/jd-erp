@@ -218,7 +218,11 @@ class SystemEmailTemplateVersion(models.Model):
 
 
 def _template_attachment_path(instance, filename):
-    return f"notifications/template_attachments/{instance.template_id or 'new'}/{filename}"
+    from apps.common.upload_paths import _random_name
+    # The display name lives on `filename`; the stored path is random.
+    return _random_name(
+        f"notifications/template_attachments/{instance.template_id or 'new'}", filename,
+    )
 
 
 class SystemEmailAttachment(models.Model):

@@ -31,9 +31,19 @@ class TaskAttachmentTests(TestCase):
     def test_pdf_attachment_is_stored_and_linked(self):
         r = self._post(attachment=SimpleUploadedFile("brief.pdf", PDF, "application/pdf"))
         self.assertEqual(r.status_code, 201, r.content)
-        self.assertTrue(r.data["attachment_url"].startswith("http://testserver/media/"))
-        self.assertTrue(r.data["attachment_name"].startswith("brief"))
-        self.assertTrue(Task.objects.get().attachment.name.startswith("tasks/attachments/"))
+        # Signed, expiring link (media is private since 2026-11-27), never
+        # the raw /media/ path; the stored name is random but keeps the stem.
+        self.assertTrue(r.data["attachment_url"].startswith("http://testserver/api/media/"))
+        self.assertTrue(r.data["attachment_name"].endswith("brief.pdf"))
+        stored = Task.objects.get().attachment.name
+        self.assertTrue(stored.startswith("tasks/attachments/"))
+        self.assertNotEqual(stored, "tasks/attachments/brief.pdf")
+        # The link serves the file inline without any login.
+        from rest_framework.test import APIClient
+        anon = APIClient()
+        got = anon.get(r.data["attachment_url"].replace("http://testserver", ""))
+        self.assertEqual(got.status_code, 200)
+        self.assertEqual(got["Content-Type"], "application/pdf")
 
     def test_no_attachment_is_fine(self):
         r = self._post()

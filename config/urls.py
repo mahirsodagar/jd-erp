@@ -4,6 +4,7 @@ from django.contrib import admin
 from django.urls import include, path
 
 from apps.admissions.public_views import PublicApplicationView
+from apps.common.media_urls import SignedMediaView
 from apps.leads.website_webhook import WebsiteLeadWebhookView
 from apps.leads.exam_views import (
     PublicExamAttachmentDeleteView, PublicExamAttachmentView,
@@ -16,7 +17,8 @@ from apps.payments.views import (
 )
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
+    # Signed, expiring links to stored files (nginx keeps /media/ internal).
+    path("api/media/<str:token>/", SignedMediaView.as_view(), name="media-signed"),
     # Public, no-auth student application form (tokenized).
     path("api/public/application/<uuid:token>/",
          PublicApplicationView.as_view(), name="public-application"),
@@ -84,6 +86,9 @@ urlpatterns = [
     path("api/comms/system-emails/", include("apps.notifications.template_urls")),
     path("api/comms/", include("apps.communications.urls")),
 ]
+
+if settings.ADMIN_SITE_ENABLED:
+    urlpatterns.insert(1, path(settings.ADMIN_URL_PATH, admin.site.urls))
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from apps.common.upload_paths import document_request_attachment_path
 
 
 class DocumentRequest(models.Model):
@@ -36,7 +37,7 @@ class DocumentRequest(models.Model):
 
     # Issued document, attached by the admin on approval (optional).
     attachment = models.FileField(
-        upload_to="student_documents/", blank=True, null=True,
+        upload_to=document_request_attachment_path, blank=True, null=True,
     )
     approver_remarks = models.TextField(blank=True)
     decided_by = models.ForeignKey(

@@ -20,6 +20,7 @@ import mimetypes
 from django.conf import settings
 from django.db.models import Count, Max
 from django.http import Http404
+from django.shortcuts import get_object_or_404
 from rest_framework import serializers, status as http
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
@@ -27,6 +28,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import has_perm
+from apps.common.file_validation import DANGEROUS_MIMES, detect_mime
+from apps.common.media_urls import signed_media_url
 
 from . import registry, templating
 from .models import (
@@ -99,11 +102,7 @@ def _var_dict(v: registry.Var) -> dict:
 
 
 def _attachment_dict(a: SystemEmailAttachment, request) -> dict:
-    url = ""
-    try:
-        url = request.build_absolute_uri(a.file.url) if a.file else ""
-    except ValueError:
-        url = ""
+    url = signed_media_url(request, a.file, download_name=a.filename) or ""
     return {
         "id": a.id, "filename": a.filename, "content_type": a.content_type,
         "size": a.size, "url": url, "created_at": a.created_at,
@@ -406,7 +405,9 @@ def _sample_context(trig: registry.Trigger, sample: dict | None, request) -> dic
         elif kind == "lead":
             from apps.leads.models import Lead
 
-            obj = Lead.objects.select_related("program", "campus", "assign_to", "source").get(pk=pk)
+            obj = get_object_or_404(
+                Lead.objects.select_related("program", "campus", "assign_to", "source"), pk=pk,
+            )
             ctx.update({k: v for k, v in cb.lead_vars(obj, request=request).items() if v})
         elif kind == "employee":
             from apps.employees.models import Employee
@@ -520,6 +521,17 @@ class SystemEmailAttachmentsView(APIView):
         ctype = (f.content_type or mimetypes.guess_type(f.name)[0] or "").split(";")[0].strip()
         if ctype not in ATTACHMENT_TYPES:
             return Response({"detail": f"File type not allowed ({ctype or 'unknown'})."},
+                            status=http.HTTP_400_BAD_REQUEST)
+        # The declared type is the client's word; check the bytes too.
+        # Office files sniff as zip and plain text as octet-stream when
+        # libmagic is absent, so those two fall back to the declared type.
+        detected = detect_mime(f)
+        office_ok = detected == "application/zip" and ctype.startswith("application/vnd.")
+        text_ok = detected in ("application/octet-stream", "text/plain") and ctype.startswith("text/")
+        if detected in DANGEROUS_MIMES or not (
+            detected in ATTACHMENT_TYPES or office_ok or text_ok
+        ):
+            return Response({"detail": f"File content does not match an allowed type ({detected})."},
                             status=http.HTTP_400_BAD_REQUEST)
         row = SystemEmailTemplate.objects.filter(trigger_key=key, institute=institute).first()
         if row is None:

@@ -20,6 +20,7 @@ from .views import (
     ConsolidatedMonthlyView,
     CourseEndReportDetailView,
     CourseEndReportListCreateView,
+    CourseEndReportResubmitView,
     CourseEndReportReviewView,
     DailyReportAccessDecideView,
     DailyReportAccessGrantView,
@@ -104,6 +105,8 @@ urlpatterns = [
          name="course-end-list-create"),
     path("course-end/<int:pk>/review/", CourseEndReportReviewView.as_view(),
          name="course-end-review"),
+    path("course-end/<int:pk>/resubmit/", CourseEndReportResubmitView.as_view(),
+         name="course-end-resubmit"),
     path("course-end/<int:pk>/", CourseEndReportDetailView.as_view(),
          name="course-end-detail"),
 

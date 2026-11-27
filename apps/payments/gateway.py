@@ -484,10 +484,22 @@ def verify_return_signature(params: dict, account: str = "") -> bool:
     # The reference implementations compare after urldecoding BOTH sides,
     # so mirror that rather than comparing raw base64 — `+` in a digest
     # would otherwise never match a value that arrived as a space.
-    return hmac.compare_digest(
+    return _ct_equal(
         urllib.parse.unquote_plus(computed),
         urllib.parse.unquote_plus(received),
     )
+
+
+def _ct_equal(a, b) -> bool:
+    """`hmac.compare_digest` on UTF-8 bytes. The str form raises
+    TypeError on non-ASCII input, which a crafted header or query
+    string could use to turn a clean reject into a 500."""
+    try:
+        return hmac.compare_digest(
+            str(a or "").encode("utf-8"), str(b or "").encode("utf-8"),
+        )
+    except (TypeError, UnicodeError):
+        return False
 
 
 def check_webhook_auth(authorization_header: str) -> bool:
@@ -530,7 +542,7 @@ def check_webhook_auth(authorization_header: str) -> bool:
     for expected_user, expected_pass in pairs:
         # Both compared, and always both, so the timing doesn't leak which
         # half was wrong.
-        user_ok = hmac.compare_digest(username, expected_user)
-        pass_ok = hmac.compare_digest(password, expected_pass)
+        user_ok = _ct_equal(username, expected_user)
+        pass_ok = _ct_equal(password, expected_pass)
         ok = ok or (user_ok and pass_ok)
     return ok

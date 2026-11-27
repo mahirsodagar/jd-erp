@@ -25,6 +25,7 @@ from apps.admissions.models import Student, StudentDocument
 from apps.admissions.services import sync_portal_password
 from apps.appointments import services as appointment_svc
 from apps.appointments.models import StudentAppointment
+from apps.common.file_validation import PHOTO_OR_PDF_MIMES, validate_upload_for_api
 from apps.common.throttles import PasswordChangeThrottle
 from apps.courseware.models import (
     CoursewareAttachment, CoursewareMapping, CoursewareTopic,
@@ -972,6 +973,14 @@ class QualificationListCreateView(APIView):
             header = item.get("header")
             if header not in QUALIFICATION_HEADERS:
                 continue
+            # Content-sniffed: nginx serves /media/ publicly, so an
+            # .html / .svg smuggled in as a "certificate" would be
+            # stored XSS on the API origin.
+            if item.get("file") is not None:
+                validate_upload_for_api(
+                    item["file"], allowed_mimes=PHOTO_OR_PDF_MIMES,
+                    max_size_mb=10, field="file",
+                )
             doc = StudentDocument.objects.create(
                 student=student,
                 header=header,
@@ -1037,6 +1046,11 @@ class ProvisionParentView(APIView):
             student = Student.objects.get(pk=pk)
         except Student.DoesNotExist as e:
             raise Http404 from e
+        # Campus scope, as on every other HR-facing student endpoint.
+        from apps.admissions.permissions import can_view_all_campuses
+        if (not can_view_all_campuses(request.user)
+                and not request.user.campuses.filter(pk=student.campus_id).exists()):
+            raise Http404
         s = ProvisionParentSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         d = s.validated_data

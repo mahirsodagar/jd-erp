@@ -18,6 +18,17 @@ from .exam_views import (
     ExamSendLinksView,
     LeadExamAttemptsView,
 )
+from .mail_views import (
+    InboundEmailCreateLeadView,
+    InboundEmailDetailView,
+    InboundEmailFetchNowView,
+    InboundEmailIgnoreView,
+    InboundEmailListView,
+    InboundEmailRetryView,
+    InboundEmailSummaryView,
+    LeadMailRuleDetailView,
+    LeadMailRuleListCreateView,
+)
 from .reports import (
     ConversionFunnelView,
     CounsellorLeaderboardView,
@@ -64,6 +75,17 @@ urlpatterns = [
     path("counsellors/eligible/", CounsellorEligibleEmployeesView.as_view(), name="counsellor-eligible"),
     path("counsellors/options/", CounsellorOptionsView.as_view(), name="counsellor-options"),
     path("counsellors/<int:pk>/", CounsellorDetailView.as_view(), name="counsellor-detail"),
+
+    # Email Inbox — leads read from the lead mailbox over IMAP.
+    path("mail/", InboundEmailListView.as_view(), name="lead-mail-list"),
+    path("mail/summary/", InboundEmailSummaryView.as_view(), name="lead-mail-summary"),
+    path("mail/fetch/", InboundEmailFetchNowView.as_view(), name="lead-mail-fetch"),
+    path("mail/rules/", LeadMailRuleListCreateView.as_view(), name="lead-mail-rules"),
+    path("mail/rules/<int:pk>/", LeadMailRuleDetailView.as_view(), name="lead-mail-rule-detail"),
+    path("mail/<int:pk>/", InboundEmailDetailView.as_view(), name="lead-mail-detail"),
+    path("mail/<int:pk>/retry/", InboundEmailRetryView.as_view(), name="lead-mail-retry"),
+    path("mail/<int:pk>/ignore/", InboundEmailIgnoreView.as_view(), name="lead-mail-ignore"),
+    path("mail/<int:pk>/create/", InboundEmailCreateLeadView.as_view(), name="lead-mail-create"),
 
     # F.6 — reports
     path("reports/funnel/", ConversionFunnelView.as_view(), name="report-funnel"),

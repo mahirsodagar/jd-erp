@@ -2,6 +2,11 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
+from apps.common.media_urls import signed_media_url
+
+from apps.common.file_validation import (
+    DOCUMENT_MIMES, IMAGE_MIMES, PHOTO_MIMES, SecureFileField,
+)
 from apps.master.models import (
     AcademicYear, Batch, Program, Semester, Subject,
 )
@@ -194,6 +199,15 @@ class AssignmentSerializer(serializers.ModelSerializer):
     submission_count = serializers.SerializerMethodField()
     graded_count = serializers.SerializerMethodField()
     image_url = serializers.SerializerMethodField()
+    # Students open these from the portal, so the bytes are checked here.
+    attachment = SecureFileField(
+        allowed_mimes=DOCUMENT_MIMES | PHOTO_MIMES, max_size_mb=25,
+        required=False, allow_null=True,
+    )
+    image = SecureFileField(
+        allowed_mimes=IMAGE_MIMES, max_size_mb=5,
+        required=False, allow_null=True,
+    )
 
     class Meta:
         model = Assignment
@@ -265,8 +279,7 @@ class AssignmentSerializer(serializers.ModelSerializer):
         if not obj.image:
             return None
         request = self.context.get("request")
-        return (request.build_absolute_uri(obj.image.url)
-                if request else obj.image.url)
+        return signed_media_url(request, obj.image)
 
     def get_submission_count(self, obj):
         return obj.submissions.count()
@@ -360,6 +373,17 @@ class MarksEntrySerializer(serializers.ModelSerializer):
         # IntegrityError surface as 400 / 409 from the view.
         validators = []
 
+    #: Identity of a mark row; fixed once created (a PATCH could
+    #: otherwise re-point someone's marks at another student / subject).
+    _KEY_FIELDS = ("student", "subject", "batch", "semester")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance is not None:
+            for name in self._KEY_FIELDS:
+                if name in self.fields:
+                    self.fields[name].read_only = True
+
     def validate(self, attrs):
         ia = attrs.get("ia_marks", getattr(self.instance, "ia_marks", None))
         ia_max = attrs.get("ia_max", getattr(self.instance, "ia_max", 0))
@@ -416,7 +440,12 @@ class MarksSheetPublishSerializer(MarksSheetKeySerializer):
 
 
 class StudentSubmitSerializer(serializers.Serializer):
-    file = serializers.FileField(required=False, allow_null=True)
+    # Same rule as the portal's SubmitAssignmentSerializer: real
+    # document / image bytes only, 25 MB.
+    file = SecureFileField(
+        allowed_mimes=DOCUMENT_MIMES | PHOTO_MIMES, max_size_mb=25,
+        required=False, allow_null=True,
+    )
     text_response = serializers.CharField(required=False, allow_blank=True)
 
 
@@ -562,6 +591,13 @@ class TestQuestionSerializer(serializers.ModelSerializer):
         fields = ["id", "test", "description", "type", "options",
                   "answer_key", "marks", "sort_order"]
         read_only_fields = ["id"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # A question stays in the test it was created in; ownership is
+        # checked on the source test only.
+        if self.instance is not None:
+            self.fields["test"].read_only = True
 
     def validate(self, attrs):
         qtype = attrs.get("type") or getattr(self.instance, "type", "")

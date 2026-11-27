@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
 from apps.common.file_validation import SecureFileField
+from apps.common.media_urls import signed_media_url
 
 from .models import Department, Designation, Employee, EmployeeDocument, Holiday
 from .services import PHOTO_MAX_BYTES, validate_photo
@@ -63,7 +64,7 @@ class EmployeeDocumentSerializer(serializers.ModelSerializer):
         if not obj.file:
             return None
         request = self.context.get("request")
-        return request.build_absolute_uri(obj.file.url) if request else obj.file.url
+        return signed_media_url(request, obj.file, download_name=obj.name)
 
     def validate_name(self, value):
         value = (value or "").strip()
@@ -94,10 +95,7 @@ class EmployeeListSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_photo_url(self, obj):
-        request = self.context.get("request")
-        if obj.photo and request:
-            return request.build_absolute_uri(obj.photo.url)
-        return None
+        return signed_media_url(self.context.get("request"), obj.photo)
 
 
 class EmployeeDetailSerializer(serializers.ModelSerializer):
@@ -183,11 +181,11 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
 
     def get_photo_url(self, obj):
         request = self.context.get("request")
-        return request.build_absolute_uri(obj.photo.url) if obj.photo and request else None
+        return signed_media_url(request, obj.photo)
 
     def get_qr_url(self, obj):
         request = self.context.get("request")
-        return request.build_absolute_uri(obj.qr_code.url) if obj.qr_code and request else None
+        return signed_media_url(request, obj.qr_code)
 
     def get_status_changed_by_name(self, obj):
         u = obj.status_changed_by

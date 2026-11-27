@@ -60,6 +60,12 @@ class InstallmentListCreateView(APIView):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         s = InstallmentSerializer(data=request.data)
         s.is_valid(raise_exception=True)
+        # Same campus scope as the list / receipt create.
+        enrollment = s.validated_data["enrollment"]
+        if not visible_enrollments_filter(
+            Enrollment.objects.filter(pk=enrollment.pk), request.user,
+        ).exists():
+            raise Http404
         s.save(created_by=request.user)
         return Response(s.data, status=http.HTTP_201_CREATED)
 
@@ -554,6 +560,9 @@ class ConcessionDecisionView(APIView):
         if c.status != Concession.Status.PENDING:
             return Response({"detail": "Already decided."},
                             status=http.HTTP_400_BAD_REQUEST)
+        if c.requested_by_id == request.user.id and not request.user.is_superuser:
+            return Response({"detail": "You cannot decide a concession you requested."},
+                            status=http.HTTP_403_FORBIDDEN)
         s = ConcessionDecisionSerializer(data=request.data)
         s.is_valid(raise_exception=True)
 
@@ -743,7 +752,7 @@ class FeesMeReceiptPdfView(_StudentMixin, APIView):
                 "enrollment", "enrollment__student", "enrollment__campus",
                 "enrollment__batch", "enrollment__program",
                 "enrollment__student__institute", "installment", "received_by",
-            ).get(pk=pk, enrollment__student=student)
+            ).get(pk=pk, enrollment__student=student, status=FeeReceipt.Status.ACTIVE)
         except FeeReceipt.DoesNotExist as e:
             raise Http404 from e
         pdf = render_receipt_pdf(r)

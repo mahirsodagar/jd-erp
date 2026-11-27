@@ -37,7 +37,7 @@ from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.common.throttles import WebsiteWebhookThrottle
+from apps.common.throttles import ThrottleBeforePermissionMixin, WebsiteWebhookThrottle
 from apps.master.models import Program
 
 from .models import WebsiteLeadEvent, WebsiteValueMap
@@ -233,7 +233,7 @@ def _client_ip(request):
     )
 
 
-class WebsiteLeadWebhookView(APIView):
+class WebsiteLeadWebhookView(ThrottleBeforePermissionMixin, APIView):
     authentication_classes = []
     permission_classes = [HasWebsiteWebhookKey]
     throttle_classes = [WebsiteWebhookThrottle]

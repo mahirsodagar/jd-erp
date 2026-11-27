@@ -1,4 +1,5 @@
 from django.db.models import ProtectedError, Q
+from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -38,7 +39,7 @@ class _MasterDetailMixin:
     perm = None
 
     def _obj(self, pk):
-        return self.model.objects.get(pk=pk)
+        return get_object_or_404(self.model, pk=pk)
 
     def get(self, request, pk):
         return Response(self.serializer(self._obj(pk)).data)
@@ -109,7 +110,7 @@ class CampusProgramsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
-        campus = Campus.objects.get(pk=pk)
+        campus = get_object_or_404(Campus, pk=pk)
         qs = campus.programs.filter(is_active=True)
         return Response(ProgramSerializer(qs, many=True).data)
 
@@ -366,7 +367,7 @@ class _DetailBase(APIView):
         return [IsAuthenticated(), HasPerm()]
 
     def _obj(self, pk):
-        return self.model.objects.get(pk=pk)
+        return get_object_or_404(self.model, pk=pk)
 
     def get(self, request, pk):
         return Response(self.serializer(self._obj(pk)).data)

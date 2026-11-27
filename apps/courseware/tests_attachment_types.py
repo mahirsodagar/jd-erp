@@ -18,7 +18,20 @@ from apps.master.models import (
 _MEDIA = tempfile.mkdtemp()
 
 
-def _file(name, ctype, body=b"x" * 16):
+# Leading bytes that really are of the declared type — uploads are
+# content-sniffed since 2026-11-27, so a bare "x" * 16 is refused for
+# every family. Unknown types keep the junk body on purpose.
+_MAGIC = {
+    "application/pdf": b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n" + b"x" * 16,
+    "image/png": b"\x89PNG\r\n\x1a\n" + b"\x00" * 16,
+    "video/mp4": b"\x00\x00\x00\x18ftypisom" + b"\x00" * 16,
+    "video/quicktime": b"\x00\x00\x00\x14ftypqt  " + b"\x00" * 16,
+}
+
+
+def _file(name, ctype, body=None):
+    if body is None:
+        body = _MAGIC.get(ctype, b"x" * 16)
     return SimpleUploadedFile(name, body, content_type=ctype)
 
 

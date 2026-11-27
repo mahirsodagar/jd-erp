@@ -30,9 +30,8 @@ RULES: dict[str, tuple[str, ...]] = {
     # it on the baseline Faculty role and showed every login everyone's
     # sessions (roles.0006 takes it off again). Grant it from the Roles
     # page to admin roles only.
-    # The count tile used to ride on the strip's key; roles that saw it
-    # keep it until an admin unticks it.
-    "dashboard.sessions_count.view": ("dashboard.sessions.view",),
+    # `dashboard.sessions_count.view` was dropped with the Today's
+    # Sessions count tile (2026-11-27); existing prod rows are unused.
     "dashboard.leads.view": ("leads.lead.view", "leads.lead.view_all"),
     "dashboard.enrollments.view": (
         "admissions.enrollment.view", "admissions.enrollment.add",
@@ -196,6 +195,13 @@ RULES: dict[str, tuple[str, ...]] = {
         "academics.certificate.view_all",
     ),
     "academics.alumni.view_all_campuses": ("academics.alumni.view_all",),
+    # Marks had no campus scope at all until 2026-11-27; keep the
+    # institute-wide roles institute-wide, scope everyone else.
+    "academics.marks.view_all_campuses": (
+        "academics.certificate.view_all_campuses",
+        "admissions.student.view_all_campuses",
+        "academics.transcript.view_any",
+    ),
 
     # --- Module 6.6: Academics > 0-Hour Form ---------------------------
     # Deleting your own report used to come with `submit`. The *_any
@@ -370,4 +376,9 @@ INTENTIONALLY_NOT_BACKFILLED: dict[str, str] = {
     # never resolved, so a mis-filed one was permanent.
     "audit.compliance.edit_any": "no edit endpoint existed",
     "audit.compliance.delete_any": "no delete endpoint existed",
+    # Email Inbox (2026-11-27) is new; no old key implied reading the
+    # lead mailbox or editing its routing rules. Granted per role.
+    "leads.mail.view": "new page; no pre-split equivalent",
+    "leads.mail.manage": "new page; no pre-split equivalent",
+    "leads.mail.rules": "new page; no pre-split equivalent",
 }

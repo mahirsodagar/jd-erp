@@ -14,6 +14,7 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from apps.common.upload_paths import exam_attachment_path
 
 
 class EntranceExam(models.Model):
@@ -235,7 +236,7 @@ class EntranceExamAttachment(models.Model):
         on_delete=models.SET_NULL, related_name="attachments",
         help_text="Which question this file answers, if any.",
     )
-    file = models.FileField(upload_to="leads/exam_attachments/%Y/%m/")
+    file = models.FileField(upload_to=exam_attachment_path)
     original_name = models.CharField(max_length=255)
     size = models.PositiveIntegerField(default=0)
     note = models.CharField(max_length=200, blank=True)

@@ -119,15 +119,17 @@ class ReportCsvTests(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn('filename="Module_End_Reports.csv"', r["Content-Disposition"])
         rows = _rows(r)
-        self.assertEqual(rows[0][:5],
-                         ["Completed on", "Program", "Batch", "Subject", "Instructor"])
-        self.assertEqual([row[4] for row in rows[1:]], ["Ann", "Bob"])  # newest first
-        self.assertEqual(rows[1][:4], ["30-10-2026", "B.Des", "BD-1", "Drawing (DRAW)"])
-        self.assertEqual(rows[1][6:9], ["88.50", "", "Module wrapped up"])
-        self.assertEqual(rows[1][12:14], ["Approved", "Good"])
+        self.assertEqual(rows[0][:6],
+                         ["Completed on", "Program", "Batch", "Subject", "Type",
+                          "Instructor"])
+        self.assertEqual([row[5] for row in rows[1:]], ["Ann", "Bob"])  # newest first
+        self.assertEqual(rows[1][:5],
+                         ["30-10-2026", "B.Des", "BD-1", "Drawing (DRAW)", "End Module"])
+        self.assertEqual(rows[1][7:10], ["88.50", "", "Module wrapped up"])
+        self.assertEqual(rows[1][13:15], ["Approved", "Good"])
         r = c.get(reverse("course-end-list-create"),
                   {"output": "csv", "hod_status": "PENDING"})
-        self.assertEqual([row[4] for row in _rows(r)[1:]], ["Bob"])
+        self.assertEqual([row[5] for row in _rows(r)[1:]], ["Bob"])
 
     def test_zero_hour_csv_is_every_row_not_one_page(self):
         c = APIClient()

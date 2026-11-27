@@ -150,17 +150,20 @@ class ScheduleSlotListCreateView(APIView):
 class ScheduleSlotDetailView(APIView):
     permission_classes = [IsAuthenticated, TimetableAccess]
 
-    def _obj(self, pk):
+    def _obj(self, pk, *, qs):
+        """Same scoping as the list (`_read_scope`) and purge (`_scope`):
+        a slot outside the caller's scope does not exist for them."""
         try:
-            return ScheduleSlot.objects.get(pk=pk)
+            return qs.get(pk=pk)
         except ScheduleSlot.DoesNotExist as e:
             raise Http404 from e
 
     def get(self, request, pk):
-        return Response(ScheduleSlotSerializer(self._obj(pk)).data)
+        slot = self._obj(pk, qs=_read_scope(ScheduleSlot.objects.all(), request.user))
+        return Response(ScheduleSlotSerializer(slot).data)
 
     def patch(self, request, pk):
-        slot = self._obj(pk)
+        slot = self._obj(pk, qs=_scope(ScheduleSlot.objects.all(), request.user))
         # Re-validate conflicts if a key field changes.
         force = _forced(request, request.user)
         s = ScheduleSlotSerializer(slot, data=request.data, partial=True)
@@ -196,7 +199,7 @@ class ScheduleSlotDetailView(APIView):
         return Response(ScheduleSlotSerializer(slot).data)
 
     def delete(self, request, pk):
-        slot = self._obj(pk)
+        slot = self._obj(pk, qs=_scope(ScheduleSlot.objects.all(), request.user))
         slot.status = ScheduleSlot.Status.CANCELLED
         slot.save(update_fields=["status", "updated_at"])
         notify_slot(slot, verb="cancelled", actor=request.user)
@@ -1201,6 +1204,21 @@ class StudentSubmitView(APIView):
 
 # --- Marks -----------------------------------------------------------
 
+_MARKS_SCOPE_KEY = "academics.marks.view_all_campuses"
+
+
+def _marks_campus_ok(user, campus_id) -> bool:
+    """Campus scope for marks (2026-11-27): institute-wide only with
+    `academics.marks.view_all_campuses`, else the caller's campuses."""
+    allowed = _record_campus_ids(user, _MARKS_SCOPE_KEY)
+    return allowed is None or campus_id in allowed
+
+
+def _marks_scope(qs, user):
+    allowed = _record_campus_ids(user, _MARKS_SCOPE_KEY)
+    return qs if allowed is None else qs.filter(batch__campus_id__in=allowed)
+
+
 class MarksListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1209,9 +1227,9 @@ class MarksListCreateView(APIView):
         if not has_perm(u, "academics.marks.view"):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
-        qs = MarksEntry.objects.select_related(
+        qs = _marks_scope(MarksEntry.objects.select_related(
             "student", "subject", "batch", "semester",
-        )
+        ), u)
         params = request.query_params
         if v := params.get("student"):
             qs = qs.filter(student_id=v)
@@ -1238,6 +1256,9 @@ class MarksListCreateView(APIView):
                             status=http.HTTP_403_FORBIDDEN)
         s = MarksEntrySerializer(data=request.data)
         s.is_valid(raise_exception=True)
+        if not _marks_campus_ok(u, s.validated_data["batch"].campus_id):
+            return Response({"detail": "Batch not in your campus scope."},
+                            status=http.HTTP_403_FORBIDDEN)
         try:
             obj = s.save(entered_by=u)
         except Exception as e:
@@ -1251,7 +1272,9 @@ class MarksDetailView(APIView):
 
     def _obj(self, pk):
         try:
-            return MarksEntry.objects.get(pk=pk)
+            return _marks_scope(
+                MarksEntry.objects.select_related("batch"), self.request.user,
+            ).get(pk=pk)
         except MarksEntry.DoesNotExist as e:
             raise Http404 from e
 
@@ -1290,7 +1313,7 @@ class MarksPublishView(APIView):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         try:
-            m = MarksEntry.objects.get(pk=pk)
+            m = _marks_scope(MarksEntry.objects.select_related("batch"), u).get(pk=pk)
         except MarksEntry.DoesNotExist as e:
             raise Http404 from e
         if m.published:
@@ -1309,7 +1332,7 @@ class MarksUnpublishView(APIView):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
         try:
-            m = MarksEntry.objects.get(pk=pk)
+            m = _marks_scope(MarksEntry.objects.select_related("batch"), u).get(pk=pk)
         except MarksEntry.DoesNotExist as e:
             raise Http404 from e
         if not m.published:
@@ -1334,6 +1357,8 @@ class MarksSheetView(APIView):
                             status=http.HTTP_403_FORBIDDEN)
         key = MarksSheetKeySerializer(data=request.query_params)
         key.is_valid(raise_exception=True)
+        if not _marks_campus_ok(u, key.validated_data["batch"].campus_id):
+            raise Http404
         return Response({
             **marks_sheet(**key.validated_data),
             "can_edit_published": has_perm(u, "academics.marks.edit_published"),
@@ -1347,6 +1372,9 @@ class MarksSheetView(APIView):
         s = MarksSheetSaveSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         d = s.validated_data
+        if not _marks_campus_ok(u, d["batch"].campus_id):
+            return Response({"detail": "Batch not in your campus scope."},
+                            status=http.HTTP_403_FORBIDDEN)
         if d["publish"] and not has_perm(u, "academics.marks.publish"):
             return Response({"detail": "You cannot publish marks. Save "
                                        "without publishing."},
@@ -1379,6 +1407,9 @@ class MarksSheetPublishView(APIView):
                   else "academics.marks.unpublish")
         if not has_perm(request.user, needed):
             return Response({"detail": "Permission denied."},
+                            status=http.HTTP_403_FORBIDDEN)
+        if not _marks_campus_ok(request.user, d["batch"].campus_id):
+            return Response({"detail": "Batch not in your campus scope."},
                             status=http.HTTP_403_FORBIDDEN)
         n = set_marks_sheet_published(
             batch=d["batch"], semester=d["semester"], subject=d["subject"],
@@ -1426,18 +1457,42 @@ class MyTranscriptView(APIView):
 # --- Printed transcript + marks card (legacy academic_transcript.php /
 # academic_report.php). Published marks only: these go to the student.
 
-def _transcript_pdf_response(student, kind: str) -> HttpResponse:
-    from .transcript_pdf import render_marks_card_pdf, render_transcript_pdf
+def _transcript_pdf_response(student, kind: str, request=None) -> HttpResponse:
+    """`?year=N` on the transcript limits the PDF to that year of
+    study's sheet (the transcript is one sheet per year); without it
+    every year with published marks is included."""
+    from rest_framework.exceptions import ValidationError
 
+    from .transcript_pdf import (
+        NoTranscriptYear, render_marks_card_pdf, render_transcript_pdf, roman,
+    )
+
+    parts = []
     if kind == "marks-card":
-        pdf, stem = render_marks_card_pdf(student), "marks-card"
+        pdf, label = render_marks_card_pdf(student), "Marks Card"
     else:
-        pdf, stem = render_transcript_pdf(student), "academic-transcript"
+        raw = (request.query_params.get("year") if request is not None else None) or ""
+        year = None
+        if raw:
+            try:
+                year = int(raw)
+            except ValueError as e:
+                raise ValidationError({"year": "Must be a whole number."}) from e
+            if year < 1:
+                raise ValidationError({"year": "Must be 1 or more."})
+        try:
+            pdf = render_transcript_pdf(student, year=year)
+        except NoTranscriptYear as e:
+            raise Http404(f"No published marks for Year {roman(year)}.") from e
+        label = "Academic Transcript"
+        if year:
+            parts.append(f"Year {roman(year)}")
     resp = HttpResponse(pdf, content_type="application/pdf")
-    label = "Marks Card" if stem == "marks-card" else "Academic Transcript"
     name = (student.student_name or student.registration_number
             or student.application_form_id or student.pk)
-    resp["Content-Disposition"] = content_disposition([name, label], ".pdf", inline=True)
+    resp["Content-Disposition"] = content_disposition(
+        [name, label, *parts], ".pdf", inline=True,
+    )
     return resp
 
 
@@ -1461,7 +1516,7 @@ class StudentTranscriptPdfView(APIView):
         if not (u.is_superuser or is_self
                 or has_perm(u, "academics.transcript.view_any")):
             raise Http404
-        return _transcript_pdf_response(student, self.kind)
+        return _transcript_pdf_response(student, self.kind, request)
 
 
 class StudentMarksCardPdfView(StudentTranscriptPdfView):
@@ -1479,7 +1534,7 @@ class MyTranscriptPdfView(APIView):
                 {"detail": "No student record linked to this user."},
                 status=http.HTTP_400_BAD_REQUEST,
             )
-        return _transcript_pdf_response(student, self.kind)
+        return _transcript_pdf_response(student, self.kind, request)
 
 
 class MyMarksCardPdfView(MyTranscriptPdfView):
@@ -1657,6 +1712,10 @@ class CertificateIssueView(APIView):
             ).get(pk=pk)
         except Certificate.DoesNotExist as e:
             raise Http404 from e
+        # Same campus scope as the certificate list.
+        allowed = _record_campus_ids(u, "academics.certificate.view_all_campuses")
+        if allowed is not None and cert.student.campus_id not in allowed:
+            raise Http404
 
         if cert.status != Certificate.Status.REQUESTED:
             return Response({"detail": f"Cannot issue from status {cert.status}."},
@@ -1719,6 +1778,9 @@ class CertificateRejectView(APIView):
             cert = Certificate.objects.get(pk=pk)
         except Certificate.DoesNotExist as e:
             raise Http404 from e
+        allowed = _record_campus_ids(u, "academics.certificate.view_all_campuses")
+        if allowed is not None and cert.student.campus_id not in allowed:
+            raise Http404
         if cert.status != Certificate.Status.REQUESTED:
             return Response({"detail": "Only pending requests can be rejected."},
                             status=http.HTTP_400_BAD_REQUEST)
@@ -1908,6 +1970,10 @@ class AlumniDetailView(APIView):
         u = request.user
         is_self = (a.student.user_account_id == u.id)
         if u.is_superuser or has_perm(u, "academics.alumni.edit"):
+            # Same campus scope as GET.
+            allowed = _record_campus_ids(u, "academics.alumni.view_all_campuses")
+            if not is_self and allowed is not None and a.student.campus_id not in allowed:
+                raise Http404
             s = AlumniRecordSerializer(a, data=request.data, partial=True)
         elif is_self:
             s = AlumniSelfUpdateSerializer(a, data=request.data, partial=True)
@@ -2509,7 +2575,16 @@ class LessonDetailView(APIView):
             raise Http404 from e
 
     def get(self, request, pk):
-        return Response(LessonSerializer(self._obj(pk)).data)
+        lesson = self._obj(pk)
+        u = request.user
+        # Same gate + campus scope as the list: owners, and viewers whose
+        # campus scope covers the batch (students have neither).
+        if not (_is_lesson_owner(u, lesson)
+                or (has_perm(u, "academics.lesson.view")
+                    and (has_perm(u, "academics.lesson.view_all")
+                         or u.campuses.filter(pk=lesson.batch.campus_id).exists()))):
+            raise Http404
+        return Response(LessonSerializer(lesson).data)
 
     def patch(self, request, pk):
         lesson = self._obj(pk)

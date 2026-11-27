@@ -1,5 +1,6 @@
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
+from django.db.models import Q
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -210,6 +211,21 @@ class MeUpdateSerializer(serializers.ModelSerializer):
         if qs.exists():
             raise serializers.ValidationError(
                 "Another account already uses this email.",
+            )
+        # Leave / comp-off / daily-report approvals match the approver on
+        # email (apps.leaves.permissions.manager_emails), so taking a
+        # colleague's HR address as your login email would make you their
+        # approver. Only HR edits employee emails.
+        from apps.employees.models import Employee
+
+        own_emp_id = getattr(getattr(self.instance, "employee", None), "pk", None)
+        taken = Employee.objects.filter(
+            Q(email_primary__iexact=value) | Q(email_alternate__iexact=value),
+        ).exclude(pk=own_emp_id)
+        if taken.exists():
+            raise serializers.ValidationError(
+                "This email belongs to an employee record and cannot be "
+                "used as your login email.",
             )
         return value
 

@@ -645,6 +645,9 @@ class DailyReportAccessDecideView(APIView):
         if not (is_manager_for(u, req) or u.is_superuser):
             return Response({"detail": "Only the applicant's reporting manager can decide."},
                             status=http.HTTP_403_FORBIDDEN)
+        if req.user_id == u.id:
+            return Response({"detail": "You cannot decide your own request."},
+                            status=http.HTTP_403_FORBIDDEN)
         s = DailyReportAccessDecisionSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         approve = s.validated_data["approve"]
@@ -737,6 +740,8 @@ class CourseEndReportListCreateView(APIView):
             qs = qs.filter(subject_id=v)
         if v := params.get("hod_status"):
             qs = qs.filter(hod_status=v)
+        if v := params.get("report_type"):
+            qs = qs.filter(report_type=v)
         if wants_csv(request):
             # "Module End Reports.csv" — every matching row, same
             # visibility rule as the list (own rows without a view_all key).
@@ -748,6 +753,7 @@ class CourseEndReportListCreateView(APIView):
                     yield [
                         fmt_date(r.completed_on), r.batch.program.name,
                         r.batch.name, f"{r.subject.name} ({r.subject.code})",
+                        r.get_report_type_display(),
                         r.instructor.full_name, r.instructor.emp_code,
                         r.avg_attendance_pct if r.avg_attendance_pct is not None else "",
                         r.avg_marks_pct if r.avg_marks_pct is not None else "",
@@ -758,8 +764,8 @@ class CourseEndReportListCreateView(APIView):
                         fmt_date(r.created_at),
                     ]
             return csv_response("Module End Reports.csv", [
-                "Completed on", "Program", "Batch", "Subject", "Instructor",
-                "Emp Code", "Avg attendance %", "Avg marks %", "Summary",
+                "Completed on", "Program", "Batch", "Subject", "Type",
+                "Instructor", "Emp Code", "Avg attendance %", "Avg marks %", "Summary",
                 "Learning outcomes", "Challenges", "Suggestions", "HOD status",
                 "HOD remarks", "Reviewed on", "Reviewed by", "Submitted on",
             ], rows())
@@ -812,6 +818,11 @@ class CourseEndReportReviewView(APIView):
         if not has_perm(u, needed):
             return Response({"detail": "Permission denied."},
                             status=http.HTTP_403_FORBIDDEN)
+        # An HOD who also teaches must not sign off their own report.
+        me = getattr(u, "employee", None)
+        if me is not None and obj.instructor_id == me.pk and not u.is_superuser:
+            return Response({"detail": "You cannot review your own report."},
+                            status=http.HTTP_403_FORBIDDEN)
         obj.hod_status = s.validated_data["hod_status"]
         obj.hod_remarks = s.validated_data.get("hod_remarks", "")
         obj.hod_reviewed_at = timezone.now()
@@ -820,6 +831,57 @@ class CourseEndReportReviewView(APIView):
             "hod_status", "hod_remarks", "hod_reviewed_at",
             "hod_reviewed_by", "updated_at",
         ])
+        return Response(CourseEndReportSerializer(obj).data)
+
+
+class CourseEndReportResubmitView(APIView):
+    """Author fixes a RETURNED report and sends it back for review.
+
+    Only a report the HOD has returned can be resubmitted, and only by
+    its own instructor (or an `edit_any` holder). The edited fields are
+    saved and the report goes back to PENDING, so the HOD sees it in
+    their queue again. The earlier HOD remarks stay on the row as the
+    reason for the rework; the review timestamp/reviewer are cleared
+    because the new version has not been reviewed yet.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    # Content the author may rewrite. Who / what / which batch the report
+    # is about stays fixed — a different subject is a different report.
+    EDITABLE = (
+        "completed_on", "report_type", "summary", "learning_outcomes",
+        "challenges", "suggestions", "avg_attendance_pct", "avg_marks_pct",
+    )
+
+    def post(self, request, pk):
+        u = request.user
+        try:
+            obj = CourseEndReport.objects.select_related(
+                "instructor", "subject", "batch", "batch__program",
+            ).get(pk=pk)
+        except CourseEndReport.DoesNotExist as e:
+            raise Http404 from e
+        emp = _emp_of(u)
+        own = bool(emp and obj.instructor_id == emp.id
+                   and has_perm(u, "audit.course_end.submit"))
+        if not (own or has_perm(u, "audit.course_end.edit_any")):
+            return Response({"detail": "You can only resend your own report."},
+                            status=http.HTTP_403_FORBIDDEN)
+        if obj.hod_status != "RETURNED":
+            return Response(
+                {"detail": "Only a report returned by the HOD can be edited "
+                           "and resent."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+        data = {k: v for k, v in request.data.items() if k in self.EDITABLE}
+        s = CourseEndReportSerializer(obj, data=data, partial=True)
+        s.is_valid(raise_exception=True)
+        s.save(
+            hod_status="PENDING",
+            hod_reviewed_at=None,
+            hod_reviewed_by=None,
+        )
         return Response(CourseEndReportSerializer(obj).data)
 
 

@@ -1,7 +1,11 @@
 """Entrance-exam serializers. Mirrors the academics Test serializers
 (apps/academics/serializers.py:405-545), retargeted to leads.Lead."""
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
+
+from apps.common.file_validation import PHOTO_OR_PDF_MIMES, validate_file
+from apps.common.media_urls import signed_media_url
 
 from .exam_models import (
     EntranceExam, EntranceExamAttachment, EntranceExamAttempt,
@@ -24,7 +28,7 @@ class EntranceExamAttachmentSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         if not obj.file:
             return None
-        return request.build_absolute_uri(obj.file.url) if request else obj.file.url
+        return signed_media_url(request, obj.file, download_name=obj.original_name)
 
 
 class UploadAttachmentSerializer(serializers.Serializer):
@@ -42,6 +46,15 @@ class UploadAttachmentSerializer(serializers.Serializer):
         if f.size > EntranceExamAttachment.MAX_BYTES:
             mb = EntranceExamAttachment.MAX_BYTES // (1024 * 1024)
             raise serializers.ValidationError(f"File exceeds {mb} MB.")
+        # Unauthenticated upload: the extension says nothing about the
+        # bytes. Refuse anything that is not really a PDF / photo.
+        try:
+            validate_file(
+                f, allowed_mimes=PHOTO_OR_PDF_MIMES,
+                max_size_bytes=EntranceExamAttachment.MAX_BYTES, field="file",
+            )
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(e.message_dict.get("file", e.messages))
         return f
 
 
@@ -51,6 +64,13 @@ class EntranceExamQuestionSerializer(serializers.ModelSerializer):
         fields = ["id", "exam", "description", "type", "options",
                   "answer_key", "marks", "sort_order"]
         read_only_fields = ["id"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # A question stays in the exam it was created in; ownership is
+        # checked on the source exam only.
+        if self.instance is not None:
+            self.fields["exam"].read_only = True
 
     def validate(self, attrs):
         qtype = attrs.get("type") or getattr(self.instance, "type", "")

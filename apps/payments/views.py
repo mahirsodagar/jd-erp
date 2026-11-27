@@ -444,7 +444,9 @@ class SmartGatewayStatusView(APIView):
     so nobody mistakes a test payment for a real one.
     """
 
-    permission_classes = [IsAuthenticated]
+    # Merchant / account configuration is for the staff who send fee
+    # links, not every login (students included).
+    permission_classes = [IsAuthenticated, CanViewPaymentRequests]
 
     def get(self, request):
         enabled = is_enabled()

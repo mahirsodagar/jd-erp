@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.core.validators import RegexValidator
 from django.db import models
+from apps.common.upload_paths import student_document_path, student_photo_path
 
 
 PHONE = RegexValidator(
@@ -163,7 +164,7 @@ class Student(models.Model):
     mother_occupation = models.CharField(max_length=120, blank=True)
 
     # Photo
-    photo = models.ImageField(upload_to="students/photos/", blank=True, null=True)
+    photo = models.ImageField(upload_to=student_photo_path, blank=True, null=True)
 
     # Consent captured on the public application form. Stamped once, when
     # the student first ticks each box, and never cleared — the form is a
@@ -247,7 +248,7 @@ class StudentDocument(models.Model):
     percent_obtained = models.DecimalField(
         max_digits=5, decimal_places=2, null=True, blank=True,
     )
-    file = models.FileField(upload_to="students/docs/", null=True, blank=True)
+    file = models.FileField(upload_to=student_document_path, null=True, blank=True)
 
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True,

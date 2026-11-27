@@ -3,6 +3,10 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import models
 from django.utils.text import slugify
+from apps.common.upload_paths import (
+    campus_image_path, institute_handbook_path, institute_logo_path,
+    institute_signature_path,
+)
 
 
 class InstituteDeletionRefused(Exception):
@@ -37,7 +41,7 @@ class Institute(models.Model):
     name = models.CharField(max_length=160, unique=True)
     code = models.CharField(max_length=20, unique=True)
     logo = models.ImageField(
-        upload_to="institute/logos/", blank=True, null=True,
+        upload_to=institute_logo_path, blank=True, null=True,
         help_text="Used on ID cards and printed reports.",
     )
     email_domain = models.CharField(
@@ -72,7 +76,7 @@ class Institute(models.Model):
         ),
     )
     signature = models.ImageField(
-        upload_to="institute/signatures/", blank=True, null=True,
+        upload_to=institute_signature_path, blank=True, null=True,
         help_text="Authorised signatory's signature. Not printed on any "
                   "document at present (the Fee Payment Schedule and receipts "
                   "are issued unsigned); kept for future letters.",
@@ -104,7 +108,7 @@ class Institute(models.Model):
     # this file; with no file the send is refused rather than mailing a
     # body that promises an attachment it doesn't carry.
     handbook_pdf = models.FileField(
-        upload_to="institute/handbooks/", blank=True, null=True,
+        upload_to=institute_handbook_path, blank=True, null=True,
         help_text="Student handbook PDF emailed to every student after "
                   "enrolment via 'Send handbook'.",
     )
@@ -215,7 +219,7 @@ class Campus(models.Model):
         help_text="Second contact number (staff cards print both).",
     )
     image = models.ImageField(
-        upload_to="campus/images/", blank=True, null=True,
+        upload_to=campus_image_path, blank=True, null=True,
         help_text="Shown on the dashboard campus cards (PHP `campus_img`).",
     )
     is_active = models.BooleanField(default=True)

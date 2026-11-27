@@ -261,6 +261,11 @@ CATALOGUE = [
     ("leads", "leads.pool.delete", "Remove a counsellor"),
     ("leads", "leads.escalation.receive", "Receive alerts about overdue hot leads"),
 
+    # Email Inbox — leads read from leads@ over IMAP (apps/leads/mail_*.py)
+    ("leads", "leads.mail.view", "See the Email Inbox (lead emails and what became of them)"),
+    ("leads", "leads.mail.manage", "Retry, ignore or hand-create leads from the Email Inbox; fetch now"),
+    ("leads", "leads.mail.rules", "Edit email routing rules (sender → source / campus / parser)"),
+
     # Lead reports — split so revenue and staff rankings are not on the
     # same checkbox as a duplicate-phone count.
     ("leads", "leads.report.funnel", "See the conversion funnel, summary and time-per-stage"),
@@ -374,6 +379,7 @@ CATALOGUE = [
     ("academics", "academics.marks.edit_published", "Edit marks after they are published"),
     ("academics", "academics.marks.publish", "Publish marks to students"),
     ("academics", "academics.marks.unpublish", "Retract published marks"),
+    ("academics", "academics.marks.view_all_campuses", "See and enter marks for every campus, not just mine"),
     ("academics", "academics.transcript.view_any", "See any student's transcript"),
     ("academics", "academics.transcript.view_drafts", "Include unpublished marks in transcripts"),
 
@@ -534,9 +540,9 @@ CATALOGUE = [
     # tile rather than leaking anything.
     ("dashboard", "dashboard.sessions.view", "See my sessions for today"),
     ("dashboard", "dashboard.sessions.view_all", "See everyone's sessions for today"),
-    # The count tile in the stat row, split from the strip above so a
-    # role can have one without the other. Scope follows `view_all`.
-    ("dashboard", "dashboard.sessions_count.view", "See the Today's Sessions count tile"),
+    # `dashboard.sessions_count.view` (the Today's Sessions count tile)
+    # was dropped with the tile on 2026-11-27; the sessions table shows
+    # the count in its heading.
     ("dashboard", "dashboard.leads.view", "See lead stats and the priority review list"),
     # Own-data counterpart to the tile above: counts only leads whose
     # `assign_to` is the caller, so a counsellor can be given their own
@@ -694,7 +700,6 @@ FACULTY_PERMISSION_KEYS = [
     # other tile (leads / enrolments / students / engagement) is granted
     # explicitly from the Roles page.
     "dashboard.sessions.view",
-    "dashboard.sessions_count.view",
     "dashboard.my_work.view",
     # Their own self-appraisal (submit + view).
     "audit.self_appraisal.view_own",

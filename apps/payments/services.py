@@ -336,8 +336,7 @@ def installment_request_for(
             and existing.account == route.account
         ):
             return existing
-        existing.status = PaymentRequest.Status.CANCELLED
-        existing.save(update_fields=["status", "updated_on"])
+        cancel_request(existing)
 
     student = installment.enrollment.student
     return PaymentRequest.objects.create(
@@ -399,8 +398,7 @@ def other_fee_request_for(
             and existing.account == route.account
         ):
             return existing
-        existing.status = PaymentRequest.Status.CANCELLED
-        existing.save(update_fields=["status", "updated_on"])
+        cancel_request(existing)
 
     student = other_fee.enrollment.student
     return PaymentRequest.objects.create(
@@ -496,6 +494,22 @@ def start_or_resume_order(payment_request: PaymentRequest) -> PaymentOrder:
             return latest
         order = _new_order(payment_request)
         return _mint_razorpay_link(payment_request, order)
+
+    # SmartGateway has no "cancel order" call, so before minting a second
+    # page re-read the previous one: if the student paid it in the window
+    # our clock already wrote off, hand that back instead of a new page
+    # that could be paid a second time.
+    if latest is not None and not latest.is_terminal:
+        try:
+            reconcile_order(latest)
+            latest.refresh_from_db()
+        except PaymentGatewayError as e:
+            logger.warning(
+                "payments: could not re-check order %s before replacing it: %s",
+                latest.order_id, e,
+            )
+        if latest.is_paid:
+            return latest
 
     order = _new_order(payment_request)
     return _mint_smartgateway_session(payment_request, order)
@@ -891,11 +905,25 @@ def apply_order_body(order: PaymentOrder, body: dict) -> PaymentOrder:
     The one place order state is written, shared by the webhook, the
     return_url handler and the reconcile command so all three produce
     identical results. Idempotent: re-applying a CHARGED body is a no-op.
+
+    The order and its request are row-locked for the transaction so the
+    webhook and the return_url handler (which routinely arrive within
+    the same second) cannot both see "unpaid" and book two receipts.
     """
-    if order.is_paid:
-        return order
+    order = (
+        PaymentOrder.objects.select_for_update()
+        .select_related("request")
+        .get(pk=order.pk)
+    )
+    PaymentRequest.objects.select_for_update().filter(pk=order.request_id).first()
 
     status = str(body.get("status") or "").upper()
+    refunded = status in PaymentOrder.REFUND_STATUSES or body.get("refunded") is True
+    if order.is_paid:
+        if refunded:
+            _reverse_settlement(order, body, status)
+        return order
+
     valid = set(PaymentOrder.Status.values)
     if status and status not in valid:
         logger.warning(
@@ -937,8 +965,17 @@ def apply_order_body(order: PaymentOrder, body: dict) -> PaymentOrder:
     if not order.is_paid:
         return order
 
-    # Settle the parent request exactly once.
+    # Money moved. Before booking it, make sure it is the payment we
+    # asked for; anything else is flagged for Accounts, never auto-booked.
     payment_request = order.request
+    note = _settlement_review_note(order, payment_request, body)
+    if note:
+        order.review_note = note[:300]
+        order.save(update_fields=["review_note", "updated_on"])
+        logger.error("payments: order %s NOT settled — %s", order.order_id, note)
+        return order
+
+    # Settle the parent request exactly once.
     if payment_request.status != PaymentRequest.Status.PAID:
         payment_request.status = PaymentRequest.Status.PAID
         payment_request.paid_order = order
@@ -965,6 +1002,88 @@ def apply_order_body(order: PaymentOrder, body: dict) -> PaymentOrder:
         transaction.on_commit(lambda: _maybe_autosend_application_link(lead))
 
     return order
+
+
+def cancel_request(payment_request: PaymentRequest) -> None:
+    """Retire a request that is being replaced (amount / route changed).
+
+    Razorpay links can be cancelled at the gateway, so the old link dies
+    outright. SmartGateway sessions cannot; a payment on one lands in
+    `apply_order_body`, which sees the CANCELLED request and flags the
+    order for Accounts instead of booking it.
+    """
+    payment_request.status = PaymentRequest.Status.CANCELLED
+    payment_request.save(update_fields=["status", "updated_on"])
+    if payment_request.gateway == routing.GATEWAY_RAZORPAY:
+        latest = payment_request.orders.order_by("-created_on").first()
+        if latest is not None:
+            _retire_razorpay_link(latest)
+
+
+def _settlement_review_note(order, payment_request, body: dict) -> str:
+    """Why a paid order must NOT be auto-booked, or "" when it is fine."""
+    gw_amount = body.get("amount")
+    if gw_amount not in (None, ""):
+        try:
+            gw = Decimal(str(gw_amount))
+        except (ArithmeticError, ValueError):
+            gw = None
+        if gw is not None and abs(gw - Decimal(order.amount)) > Decimal("0.01"):
+            return (f"Gateway reports {gw} but the order was for {order.amount}; "
+                    f"not booked.")
+    if payment_request.status == PaymentRequest.Status.CANCELLED:
+        return ("Paid against a CANCELLED request (the fee or link was "
+                "replaced after this payment page was issued); not booked. "
+                "Refund or adjust manually.")
+    if (payment_request.status == PaymentRequest.Status.PAID
+            and payment_request.paid_order_id not in (None, order.pk)):
+        return (f"Second payment on a request already settled by order "
+                f"{payment_request.paid_order.order_id}; not booked. Refund.")
+    return ""
+
+
+def _reverse_settlement(order: PaymentOrder, body: dict, status: str) -> None:
+    """A paid order was refunded / voided at the gateway: undo what
+    `apply_order_body` booked so the fee shows as due again."""
+    from apps.fees.models import FeeReceipt
+
+    now = timezone.now()
+    order.status = (status or PaymentOrder.Status.AUTO_REFUNDED)[:24]
+    order.last_payload = body
+    order.review_note = (
+        f"Refunded at the gateway on {now:%Y-%m-%d}; receipt cancelled and "
+        f"the fee reopened."
+    )[:300]
+    order.save(update_fields=["status", "last_payload", "review_note", "updated_on"])
+
+    FeeReceipt.objects.filter(
+        instrument_ref=order.order_id, status=FeeReceipt.Status.ACTIVE,
+    ).update(
+        status=FeeReceipt.Status.CANCELLED, cancelled_on=now,
+        cancellation_reason=f"Refunded at the payment gateway (order {order.order_id}).",
+    )
+
+    payment_request = order.request
+    if payment_request.paid_order_id == order.pk:
+        payment_request.status = PaymentRequest.Status.PENDING
+        payment_request.paid_order = None
+        payment_request.paid_at = None
+        payment_request.save(update_fields=["status", "paid_order", "paid_at", "updated_on"])
+
+    lead = payment_request.lead
+    if lead is not None and lead.application_fee_ref in (order.txn_id, order.order_id):
+        lead.application_fee_paid_at = None
+        lead.application_fee_amount = None
+        lead.application_fee_mode = ""
+        lead.application_fee_ref = ""
+        lead.application_fee_notes = f"Online payment {order.order_id} was refunded."
+        lead.application_fee_recorded_by = None
+        lead.save(update_fields=[
+            "application_fee_paid_at", "application_fee_amount",
+            "application_fee_mode", "application_fee_ref",
+            "application_fee_notes", "application_fee_recorded_by",
+        ])
+    logger.warning("payments: order %s refunded — settlement reversed.", order.order_id)
 
 
 def reconcile_order(order: PaymentOrder) -> PaymentOrder:

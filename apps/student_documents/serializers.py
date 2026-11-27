@@ -1,5 +1,8 @@
 from rest_framework import serializers
 
+from apps.common.file_validation import PHOTO_OR_PDF_MIMES, SecureFileField
+from apps.common.media_urls import signed_media_url
+
 from .models import DocumentRequest
 
 
@@ -34,8 +37,7 @@ class DocumentRequestSerializer(serializers.ModelSerializer):
         if not obj.attachment:
             return None
         request = self.context.get("request")
-        return (request.build_absolute_uri(obj.attachment.url)
-                if request else obj.attachment.url)
+        return signed_media_url(request, obj.attachment)
 
 
 class PortalDocumentRequestSerializer(serializers.ModelSerializer):
@@ -58,8 +60,7 @@ class PortalDocumentRequestSerializer(serializers.ModelSerializer):
         if not obj.attachment:
             return None
         request = self.context.get("request")
-        return (request.build_absolute_uri(obj.attachment.url)
-                if request else obj.attachment.url)
+        return signed_media_url(request, obj.attachment)
 
 
 # Study Certificate withdrawn on client request (2026-11-25); the enum
@@ -83,4 +84,8 @@ class DecideDocumentSerializer(serializers.Serializer):
                                                 ("REJECTED", "Rejected")])
     remarks = serializers.CharField(required=False, allow_blank=True,
                                     max_length=2000)
-    attachment = serializers.FileField(required=False, allow_null=True)
+    # Shown to the student in the portal: PDF or image bytes only.
+    attachment = SecureFileField(
+        allowed_mimes=PHOTO_OR_PDF_MIMES, max_size_mb=10,
+        required=False, allow_null=True,
+    )

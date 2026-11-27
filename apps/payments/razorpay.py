@@ -400,7 +400,18 @@ def verify_callback_signature(params: dict, account: str = "") -> bool:
     if not secret or not received or not all(parts):
         return False
     expected = _hmac_hex(secret, "|".join(parts).encode("utf-8"))
-    return hmac.compare_digest(expected, received)
+    return _ct_equal(expected, received)
+
+
+def _ct_equal(a, b) -> bool:
+    """Constant-time compare on UTF-8 bytes; a non-ASCII str would make
+    `hmac.compare_digest` raise instead of returning False."""
+    try:
+        return hmac.compare_digest(
+            str(a or "").encode("utf-8"), str(b or "").encode("utf-8"),
+        )
+    except (TypeError, UnicodeError):
+        return False
 
 
 def verify_webhook_signature(raw_body: bytes, signature: str) -> bool:
@@ -428,5 +439,5 @@ def verify_webhook_signature(raw_body: bytes, signature: str) -> bool:
     ok = False
     for secret in secrets:
         # Every secret is tried, so timing doesn't reveal which matched.
-        ok = hmac.compare_digest(_hmac_hex(secret, raw_body), signature) or ok
+        ok = _ct_equal(_hmac_hex(secret, raw_body), signature) or ok
     return ok

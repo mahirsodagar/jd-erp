@@ -1,3 +1,4 @@
+from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -38,10 +39,10 @@ class RoleDetailView(APIView):
     perm_base = "roles.role"
 
     def get(self, request, pk):
-        return Response(RoleSerializer(Role.objects.get(pk=pk)).data)
+        return Response(RoleSerializer(get_object_or_404(Role, pk=pk)).data)
 
     def patch(self, request, pk):
-        role = Role.objects.get(pk=pk)
+        role = get_object_or_404(Role, pk=pk)
         serializer = RoleSerializer(role, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         role = serializer.save()
@@ -49,7 +50,7 @@ class RoleDetailView(APIView):
         return Response(RoleSerializer(role).data)
 
     def delete(self, request, pk):
-        role = Role.objects.get(pk=pk)
+        role = get_object_or_404(Role, pk=pk)
         if role.is_system:
             return Response(
                 {"detail": "System roles cannot be deleted."},

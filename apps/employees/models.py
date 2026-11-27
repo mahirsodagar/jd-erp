@@ -2,6 +2,9 @@ from django.conf import settings
 from django.core.validators import RegexValidator
 from django.db import models
 from django.utils import timezone
+from apps.common.upload_paths import (
+    employee_document_path, employee_photo_path, employee_qr_path,
+)
 
 
 PHONE_VALIDATOR = RegexValidator(
@@ -193,8 +196,8 @@ class Employee(models.Model):
     email_alternate = models.EmailField(blank=True)
 
     # Media
-    photo = models.ImageField(upload_to="employees/photos/", blank=True, null=True)
-    qr_code = models.ImageField(upload_to="employees/qr/", blank=True, null=True)
+    photo = models.ImageField(upload_to=employee_photo_path, blank=True, null=True)
+    qr_code = models.ImageField(upload_to=employee_qr_path, blank=True, null=True)
 
     # Status / soft delete
     status = models.PositiveSmallIntegerField(
@@ -292,7 +295,7 @@ class EmployeeDocument(models.Model):
     )
     # Human-readable label, e.g. "Aadhaar card", "Degree certificate".
     name = models.CharField(max_length=160)
-    file = models.FileField(upload_to="employees/documents/")
+    file = models.FileField(upload_to=employee_document_path)
 
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True,

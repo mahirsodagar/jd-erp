@@ -1,5 +1,8 @@
 from django.conf import settings
 from django.db import models
+from apps.common.upload_paths import (
+    assignment_attachment_path, assignment_image_path, submission_path,
+)
 
 
 class ScheduleSlot(models.Model):
@@ -186,11 +189,11 @@ class Assignment(models.Model):
     max_marks = models.DecimalField(max_digits=5, decimal_places=1)
     due_date = models.DateTimeField()
     attachment = models.FileField(
-        upload_to="assignments/", blank=True, null=True,
+        upload_to=assignment_attachment_path, blank=True, null=True,
     )
     # Cover image shown on the assignment grid card.
     image = models.ImageField(
-        upload_to="assignments/images/", blank=True, null=True,
+        upload_to=assignment_image_path, blank=True, null=True,
     )
 
     is_published = models.BooleanField(
@@ -237,7 +240,7 @@ class AssignmentSubmission(models.Model):
         related_name="assignment_submissions",
     )
 
-    file = models.FileField(upload_to="submissions/", blank=True, null=True)
+    file = models.FileField(upload_to=submission_path, blank=True, null=True)
     text_response = models.TextField(blank=True)
 
     submitted_at = models.DateTimeField(null=True, blank=True)

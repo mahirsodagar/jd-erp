@@ -3,6 +3,7 @@ import logging
 from django.conf import settings as dj_settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
+from django.shortcuts import get_object_or_404
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 from rest_framework import status
@@ -30,6 +31,7 @@ from apps.common.throttles import (
 )
 
 from .permissions import HasPerm, has_perm
+from .tokens import revoke_all_refresh_tokens
 from .serializers import (
     AdminResetPasswordSerializer,
     ChangePasswordSerializer,
@@ -122,7 +124,14 @@ class ChangePasswordView(APIView):
         request.user.save(update_fields=["password"])
         sync_portal_password(request.user, new_pw)
         record_password_change(request, user=request.user)
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        # Every other device is signed out; this one continues on a
+        # fresh token pair returned here (the SPA swaps them in).
+        revoke_all_refresh_tokens(request.user)
+        refresh = RefreshToken.for_user(request.user)
+        return Response(
+            {"tokens": {"access": str(refresh.access_token), "refresh": str(refresh)}},
+            status=status.HTTP_200_OK,
+        )
 
 
 class UserListCreateView(APIView):
@@ -157,6 +166,20 @@ class UserListCreateView(APIView):
         )
 
     def post(self, request):
+        # Creating a user with roles / is_staff / campuses needs the same
+        # per-field keys as granting them on PATCH (UserDetailView), or
+        # `accounts.user.add` alone would mint an account with any role.
+        sent = set(request.data.keys())
+        needed = {
+            perm for field, perm in UserDetailView._FIELD_PERMS.items()
+            if field in sent and request.data.get(field) not in (None, "", [], False)
+        }
+        missing = sorted(p for p in needed if not has_perm(request.user, p))
+        if missing:
+            return Response(
+                {"detail": f"Missing permission(s): {', '.join(missing)}."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         serializer = UserCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
@@ -197,11 +220,25 @@ class UserDetailView(APIView):
 
     def get(self, request, pk):
         return Response(UserSerializer(
-            User.objects.get(pk=pk), context={"request": request},
+            get_object_or_404(User, pk=pk), context={"request": request},
         ).data)
 
+    @staticmethod
+    def _guard_superuser(request, target):
+        """Only a superuser may alter a superuser's account — otherwise
+        `accounts.user.edit` could change their email / deactivate them
+        and take the account over via forgot-password."""
+        if target.is_superuser and not request.user.is_superuser:
+            return Response(
+                {"detail": "Only a superuser can modify a superuser account."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
     def patch(self, request, pk):
-        user = User.objects.get(pk=pk)
+        user = get_object_or_404(User, pk=pk)
+        if (denied := self._guard_superuser(request, user)) is not None:
+            return denied
         sent = set(request.data.keys())
 
         needed = {
@@ -219,12 +256,19 @@ class UserDetailView(APIView):
         serializer = UserUpdateSerializer(user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
+        if "is_active" in sent and not user.is_active:
+            revoke_all_refresh_tokens(user)
         return Response(UserSerializer(user, context={"request": request}).data)
 
     def delete(self, request, pk):
-        user = User.objects.get(pk=pk)
+        user = get_object_or_404(User, pk=pk)
+        if (denied := self._guard_superuser(request, user)) is not None:
+            return denied
         user.is_active = False
         user.save(update_fields=["is_active"])
+        # Deactivation must end the account's live sessions too, not only
+        # block the next login.
+        revoke_all_refresh_tokens(user)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -242,7 +286,9 @@ class AdminResetPasswordView(APIView):
     required_perm = "accounts.user.reset_password"
 
     def post(self, request, pk):
-        target = User.objects.get(pk=pk)
+        target = get_object_or_404(User, pk=pk)
+        if (denied := UserDetailView._guard_superuser(request, target)) is not None:
+            return denied
         serializer = AdminResetPasswordSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         new_pw = serializer.validated_data["new_password"]
@@ -251,6 +297,9 @@ class AdminResetPasswordView(APIView):
         # Student accounts: keep the staff-visible copy on the student row.
         sync_portal_password(target, new_pw)
         record_password_reset(request, actor=request.user, target=target)
+        # An admin reset is a compromise response as often as a favour:
+        # end the account's existing sessions.
+        revoke_all_refresh_tokens(target)
 
         delivery = {
             "delivered": False,
@@ -376,6 +425,7 @@ class ResetPasswordView(APIView):
         user.save(update_fields=["password"])
         sync_portal_password(user, new_pw)
         record_password_reset_completed(request, target=user)
+        revoke_all_refresh_tokens(user)
 
         # Best-effort: tell the user their password just changed.
         if user.email:

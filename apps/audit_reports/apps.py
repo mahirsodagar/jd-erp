@@ -10,12 +10,12 @@ class AuditReportsConfig(AppConfig):
         from auditlog.registry import auditlog
         from .models import (
             AdminDailyReport, BatchMentorReport, ComplianceFlag,
-            CourseEndReport, FacultyDailyReport, FacultySelfAppraisal,
-            StudentFeedback,
+            CourseEndReport, DailyReportAccess, FacultyDailyReport,
+            FacultySelfAppraisal, StudentFeedback,
         )
         for m in (
             FacultyDailyReport, AdminDailyReport, CourseEndReport,
             BatchMentorReport, StudentFeedback, FacultySelfAppraisal,
-            ComplianceFlag,
+            ComplianceFlag, DailyReportAccess,
         ):
             auditlog.register(m)

@@ -28,7 +28,7 @@ from .serializers import (
 )
 from .services import (
     LIVE_STATUSES, StatusChangeError, can_enroll, drop_out_student,
-    sync_portal_access,
+    lock_application_form_on_enrolment, sync_portal_access,
     graduate_batch, promote_batch, reactivate_student,
     provision_student_portal_credentials,
     sync_student_placement_from_enrollment, transfer_enrollment,
@@ -366,6 +366,10 @@ class StudentDocumentDetailView(APIView):
             or is_self_student(u, doc.student)
         ):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
+        # Staff deletes follow the same campus scope as the student record.
+        if (not is_self_student(u, doc.student) and not can_view_all_campuses(u)
+                and not u.campuses.filter(pk=doc.student.campus_id).exists()):
+            raise Http404
         doc.delete()
         return Response(status=http.HTTP_204_NO_CONTENT)
 
@@ -493,6 +497,14 @@ class EnrollmentListCreateView(APIView):
         s = EnrollmentSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         student = s.validated_data["student"]
+        # Same campus scope the list / detail apply: no enrolling into a
+        # campus the caller is not assigned to.
+        target_campus = s.validated_data.get("campus")
+        u = request.user
+        if (target_campus is not None and not can_view_all_campuses(u)
+                and not u.campuses.filter(pk=target_campus.pk).exists()):
+            return Response({"detail": "Campus not in your scope."},
+                            status=http.HTTP_403_FORBIDDEN)
         ok, msg = can_enroll(student)
         if not ok:
             return Response({"detail": msg}, status=http.HTTP_400_BAD_REQUEST)
@@ -501,6 +513,10 @@ class EnrollmentListCreateView(APIView):
             # Enrolling into a different program than the one applied for
             # is allowed and common; the student profile has to follow it.
             sync_student_placement_from_enrollment(student, actor=request.user)
+            # The public application link is done once the applicant is
+            # enrolled: lock the form so the token can't keep editing the
+            # student record (2026-11-27).
+            lock_application_form_on_enrolment(student, actor=request.user)
             # A fresh live enrollment ends a dropout: portal login returns.
             sync_portal_access(student)
             # Fees paid online right after the application form become
@@ -539,8 +555,16 @@ class EnrollmentDetailView(APIView):
         if not has_perm(request.user, "admissions.enrollment.edit"):
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         obj = self._obj(pk)
+        u = request.user
+        if not can_view_all_campuses(u) and not u.campuses.filter(pk=obj.campus_id).exists():
+            raise Http404
         s = EnrollmentSerializer(obj, data=request.data, partial=True)
         s.is_valid(raise_exception=True)
+        new_campus = s.validated_data.get("campus")
+        if (new_campus is not None and not can_view_all_campuses(u)
+                and not u.campuses.filter(pk=new_campus.pk).exists()):
+            return Response({"detail": "Target campus not in your scope."},
+                            status=http.HTTP_403_FORBIDDEN)
         with transaction.atomic():
             s.save()
             sync_student_placement_from_enrollment(obj.student, actor=request.user)

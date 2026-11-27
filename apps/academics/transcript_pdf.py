@@ -5,9 +5,12 @@ Ports of the two printed documents the legacy PHP ERP produced from
 
 - `academic_transcript.php`  -> **Academic Assessment Record** (the
   transcript), re-laid out in 2026-11 on the institute's 234 x 321 mm
-  framed template: logo, program, the candidate's name / registration
-  number / centre / year, one Code / Course / Grade table per semester,
-  the A-F grade system and the scrutiny / principal signature block.
+  framed template and, from 2026-11-27, printed as ONE SHEET PER YEAR
+  OF STUDY (semesters 1+2 = Year I, 3+4 = Year II, ...): logo and
+  "Since 1988" artwork, program + year, the candidate's name /
+  registration number / centre / year, two fixed Code / Course / Grade
+  boxes, the eight-band O..F grade system and the scrutiny / principal
+  signature block.
 - `academic_report.php`      -> **Marks Card** ("Student Academic
   Record"): institute, student number + photo, name, program, batch,
   academic year, one Course / Grade table across every subject, then
@@ -54,14 +57,19 @@ PAGE_W = 210.0
 MARGIN = 15.0
 BODY_W = PAGE_W - 2 * MARGIN
 
-#: (lower bound, grade, grade points) — the Academic Transcript scale.
+#: (lower bound, grade, grade points, printed range) — the Academic
+#: Assessment Record scale. From the client's 2026-11-27 per-year
+#: template ("monal y1"): eight bands, O at the top, P = exactly 40 %.
+#: Replaces the legacy six-band A-F scale.
 TRANSCRIPT_SCALE = (
-    (90, "A", "10"),
-    (80, "B", "9"),
-    (70, "C", "8"),
-    (60, "D", "7"),
-    (50, "E", "6"),
-    (0, "F", "5"),
+    (90, "O", "10", "90% and Above"),
+    (80, "A+", "9", "80% to 89.99%"),
+    (70, "A", "8", "70% to 79.99%"),
+    (60, "B+", "7", "60% to 69.99%"),
+    (50, "B", "6", "50% to 59.99%"),
+    (41, "C", "5", "41% to 49.99%"),
+    (40, "P", "4", "40%"),
+    (0, "F", "0", "Below 40%"),
 )
 
 #: (lower bound, grade, grade points, comment) — the Marks Card scale.
@@ -140,6 +148,7 @@ def _context(student) -> dict:
     return {
         "institute": institute,
         "institute_name": institute.name if institute else "",
+        "program": program,
         "program_name": program.name if program else "",
         "campus_name": (campus.city or campus.name) if campus else "",
         "batch_name": (batch.short_name or batch.name) if batch else "",
@@ -150,25 +159,62 @@ def _context(student) -> dict:
     }
 
 
+def year_of_semester(number: int) -> int:
+    """Year of study a semester belongs to: two semesters per year."""
+    return (int(number) + 1) // 2
+
+
+def roman(n: int) -> str:
+    out = ""
+    for value, sym in ((10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")):
+        while n >= value:
+            out += sym
+            n -= value
+    return out
+
+
 def transcript_document(student, *, only_published: bool = True) -> dict:
+    """Semesters grouped by year of study. `semesters` is the flat list
+    of semesters with graded rows; `years` is what the per-year sheets
+    print: every semester the program defines for that year (so a
+    semester with nothing published yet still gets its box), for each
+    year that has at least one graded row."""
     ctx = _context(student)
-    by_sem: dict[int, dict] = {}
+    program = ctx.pop("program")
+    by_num: dict[int, dict] = {}
     for m, score in _graded_entries(student, only_published=only_published):
         sem = m.semester
-        bucket = by_sem.setdefault(sem.id, {
+        bucket = by_num.setdefault(sem.number, {
             "semester_id": sem.id,
             "semester_number": sem.number,
             "semester_name": sem.name,
             "rows": [],
         })
         bucket["rows"].append(_row(m, score, TRANSCRIPT_SCALE))
-    ctx["semesters"] = sorted(by_sem.values(),
-                              key=lambda b: b["semester_number"])
+    ctx["semesters"] = [by_num[n] for n in sorted(by_num)]
+
+    defined = set(by_num)
+    if program is not None:
+        defined |= set(program.semesters.values_list("number", flat=True))
+    years: dict[int, dict] = {}
+    for n in sorted(defined):
+        y = year_of_semester(n)
+        years.setdefault(y, {"year": y, "label": f"Year {roman(y)}",
+                             "semesters": []})
+        years[y]["semesters"].append(by_num.get(n) or {
+            "semester_id": None, "semester_number": n,
+            "semester_name": f"Semester {n}", "rows": [],
+        })
+    ctx["years"] = [
+        y for y in years.values()
+        if any(s["rows"] for s in y["semesters"])
+    ]
     return ctx
 
 
 def marks_card_document(student, *, only_published: bool = True) -> dict:
     ctx = _context(student)
+    ctx.pop("program")
     ctx["rows"] = [
         _row(m, score, MARKS_CARD_SCALE)
         for m, score in _graded_entries(student, only_published=only_published)
@@ -291,55 +337,86 @@ def _student_photo_bytes(student) -> bytes | None:
 
 # --- Academic Assessment Record (the transcript) -----------------------
 #
-# Layout from the 2026 "Academic Assessment Record" template: a
-# 234 x 321 mm sheet with a thick blue frame, a faint diagonal
-# institute-name watermark, the logo lockup centred at the top, the
-# program and record titles, the candidate block, one navy-headed
-# Code / Course / Grade table per semester, the grade system bottom-left
-# and the scrutiny / principal signature block bottom-right, closed by
-# a navy footer strip with the campus contact line.
+# Layout from the client's 2026-11-27 per-year template ("monal y1"):
+# a 234 x 321 mm sheet with a thick blue frame, a diagonal institute-name
+# watermark, the logo lockup and "Since 1988" artwork centred at the
+# top, the program + year title, the record title, the candidate block,
+# then TWO fixed-height navy-headed Subject code / Course / Grade boxes
+# (the year's two semesters), the eight-band grade system bottom-left,
+# the scrutiny / principal signature block bottom-right, and a navy
+# footer strip with the campus contact line.
+#
+# ONE SHEET PER YEAR OF STUDY (client decision 2026-11-27): Year I is
+# semesters 1 + 2, Year II is 3 + 4, and so on. Every position below is
+# measured off the template in mm; nothing floats.
 
 T_PAGE_W, T_PAGE_H = 234.0, 321.0
 T_NAVY = (24, 86, 158)
 T_BLUE = (33, 104, 178)
-T_PINK = (194, 62, 127)
-T_TEXT = (35, 45, 58)
-T_RULE = (120, 145, 170)
-T_WATERMARK = (239, 242, 246)
+T_FRAME_OUTER = (18, 62, 140)
+T_FRAME_INNER = (41, 141, 212)
+T_PINK = (221, 34, 133)
+T_TEXT = (35, 31, 32)
+T_RULE = (33, 104, 178)
+T_WATERMARK = (228, 232, 238)
 
-#: Optional "Since 1988" artwork printed beside the logo when present.
+#: "Since 1988 / Leading Change" artwork printed beside the logo
+#: (cropped from the client's template).
 _ANNIVERSARY_ART = _ASSETS / "since-1988.png"
-#: Printed under the logo lockup.
+#: Printed under the logo lockup when the institute's own logo is used
+#: (the bundled lockup already carries it).
 TRANSCRIPT_WEBSITE = "jdinstitute.edu.in"
 #: Names in the signature block. From the supplied template; change here
 #: when the scrutineer or principal changes.
 TRANSCRIPT_SCRUTINISED_BY = "Dr. Anusuya K"
 TRANSCRIPT_PRINCIPAL = "Babu Rajendra Prasadh R"
 #: Footer fallbacks when `Institute.address` / phone / email are blank.
-TRANSCRIPT_CAMPUS_ADDRESS = "#18, Edward Brigade Road, Bangalore - 560001, India."
+TRANSCRIPT_CAMPUS_ADDRESS = "#18, Edward House, Brigade Road, Bangalore - 560001, India."
 TRANSCRIPT_PHONE = "+91 80 22279927, +91 9901999903"
 TRANSCRIPT_EMAIL = "jdfashion@jdindia.com"
 
-_T_TABLE_X, _T_TABLE_W = 22.0, 190.0
-_T_ROW_H = 6.6
-_T_TABLES_TOP = 96.0
-#: Tables may run down to here; the grade / signature block is fixed below.
-_T_TABLES_BOTTOM = 240.0
-_T_CONT_TOP = 20.0   # first table on a continuation page
+# Table geometry (mm). Columns: code | course | grade.
+_T_X0, _T_X1, _T_X2, _T_X3 = 22.6, 56.4, 190.6, 212.1
+_T_STRIP_H = 6.7      # navy "SEMESTER n" strip
+_T_HEAD_H = 6.5       # Subject code / Course / Grade header band
+_T_ROW_PITCH = 5.45   # row baseline pitch at the template's five rows
+#: (top, bottom) of the two semester boxes on a sheet.
+_T_BOXES = ((105.1, 166.3), (166.3, 238.6))
+
+
+def _tx(pdf: FPDF, baseline: float, text: str, *, x: float | None = None,
+        center: float | None = None, right: float | None = None) -> None:
+    """Put `text` with its baseline at `baseline`, left at `x`, centred
+    on `center`, or ending at `right`."""
+    text = safe(text)
+    if center is not None:
+        x = center - pdf.get_string_width(text) / 2
+    elif right is not None:
+        x = right - pdf.get_string_width(text)
+    pdf.text(x or 0, baseline, text)
 
 
 def _t_page(pdf: FPDF, watermark: str) -> None:
-    """Frame, watermark and footer-less chrome shared by every page."""
+    """Frame + watermark shared by every sheet."""
     pdf.add_page()
-    pdf.set_draw_color(*T_BLUE)
-    pdf.set_line_width(4.2)
-    pdf.rect(5.5, 5.5, T_PAGE_W - 11, T_PAGE_H - 11)
+    # Watermark: diagonal lines of the institute name, as on the template.
     pdf.set_text_color(*T_WATERMARK)
-    pdf.set_font("Helvetica", "B", 8)
-    for y in range(58, 275, 18):
-        for x in range(-35, 255, 55):
-            with pdf.rotation(38, x + 20, y):
-                pdf.text(x, y, watermark)
+    pdf.set_font("Helvetica", "B", 7)
+    unit = watermark + "   "
+    # Long enough to cross the whole sheet diagonally from off-page left.
+    repeats = max(2, int(420 / max(pdf.get_string_width(unit), 1.0)) + 1)
+    line = unit * repeats
+    with pdf.rect_clip(13.6, 13.6, T_PAGE_W - 27.2, T_PAGE_H - 27.2):
+        for y in range(20, 480, 11):
+            with pdf.rotation(38, -60, y):
+                pdf.text(-60, y, line)
+    # Frame: 9.0 .. 13.6 mm, darker outside, lighter inside.
+    pdf.set_draw_color(*T_FRAME_OUTER)
+    pdf.set_line_width(2.6)
+    pdf.rect(10.3, 10.3, T_PAGE_W - 20.6, T_PAGE_H - 20.6)
+    pdf.set_draw_color(*T_FRAME_INNER)
+    pdf.set_line_width(2.0)
+    pdf.rect(12.6, 12.6, T_PAGE_W - 25.2, T_PAGE_H - 25.2)
 
 
 def _t_footer(pdf: FPDF, institute) -> None:
@@ -350,230 +427,234 @@ def _t_footer(pdf: FPDF, institute) -> None:
     phone = getattr(institute, "phone", "") or TRANSCRIPT_PHONE
     email = getattr(institute, "email", "") or TRANSCRIPT_EMAIL
     pdf.set_fill_color(*T_NAVY)
-    pdf.rect(9, 308, T_PAGE_W - 18, 7, style="F")
+    pdf.rect(13.6, 298.7, T_PAGE_W - 27.2, 13.1, style="F")
     pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Helvetica", "", 5.7)
-    pdf.set_xy(12, 309.5)
-    pdf.cell(T_PAGE_W - 24, 4,
-             safe(f"Campus: {address}    Tel: {phone}    e-mail: {email}"),
-             align="C")
+    pdf.set_font("Helvetica", "", 6)
+    text = f"Campus :  {address}         Tel:  {phone}.        e-mail : {email}"
+    _tx(pdf, 303.8, _fit(pdf, text, T_PAGE_W - 42), x=21.8)
 
 
-def _t_header(pdf: FPDF, doc: dict) -> None:
+def _t_header(pdf: FPDF, doc: dict, title: str) -> None:
     logo = _logo_file(doc["institute"])
     art = str(_ANNIVERSARY_ART) if _ANNIVERSARY_ART.is_file() else None
     try:
         if logo and art:
-            pdf.image(logo, x=79, y=10, w=30, h=27, keep_aspect_ratio=True)
+            pdf.image(logo, x=80, y=15, w=37, h=33, keep_aspect_ratio=True)
             pdf.set_draw_color(120, 130, 145)
             pdf.set_line_width(0.25)
-            pdf.line(117, 10, 117, 39)
-            pdf.image(art, x=122, y=10, w=35, h=27, keep_aspect_ratio=True)
+            pdf.line(118.8, 17.6, 118.8, 53.8)
+            pdf.image(art, x=121, y=15, w=39, h=37, keep_aspect_ratio=True)
         elif logo:
-            # No anniversary artwork on file: the logo alone, centred.
-            pdf.image(logo, x=T_PAGE_W / 2 - 25, y=10, w=50, h=27,
+            pdf.image(logo, x=T_PAGE_W / 2 - 25, y=15, w=50, h=36,
                       keep_aspect_ratio=True)
     except Exception:  # noqa: BLE001 — a corrupt logo must not 500
         pass
+    if logo and str(logo) != str(_FALLBACK_LOGO):
+        pdf.set_text_color(*T_TEXT)
+        pdf.set_font("Helvetica", "", 6.5)
+        _tx(pdf, 52.0, TRANSCRIPT_WEBSITE, center=98.5)
 
-    pdf.set_text_color(*T_NAVY)
-    pdf.set_font("Helvetica", "", 7)
-    pdf.set_xy(75, 37)
-    pdf.cell(84, 3.5, TRANSCRIPT_WEBSITE, align="C")
-
+    # Program + year of study, then the record title, each over a rule.
+    pdf.set_text_color(3, 91, 168)
     pdf.set_font("Helvetica", "B", 13)
-    pdf.set_xy(18, 46)
-    pdf.cell(T_PAGE_W - 36, 7, _fit(pdf, safe(doc["program_name"]).upper(),
-                                   T_PAGE_W - 36), align="C")
+    _tx(pdf, 63.5, _fit(pdf, title, T_PAGE_W - 40), center=T_PAGE_W / 2)
     pdf.set_draw_color(*T_NAVY)
     pdf.set_line_width(0.35)
-    pdf.line(38, 54, T_PAGE_W - 38, 54)
+    pdf.line(38.8, 65.4, 195.4, 65.4)
 
     pdf.set_text_color(*T_PINK)
-    pdf.set_font("Helvetica", "B", 14)
-    pdf.set_xy(20, 58)
-    pdf.cell(T_PAGE_W - 40, 8, "ACADEMIC ASSESSMENT RECORD", align="C")
+    pdf.set_font("Helvetica", "B", 15)
+    _tx(pdf, 75.6, "ACADEMIC ASSESSMENT RECORD", center=T_PAGE_W / 2)
     pdf.set_draw_color(*T_PINK)
-    pdf.line(38, 67, T_PAGE_W - 38, 67)
+    pdf.set_line_width(0.3)
+    pdf.line(47.6, 77.6, 185.0, 77.6)
 
-    def label(x, y, w, text):
-        pdf.set_text_color(*T_NAVY)
-        pdf.set_font("Helvetica", "B", 8)
-        pdf.set_xy(x, y)
-        pdf.cell(w, 6, text)
+    # Candidate block.
+    def label(x, baseline, text):
+        pdf.set_text_color(22, 81, 159)
+        pdf.set_font("Helvetica", "B", 8.5)
+        _tx(pdf, baseline, text, x=x)
 
-    def value(x, y, w, text, size=7.5):
+    def value(x, baseline, text, width):
         pdf.set_text_color(*T_TEXT)
-        pdf.set_font("Helvetica", "", size)
-        pdf.set_xy(x, y)
-        pdf.cell(w, 6, _fit(pdf, safe(text), w))
+        pdf.set_font("Helvetica", "", 8)
+        _tx(pdf, baseline, _fit(pdf, text, width), x=x)
 
-    label(20, 73, 42, "Name of the Candidate:")
-    value(62, 73, 145, doc["student_name"], size=8)
     pdf.set_draw_color(*T_RULE)
     pdf.set_line_width(0.2)
-    pdf.line(62, 80, 207, 80)
+    label(22.6, 88.7, "Name of the Candidate :")
+    value(72.7, 87.6, doc["student_name"].upper(), 139)
+    pdf.line(70.5, 88.2, 211.6, 88.2)
 
-    label(20, 84, 38, "Registration No.:")
-    value(58, 84, 61, doc["registration_no"])
-    label(122, 84, 20, "Centre:")
-    value(142, 84, 35, doc["campus_name"])
-    label(179, 84, 15, "Year:")
-    value(194, 84, 25, doc["academic_year"])
-    pdf.line(20, 91, 219, 91)
+    label(22.6, 100.2, "Registration No.")
+    label(57.5, 100.2, ":")
+    value(61.7, 99.1, doc["registration_no"], 47)
+    pdf.line(58.0, 99.8, 109.0, 99.8)
+    label(110.2, 100.2, "Centre")
+    label(123.3, 100.2, ":")
+    value(127.9, 99.1, doc["campus_name"], 40)
+    pdf.line(125.0, 99.8, 168.0, 99.8)
+    label(168.8, 100.2, "Year")
+    label(178.0, 100.2, ":")
+    value(182.0, 99.1, doc["academic_year"], 30)
+    pdf.line(180.0, 99.8, 212.1, 99.8)
 
 
-def _t_table_height(rows: int) -> float:
-    return 7.3 + 7 + rows * _T_ROW_H
-
-
-def _t_semester_table(pdf: FPDF, title: str, rows, x: float, y: float,
-                      width: float) -> float:
-    code_w, grade_w = 36.0, 28.0
-    course_w = width - code_w - grade_w
-    pdf.set_draw_color(0, 0, 0)
-    pdf.set_line_width(0.2)
+def _t_semester_box(pdf: FPDF, title: str, rows, top: float, bottom: float) -> None:
+    """One fixed-height navy-headed box. Rows have no horizontal rules;
+    the pitch (then the font) shrinks when a semester carries more
+    subjects than the template's five-row spacing fits."""
+    pdf.set_draw_color(*T_RULE)
+    pdf.set_line_width(0.25)
     pdf.set_fill_color(*T_NAVY)
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_xy(x, y)
-    pdf.cell(width, 7.3, safe(title), border=1, fill=True, align="C")
-    y += 7.3
+    pdf.rect(_T_X0, top, _T_X3 - _T_X0, _T_STRIP_H, style="F")
+    pdf.rect(_T_X0, top, _T_X3 - _T_X0, bottom - top)
+    head_bottom = top + _T_STRIP_H + _T_HEAD_H
+    pdf.line(_T_X0, head_bottom, _T_X3, head_bottom)
+    pdf.line(_T_X1, top + _T_STRIP_H, _T_X1, bottom)
+    pdf.line(_T_X2, top + _T_STRIP_H, _T_X2, bottom)
 
-    pdf.set_fill_color(245, 248, 252)
-    pdf.set_text_color(*T_NAVY)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 9.5)
+    _tx(pdf, top + 5.0, title, center=(_T_X0 + _T_X3) / 2)
+
+    pdf.set_text_color(0, 79, 159)
     pdf.set_font("Helvetica", "B", 7.6)
-    pdf.set_xy(x, y)
-    pdf.cell(code_w, 7, "Subject code", border=1, fill=True)
-    pdf.cell(course_w, 7, "Course", border=1, fill=True)
-    pdf.cell(grade_w, 7, "Grade", border=1, fill=True, align="C")
-    y += 7
+    head_base = head_bottom - 1.9
+    _tx(pdf, head_base, "Subject code", x=_T_X0 + 4.0)
+    _tx(pdf, head_base, "Course", x=_T_X1 + 4.0)
+    _tx(pdf, head_base, "Grade", center=(_T_X2 + _T_X3) / 2)
 
-    pdf.set_text_color(*T_TEXT)
-    pdf.set_font("Helvetica", "", 7.6)
+    if not rows:
+        return
+    avail = bottom - head_bottom
+    pitch = min(_T_ROW_PITCH, (avail - 2.0) / len(rows))
+    size = 7.6 if pitch >= 4.0 else max(5.0, 7.6 * pitch / 4.0)
+    pdf.set_font("Helvetica", "", size)
+    # First baseline sits a little lower than one pitch (template: 10.8
+    # mm under the header rule at the 5.45 pitch).
+    baseline = head_bottom + min(10.8, pitch + 2.0) - (_T_ROW_PITCH - pitch) * 0.4
     for code, course, grade in rows:
-        pdf.set_xy(x, y)
-        pdf.cell(code_w, _T_ROW_H, _fit(pdf, safe(code), code_w), border=1)
-        pdf.cell(course_w, _T_ROW_H, _fit(pdf, safe(course), course_w),
-                 border=1)
-        pdf.cell(grade_w, _T_ROW_H, safe(grade), border=1, align="C")
-        y += _T_ROW_H
-    return y
+        pdf.set_text_color(*T_TEXT)
+        _tx(pdf, baseline, _fit(pdf, code, _T_X1 - _T_X0 - 6), x=_T_X0 + 4.0)
+        _tx(pdf, baseline, _fit(pdf, course, _T_X2 - _T_X1 - 8), x=_T_X1 + 4.0)
+        pdf.set_text_color(0, 0, 0)
+        _tx(pdf, baseline, grade, center=(_T_X2 + _T_X3) / 2)
+        baseline += pitch
 
 
-def _t_grade_table(pdf: FPDF, x: float, y: float, row_h: float = 4.4) -> None:
-    widths = (18, 33, 22)
-    pdf.set_draw_color(0, 0, 0)
-    pdf.set_line_width(0.2)
-    pdf.set_fill_color(*T_NAVY)
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Helvetica", "B", 5.8)
-    pdf.set_xy(x, y)
-    for w, head in zip(widths, ("Grade", "Range", "Grade Points")):
-        pdf.cell(w, 6, head, border=1, fill=True, align="C")
-    y += 6
-    pdf.set_text_color(*T_TEXT)
-    pdf.set_font("Helvetica", "", 6)
-    for i, (lower, grade, points) in enumerate(TRANSCRIPT_SCALE):
-        upper = 100 if i == 0 else TRANSCRIPT_SCALE[i - 1][0]
-        pdf.set_xy(x, y)
-        for w, text in zip(widths, (grade, f"{lower:.2f} - {upper:.2f}", points)):
-            pdf.cell(w, row_h, text, border=1, align="C")
-        y += row_h
-
-
-#: Template position of the grade / signature block. The block floats up
-#: to sit just under the last table (2026-11-18, "reduce the gap"), and
-#: never below this.
-_T_BOTTOM_BLOCK_Y = 245.0
-_T_BOTTOM_GAP = 8.0
-
-
-def _t_bottom_block(pdf: FPDF, institute, top: float = _T_BOTTOM_BLOCK_Y) -> None:
-    """Grade system (left) and the scrutiny / principal signatures
-    (right). Laid out as on the template, shifted so the block starts
-    at `top`."""
-    dy = top - _T_BOTTOM_BLOCK_Y
-    pdf.set_text_color(*T_NAVY)
-    pdf.set_font("Helvetica", "B", 7)
-    pdf.set_xy(22, 245 + dy)
-    pdf.cell(73, 5, "GRADE SYSTEM", align="C")
-    _t_grade_table(pdf, 22, 250 + dy)
-
-    pdf.set_text_color(*T_NAVY)
-    pdf.set_font("Helvetica", "B", 7.5)
-    pdf.set_xy(145, 250 + dy)
-    pdf.cell(70, 5, "Scrutinised by")
+def _t_grade_table(pdf: FPDF) -> None:
+    x = (22.6, 34.2, 55.2, 72.3)
+    top, head_h, pitch = 262.0, 4.3, 3.56
     pdf.set_draw_color(*T_RULE)
     pdf.set_line_width(0.2)
-    pdf.line(145, 259 + dy, 215, 259 + dy)
-    pdf.set_font("Helvetica", "", 7)
-    pdf.set_xy(145, 260 + dy)
-    pdf.cell(70, 5, "Signature :")
-    pdf.set_xy(145, 268 + dy)
+    pdf.set_fill_color(*T_NAVY)
+    pdf.rect(x[0], top, x[3] - x[0], head_h, style="F")
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 4.6)
+    _tx(pdf, top + 3.1, "Grade", center=(x[0] + x[1]) / 2)
+    _tx(pdf, top + 3.1, "Range", x=x[1] + 1.9)
+    _tx(pdf, top + 3.1, "Grade Points", x=x[2] + 2.3)
+    bottom = top + head_h + pitch * len(TRANSCRIPT_SCALE)
+    pdf.rect(x[0], top, x[3] - x[0], bottom - top)
+    for xx in x[1:3]:
+        pdf.line(xx, top + head_h, xx, bottom)
+    pdf.set_text_color(22, 81, 159)
+    pdf.set_font("Helvetica", "", 4.8)
+    y = top + head_h
+    for _lower, grade, points, label in TRANSCRIPT_SCALE:
+        y += pitch
+        pdf.line(x[0], y, x[3], y)
+        _tx(pdf, y - 1.0, grade, center=(x[0] + x[1]) / 2)
+        _tx(pdf, y - 1.0, label, x=x[1] + 1.9)
+        _tx(pdf, y - 1.0, points, center=(x[2] + x[3]) / 2)
+
+
+def _t_bottom_block(pdf: FPDF, institute) -> None:
+    """Grade system (left), principal (centre) and scrutineer (right),
+    at the template's fixed positions."""
+    pdf.set_text_color(22, 81, 159)
     pdf.set_font("Helvetica", "B", 7.5)
-    pdf.cell(70, 5, safe("Name : " + TRANSCRIPT_SCRUTINISED_BY))
+    _tx(pdf, 260.9, "GRADE SYSTEM", center=47.5)
+    _t_grade_table(pdf)
+
+    pdf.set_text_color(22, 81, 159)
+    pdf.set_font("Helvetica", "B", 7.5)
+    _tx(pdf, 271.8, "Scrutinised by", x=145.8)
+    pdf.set_font("Helvetica", "", 7)
+    _tx(pdf, 278.5, "Signature  :", x=145.8)
+    pdf.set_draw_color(*T_RULE)
+    pdf.set_line_width(0.2)
+    pdf.line(164.0, 277.4, 212.1, 277.4)
+    _tx(pdf, 288.0, "Name :", x=145.8)
+    pdf.set_font("Helvetica", "B", 7.7)
+    _tx(pdf, 287.6, TRANSCRIPT_SCRUTINISED_BY, x=171.5)
 
     # Principal: the institute's signature artwork when on file, else
     # the space is left clear for a wet signature.
     from apps.common.pdf_theme import signature_path
     if sig := signature_path(institute):
         try:
-            pdf.image(sig, x=95, y=263 + dy, w=35, h=15,
-                      keep_aspect_ratio=True)
+            pdf.image(sig, x=96.0, y=270.5, w=36, h=14, keep_aspect_ratio=True)
         except Exception:  # noqa: BLE001
             pass
-    pdf.set_xy(92, 284 + dy)
-    pdf.set_text_color(*T_NAVY)
-    pdf.set_font("Helvetica", "B", 7)
-    pdf.cell(42, 5, safe(TRANSCRIPT_PRINCIPAL), align="C")
-    pdf.set_xy(99, 289 + dy)
-    pdf.set_font("Helvetica", "", 6.5)
-    pdf.cell(28, 4, "Principal", align="C")
+    pdf.set_text_color(22, 81, 159)
+    pdf.set_font("Helvetica", "B", 7.2)
+    _tx(pdf, 289.5, TRANSCRIPT_PRINCIPAL, center=116.5)
+    pdf.set_font("Helvetica", "", 6.8)
+    _tx(pdf, 294.4, "Principal", center=116.5)
 
 
-def render_transcript_pdf(student, *, only_published: bool = True) -> bytes:
-    doc = transcript_document(student, only_published=only_published)
+def _t_sheet(pdf: FPDF, doc: dict, year: dict, watermark: str) -> None:
     institute = doc["institute"]
+    _t_page(pdf, watermark)
+    _t_footer(pdf, institute)
+    title = f"{safe(doc['program_name']).upper()} - {year['label']}"
+    _t_header(pdf, doc, title)
+    for sem, (top, bottom) in zip(year["semesters"], _T_BOXES):
+        _t_semester_box(
+            pdf, f"SEMESTER {sem['semester_number']}",
+            [(r["subject_code"], r["subject_name"], r["grade"])
+             for r in sem["rows"]],
+            top, bottom,
+        )
+    _t_bottom_block(pdf, institute)
+
+
+class NoTranscriptYear(LookupError):
+    """The requested year of study has no published marks."""
+
+
+def render_transcript_pdf(student, *, only_published: bool = True,
+                          year: int | None = None) -> bytes:
+    """One sheet per year of study with published marks; `year` limits
+    the PDF to that year's sheet (NoTranscriptYear when it has none)."""
+    doc = transcript_document(student, only_published=only_published)
     watermark = safe(doc["institute_name"]).upper() or "JD INSTITUTE"
+    years = doc["years"]
+    if year is not None:
+        years = [y for y in years if y["year"] == year]
+        if not years:
+            raise NoTranscriptYear(year)
 
     pdf = FPDF(orientation="P", unit="mm", format=(T_PAGE_W, T_PAGE_H))
     pdf.set_margins(0, 0, 0)
     pdf.set_auto_page_break(False)
     pdf.set_title("Academic Assessment Record")
 
-    _t_page(pdf, watermark)
-    _t_footer(pdf, institute)
-    _t_header(pdf, doc)
-
-    y = _T_TABLES_TOP
-    if not doc["semesters"]:
-        pdf.set_font("Helvetica", "I", 9)
+    if not years:
+        # Nothing published: a blank Year I sheet with a note.
+        empty = {"year": 1, "label": "Year I", "semesters": [
+            {"semester_number": 1, "rows": []},
+            {"semester_number": 2, "rows": []},
+        ]}
+        _t_sheet(pdf, doc, empty, watermark)
+        pdf.set_font("Helvetica", "I", 8)
         pdf.set_text_color(90, 90, 90)
-        pdf.set_xy(_T_TABLE_X, y)
-        pdf.cell(_T_TABLE_W, 7, "No published marks on record.", align="C")
-    for sem in doc["semesters"]:
-        height = _t_table_height(len(sem["rows"]))
-        if y + height > _T_TABLES_BOTTOM and y != _T_CONT_TOP:
-            # Too tall for the space left: continue on a fresh page.
-            _t_page(pdf, watermark)
-            _t_footer(pdf, institute)
-            y = _T_CONT_TOP
-        y = _t_semester_table(
-            pdf, f"SEMESTER {sem['semester_number']}",
-            [(r["subject_code"], r["subject_name"], r["grade"])
-             for r in sem["rows"]],
-            _T_TABLE_X, y, _T_TABLE_W,
-        ) + 6
-    if not doc["semesters"]:
-        y += 12
-    if y > _T_TABLES_BOTTOM:
-        _t_page(pdf, watermark)
-        _t_footer(pdf, institute)
-        y = _T_CONT_TOP
-    # Sit just under the last table; never lower than the template spot.
-    _t_bottom_block(pdf, institute,
-                    top=min(_T_BOTTOM_BLOCK_Y, y + _T_BOTTOM_GAP))
+        _tx(pdf, 140.0, "No published marks on record.",
+            center=(_T_X0 + _T_X3) / 2)
+    for y in years:
+        _t_sheet(pdf, doc, y, watermark)
 
     return bytes(pdf.output())
 

@@ -74,6 +74,14 @@ class InstallmentSerializer(serializers.ModelSerializer):
             "created_by", "created_on",
         ]
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # An installment (and its receipts) stays on the enrollment it
+        # was scheduled for; re-pointing it would move money between
+        # students and escape campus scope.
+        if self.instance is not None:
+            self.fields["enrollment"].read_only = True
+
     def get_online_payable(self, obj) -> bool:
         from apps.payments.routing import route_for_installment
         from .services.fee_link import is_online_payable
@@ -264,6 +272,47 @@ class FeeReceiptUpdateSerializer(serializers.ModelSerializer):
             "payment_mode", "instrument_ref", "bank",
             "received_date", "notes",
         ]
+
+    #: What a gateway wrote on an online receipt; HR may still fix the
+    #: date / notes, but not the money or the reference (2026-11-27).
+    _GATEWAY_LOCKED = (
+        "installment", "basic_fee", "sgst", "cgst", "igst", "amount",
+        "payment_mode", "instrument_ref", "bank",
+    )
+
+    def validate(self, attrs):
+        if self.instance is not None and self.instance.instrument_ref:
+            from apps.payments.models import PaymentOrder
+            if PaymentOrder.objects.filter(order_id=self.instance.instrument_ref).exists():
+                locked = [
+                    f for f in self._GATEWAY_LOCKED
+                    if f in attrs and attrs[f] != getattr(self.instance, f)
+                ]
+                if locked:
+                    raise serializers.ValidationError({
+                        f: "Settled by the payment gateway — cannot be edited."
+                        for f in locked
+                    })
+        # Same invariants as creation: the installment must belong to
+        # this receipt's enrollment, and amount == basic + taxes.
+        installment = attrs.get("installment")
+        if installment is not None and installment.enrollment_id != self.instance.enrollment_id:
+            raise serializers.ValidationError(
+                {"installment": "Installment does not belong to this receipt's enrollment."},
+            )
+        money = ("basic_fee", "sgst", "cgst", "igst", "amount")
+        if any(k in attrs for k in money):
+            cur = {k: Decimal(attrs.get(k, getattr(self.instance, k)) or 0) for k in money}
+            computed = cur["basic_fee"] + cur["sgst"] + cur["cgst"] + cur["igst"]
+            if "amount" in attrs and attrs["amount"] is not None:
+                if cur["amount"] != computed:
+                    raise serializers.ValidationError(
+                        {"amount": f"amount {cur['amount']} does not equal "
+                                   f"basic+taxes ({computed})."},
+                    )
+            else:
+                attrs["amount"] = computed
+        return attrs
 
 
 class CancelReceiptSerializer(serializers.Serializer):

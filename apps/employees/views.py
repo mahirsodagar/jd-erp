@@ -80,9 +80,27 @@ class DepartmentListCreateView(_MasterListCreate):
     serializer = DepartmentSerializer
 
 
+def _designation_role_guard(request):
+    """A designation's `role` is granted automatically to every employee
+    provisioned with it, so changing it is a role assignment and needs
+    `accounts.user.assign_roles`, not just the HR master key."""
+    if "role" in request.data and request.data.get("role") not in (None, "") \
+            and not has_perm(request.user, "accounts.user.assign_roles"):
+        return Response(
+            {"role": "Linking a role to a designation needs accounts.user.assign_roles."},
+            status=http.HTTP_403_FORBIDDEN,
+        )
+    return None
+
+
 class DesignationListCreateView(_MasterListCreate):
     model = Designation
     serializer = DesignationSerializer
+
+    def post(self, request):
+        if (denied := _designation_role_guard(request)) is not None:
+            return denied
+        return super().post(request)
 
 
 class _MasterDetail(APIView):
@@ -124,6 +142,11 @@ class DepartmentDetailView(_MasterDetail):
 class DesignationDetailView(_MasterDetail):
     model = Designation
     serializer = DesignationSerializer
+
+    def patch(self, request, pk):
+        if (denied := _designation_role_guard(request)) is not None:
+            return denied
+        return super().patch(request, pk)
 
 
 # --- Holiday Calendar (HR) ----------------------------------------------
@@ -471,6 +494,15 @@ class EmployeeDetailView(APIView):
 
         s = cls(emp, data=request.data, partial=True)
         s.is_valid(raise_exception=True)
+        # Moving an employee to another campus needs the same scope as
+        # hiring into it (see EmployeeListCreateView.post).
+        new_campus = s.validated_data.get("campus")
+        if (new_campus is not None and new_campus.pk != emp.campus_id
+                and not (u.is_superuser
+                         or has_perm(u, "employees.employee.add_in_any_campus")
+                         or u.campuses.filter(pk=new_campus.pk).exists())):
+            return Response({"detail": "Target campus not in your scope."},
+                            status=http.HTTP_403_FORBIDDEN)
         photo = s.validated_data.pop("photo", None)
         for k, v in s.validated_data.items():
             setattr(emp, k, v)
@@ -665,6 +697,11 @@ class EmployeePortalAccountView(APIView):
             emp = Employee.objects.get(pk=pk)
         except Employee.DoesNotExist as e:
             raise Http404 from e
+        # Campus scope, as on the employee detail endpoint.
+        if not (u.is_superuser
+                or has_perm(u, "employees.employee.view_all_campuses")
+                or u.campuses.filter(pk=emp.campus_id).exists()):
+            raise Http404
 
         if emp.user_account_id:
             return Response({"detail": "Portal account already exists."},
@@ -672,6 +709,14 @@ class EmployeePortalAccountView(APIView):
 
         s = PortalAccountSerializer(data=request.data)
         s.is_valid(raise_exception=True)
+        # Handing out roles is `accounts.user.assign_roles`, whoever the
+        # account is for — provision_portal alone creates a role-less
+        # login (the designation's default role still applies).
+        if s.validated_data.get("role_ids") and not has_perm(u, "accounts.user.assign_roles"):
+            return Response(
+                {"role_ids": "Assigning roles needs accounts.user.assign_roles."},
+                status=http.HTTP_403_FORBIDDEN,
+            )
 
         username = s.validated_data["username"]
         if User.objects.filter(username__iexact=username).exists():

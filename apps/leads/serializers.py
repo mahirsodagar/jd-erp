@@ -418,6 +418,13 @@ class LeadFollowupSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "created_by", "created_by_name", "created_at"]
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # A follow-up belongs to the lead it was logged on; visibility is
+        # checked against that lead, so it must not be re-pointed.
+        if self.instance is not None:
+            self.fields["lead"].read_only = True
+
     def validate(self, attrs):
         from .outcomes import is_valid_disposition
         cat = attrs.get("outcome_category") or getattr(self.instance, "outcome_category", "")

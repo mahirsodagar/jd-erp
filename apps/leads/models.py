@@ -431,6 +431,11 @@ class WebsiteLeadEvent(models.Model):
 
 # Entrance Exam models live in a separate module for readability; re-export
 # them here so Django registers them under the `leads` app_label.
+from .mail_models import (  # noqa: E402,F401
+    InboundLeadEmail,
+    LeadMailRule,
+    LeadMailSyncState,
+)
 from .exam_models import (  # noqa: E402,F401
     EntranceExam,
     EntranceExamAttachment,

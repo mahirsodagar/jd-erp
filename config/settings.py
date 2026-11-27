@@ -121,6 +121,14 @@ WSGI_APPLICATION = "config.wsgi.application"
 DATABASES = {"default": env.db("DATABASE_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}")}
 
 
+# --- Cache (DRF throttles live here) --------------------------------------
+# LocMem is per process: with gunicorn's 3 workers every throttle bucket is
+# effectively 3x looser and never shared. Prod should set a shared store,
+# e.g. CACHE_URL=dbcache://jd_erp_cache (then `manage.py createcachetable`)
+# or CACHE_URL=redis://127.0.0.1:6379/1 (needs the redis package).
+CACHES = {"default": env.cache("CACHE_URL", default="locmemcache://")}
+
+
 # --- Auth ---------------------------------------------------------------
 
 AUTH_USER_MODEL = "accounts.User"
@@ -155,6 +163,11 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
     ),
+    # Exactly one trusted proxy (nginx) in front of gunicorn: DRF then
+    # takes the client IP from the LAST X-Forwarded-For hop, which nginx
+    # wrote, instead of the FIRST, which the caller can forge to get a
+    # fresh throttle bucket per request. 0 = no proxy (plain runserver).
+    "NUM_PROXIES": env.int("DRF_NUM_PROXIES", default=1),
     "DEFAULT_THROTTLE_RATES": {
         # Authenticated users: ~100 requests/minute is plenty for normal
         # SPA traffic (page loads fanout to ~5 endpoints + react-query
@@ -185,6 +198,10 @@ REST_FRAMEWORK = {
 if len(sys.argv) > 1 and sys.argv[1] == "test":
     REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update(
         user="100000/min", anon="100000/min",
+        # Login + the public intake buckets are per IP too, and every
+        # test posts from 127.0.0.1 (no test asserts a 429).
+        login="100000/min", lead_intake="100000/min",
+        website_webhook="100000/min",
     )
 
 SIMPLE_JWT = {
@@ -216,6 +233,20 @@ CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
 # --- Lead intake API key ------------------------------------------------
 
 LEAD_INTAKE_API_KEY = env("LEAD_INTAKE_API_KEY", default="")
+
+# --- Lead inbox (email → lead) -------------------------------------------
+# IMAP mailbox that receives every lead-bearing email (website form
+# notifications, tawk.to chats, listing portals). Polled by
+# `manage.py fetch_lead_emails`; see apps/leads/mail_fetch.py.
+LEAD_MAIL_IMAP_HOST = env("LEAD_MAIL_IMAP_HOST", default="imap.gmail.com")
+LEAD_MAIL_IMAP_PORT = env.int("LEAD_MAIL_IMAP_PORT", default=993)
+LEAD_MAIL_IMAP_USER = env("LEAD_MAIL_IMAP_USER", default="")
+LEAD_MAIL_IMAP_PASSWORD = env("LEAD_MAIL_IMAP_PASSWORD", default="")
+LEAD_MAIL_IMAP_FOLDER = env("LEAD_MAIL_IMAP_FOLDER", default="INBOX")
+# A mail whose phone/email matches a lead created within this window is
+# the notification copy of a submission already in the ERP (the website
+# posts to the webhook AND emails the inbox) — linked, not re-created.
+LEAD_MAIL_DUP_WINDOW_HOURS = env.int("LEAD_MAIL_DUP_WINDOW_HOURS", default=24)
 
 
 # --- Leave module -------------------------------------------------------
@@ -444,7 +475,10 @@ SMS_PROVIDER = env("SMS_PROVIDER", default="bulksms")
 # Defaults mirror what the legacy PHP project used so the integration
 # works out of the box; override via env for any new environment.
 BULK_SMS_USER = env("BULK_SMS_USER", default="jdinstitute")
-BULK_SMS_PASSWORD = env("BULK_SMS_PASSWORD", default="JDInstitute321!")
+# No default on purpose: the gateway password is a secret and belongs in
+# .env only (the old in-source default was removed 2026-11-27 — rotate it
+# on the BulkSMS dashboard and set the new value in prod .env).
+BULK_SMS_PASSWORD = env("BULK_SMS_PASSWORD", default="")
 BULK_SMS_SENDER = env("BULK_SMS_SENDER", default="JDEDUC")
 BULK_SMS_TEMPLATE_IDS = {
     "lead.application_link.sms": env(
@@ -933,6 +967,11 @@ if not DEBUG:
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = "DENY"
+    SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+    # HTTP→HTTPS is nginx's 301. Django's own redirect is opt-in: turn it
+    # on only after confirming nginx sends X-Forwarded-Proto (else every
+    # request would loop). SECURE_PROXY_SSL_HEADER above makes it safe.
+    SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=False)
 
 
 # --- I18N / TZ ----------------------------------------------------------
@@ -950,6 +989,24 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+# Private media (apps/common/media_urls.py). Files are reached through
+# signed links that live this long; nginx keeps /media/ `internal` and
+# streams the file when Django answers with X-Accel-Redirect to this
+# prefix. Blank = Django streams the bytes itself (dev / tests).
+MEDIA_LINK_TTL_SECONDS = env.int("MEDIA_LINK_TTL_SECONDS", default=2 * 60 * 60)
+MEDIA_ACCEL_PREFIX = env("MEDIA_ACCEL_PREFIX", default="")
+
+# Django admin. The React app is the ERP's admin UI; this is the raw
+# model admin, session-authenticated and without 2FA, so production should
+# leave it off (ADMIN_SITE_ENABLED=False) and use `manage.py shell` /
+# the API for the rare one-off. Keep the path non-default when on.
+ADMIN_SITE_ENABLED = env.bool("ADMIN_SITE_ENABLED", default=True)
+ADMIN_URL_PATH = env("ADMIN_URL_PATH", default="admin/").strip("/") + "/"
+
+# Public application form link: a token stops working this many days after
+# it was (re)sent, and is locked outright once the applicant is enrolled.
+APPLICATION_LINK_VALID_DAYS = env.int("APPLICATION_LINK_VALID_DAYS", default=90)
 
 # Per-request body cap; per-file caps belong in serializers.
 DATA_UPLOAD_MAX_MEMORY_SIZE = 60 * 1024 * 1024

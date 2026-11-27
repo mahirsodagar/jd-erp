@@ -1,4 +1,10 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
+from apps.common.media_urls import signed_media_url
 from rest_framework import serializers
+
+from apps.common.file_validation import (
+    PHOTO_OR_PDF_MIMES, PILLOW_IMAGE_MIMES, SecureFileField, validate_file,
+)
 
 from .models import (
     BatchTransfer, Enrollment, Student, StudentDocument, StudentRemark,
@@ -160,7 +166,7 @@ class StudentDetailSerializer(serializers.ModelSerializer):
 
     def get_photo_url(self, obj):
         request = self.context.get("request")
-        return request.build_absolute_uri(obj.photo.url) if obj.photo and request else None
+        return signed_media_url(request, obj.photo)
 
     def get_is_dropout(self, obj):
         from .services import is_dropout
@@ -210,9 +216,45 @@ class StudentDetailSerializer(serializers.ModelSerializer):
         ).exists()
 
 
+def _validate_student_photo(file):
+    """Shared by the self / HR student serializers: real image bytes
+    Pillow can open, 5 MB cap (the ID card and transcript render it)."""
+    if file is None:
+        return file
+    try:
+        validate_file(
+            file, allowed_mimes=PILLOW_IMAGE_MIMES,
+            max_size_bytes=5 * 1024 * 1024, field="photo",
+        )
+    except DjangoValidationError as e:
+        raise serializers.ValidationError(e.message_dict.get("photo", e.messages))
+    return file
+
+
 class StudentSelfUpdateSerializer(serializers.ModelSerializer):
     """Fields a student is allowed to edit on their own record.
     No FKs to academic placement (campus/program/year) — those are HR-set."""
+
+    #: Printed on ID cards, certificates and transcripts: once the
+    #: student is enrolled only HR may change them (2026-11-27).
+    _IDENTITY_FIELDS = ("student_name", "dob", "aadhaar_number", "gender")
+
+    def validate_photo(self, file):
+        return _validate_student_photo(file)
+
+    def validate(self, attrs):
+        student = self.instance
+        if student is not None and student.enrollments.exists():
+            changed = [
+                f for f in self._IDENTITY_FIELDS
+                if f in attrs and attrs[f] != getattr(student, f)
+            ]
+            if changed:
+                raise serializers.ValidationError({
+                    f: "Locked after enrolment — ask the office to correct this."
+                    for f in changed
+                })
+        return attrs
 
     class Meta:
         model = Student
@@ -232,6 +274,9 @@ class StudentSelfUpdateSerializer(serializers.ModelSerializer):
 class StudentHRUpdateSerializer(serializers.ModelSerializer):
     """Fields HR/Admissions can edit. application_form_id stays read-only."""
 
+    def validate_photo(self, file):
+        return _validate_student_photo(file)
+
     class Meta:
         model = Student
         fields = [
@@ -250,6 +295,14 @@ class StudentHRUpdateSerializer(serializers.ModelSerializer):
 
 
 class StudentDocumentSerializer(serializers.ModelSerializer):
+    # Magic-byte validated: certificates / marksheets are PDFs or photos
+    # of them. HTML/SVG/executables renamed to .pdf are refused before
+    # they reach storage (nginx serves /media/ publicly).
+    file = SecureFileField(
+        allowed_mimes=PHOTO_OR_PDF_MIMES, max_size_mb=10,
+        required=False, allow_null=True,
+    )
+
     class Meta:
         model = StudentDocument
         fields = [
@@ -313,6 +366,18 @@ class EnrollmentSerializer(serializers.ModelSerializer):
             "batch_name", "academic_year_code",
             "entry_user", "created_on", "updated_on",
         ]
+
+    #: Fixed once the enrollment exists (2026-11-27). Dropping out goes
+    #: through the Drop Out action (`admissions.student.dropout`), moving
+    #: campus through Transfer (`admissions.student.transfer`); a plain
+    #: edit must not reach either.
+    _LOCKED_ON_UPDATE = ("status", "student", "campus")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance is not None:
+            for name in self._LOCKED_ON_UPDATE:
+                self.fields[name].read_only = True
 
 
 class PromotionResultSerializer(serializers.Serializer):

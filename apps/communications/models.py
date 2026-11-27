@@ -83,7 +83,9 @@ class Suppression(models.Model):
 
 
 def _attachment_path(instance, filename):
-    return f"communications/attachments/{instance.pk or 'new'}/{filename}"
+    from apps.common.upload_paths import _random_name
+    # The display name lives on `attachment_name`; the stored path is random.
+    return _random_name(f"communications/attachments/{instance.pk or 'new'}", filename)
 
 
 class EmailCampaign(models.Model):

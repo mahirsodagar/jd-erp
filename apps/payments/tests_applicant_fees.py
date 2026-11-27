@@ -86,12 +86,37 @@ class ApplicantFeePageTests(RequiredFixture):
     def _request(self, student, kind) -> PaymentRequest:
         return PaymentRequest.objects.get(student=student, purpose=kind.purpose)
 
-    def _pay_smartgateway(self, pr: PaymentRequest):
+    def _pay_smartgateway(self, pr: PaymentRequest, amount=None):
         order = services._new_order(pr)
+        # The gateway reports what was charged; it must match the order or
+        # settlement is refused (see test_wrong_amount_is_flagged_not_booked).
+        body = _order_body(
+            order_id=order.order_id,
+            amount=float(order.amount if amount is None else amount),
+        )
         with self.captureOnCommitCallbacks(execute=True):
-            services.apply_order_body(order, _order_body(order_id=order.order_id))
+            services.apply_order_body(order, body)
         pr.refresh_from_db()
         return pr
+
+    def test_wrong_amount_is_flagged_not_booked(self):
+        self._submit(program=self.jdsd_program)
+        student = self._student()
+        pr = self._pay_smartgateway(self._request(student, OTHER), amount="1000")
+        self.assertEqual(pr.status, PaymentRequest.Status.PENDING)
+        order = pr.orders.get()
+        self.assertTrue(order.is_paid)
+        self.assertIn("not booked", order.review_note)
+        self.assertEqual(FeeReceipt.objects.count(), 0)
+
+    def test_payment_on_cancelled_request_is_flagged_not_booked(self):
+        self._submit(program=self.jdsd_program)
+        student = self._student()
+        pr = self._request(student, OTHER)
+        services.cancel_request(pr)
+        pr = self._pay_smartgateway(pr)
+        self.assertEqual(pr.status, PaymentRequest.Status.CANCELLED)
+        self.assertIn("CANCELLED request", pr.orders.get().review_note)
 
     def _enroll(self, student, program) -> Enrollment:
         sem = Semester.objects.create(number=1, name="Sem 1", program=program)

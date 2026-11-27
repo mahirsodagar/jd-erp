@@ -382,6 +382,55 @@ If the box is ever rebuilt, recreate in this order:
 
 ---
 
+## 15. Lead inbox poller (email → lead)
+
+Leads → Email Inbox reads `leads@jdinstitute.edu.in` over IMAP
+(Google Workspace, app password) and creates leads from website form
+notifications, tawk.to chats and portal mails. Code:
+`apps/leads/mail_fetch.py`, `mail_parsers.py`, `mail_intake.py`.
+
+**.env** (no inline comments!):
+
+```
+LEAD_MAIL_IMAP_HOST=imap.gmail.com
+LEAD_MAIL_IMAP_PORT=993
+LEAD_MAIL_IMAP_USER=leads@jdinstitute.edu.in
+LEAD_MAIL_IMAP_PASSWORD=<google app password>
+LEAD_MAIL_IMAP_FOLDER=INBOX
+LEAD_MAIL_DUP_WINDOW_HOURS=24
+```
+
+**First deploy** (release 2026-11-27):
+
+```bash
+cd /var/www/jd-erp
+sudo -u www-data venv/bin/python manage.py migrate                      # leads.0020
+sudo -u www-data venv/bin/python manage.py migrate_permissions --dry-run # leads.mail.* keys
+sudo -u www-data venv/bin/python manage.py migrate_permissions
+sudo -u www-data venv/bin/python manage.py seed_lead_mail_rules         # website / tawk / ignore rules
+sudo -u www-data venv/bin/python manage.py fetch_lead_emails            # parks the cursor at the newest mail
+```
+
+Then grant `leads.mail.view` / `leads.mail.manage` / `leads.mail.rules`
+to the admissions roles from Admin → Roles (new keys start unassigned).
+
+**Cron** (as www-data) — the only scheduled job on this box so far:
+
+```bash
+sudo -u www-data crontab -e
+*/5 * * * * cd /var/www/jd-erp && venv/bin/python manage.py fetch_lead_emails >> /var/www/jd-erp/logs/lead_mail.log 2>&1
+```
+
+Create `/var/www/jd-erp/logs/` (owned by www-data) first. The first
+run only parks the cursor; later runs read mail newer than that.
+`--backfill-days N` imports older mail once (every mail is stored
+exactly once, so re-running is safe). `--reprocess` re-reads stored
+mails that failed, after fixing a rule or a WebsiteValueMap row.
+
+Health shows on the Email Inbox page (last checked, last error) and in
+Django admin → Lead mail sync states. A Google "Security alert" mail
+after the first login from the VPS IP is expected.
+
 ## 14. Seeding employees (one-time, campus-wise)
 
 The legacy Employee Master exports (Bengaluru, Goa, Hyderabad,
@@ -402,3 +451,126 @@ rows (test accounts, rows without email/DOB, the same person exported
 under two campuses) and reporting-manager names that match nobody, so
 HR can fix those in HR → Employees. Campuses HYD / BZA / COK are
 created if missing.
+
+---
+
+## 16. Security hardening (2026-11-27 pass)
+
+Changes from the audit against `React_Django_ERP_Security_Testing_Plan.md`.
+Everything here is backend-only; the web repo only gained
+`public/_headers` (Netlify security headers) and an `npm audit fix`.
+
+### Deploy steps for this release
+
+```bash
+cd /var/www/jd-erp
+sudo -u www-data venv/bin/pip install -r requirements.txt      # PyJWT / sqlparse / urllib3 pins
+sudo -u www-data venv/bin/python manage.py check --deploy
+sudo -u www-data venv/bin/python manage.py createcachetable       # only if CACHE_URL=dbcache://... below
+systemctl restart jd-erp.service
+```
+
+### `.env` additions / checks
+
+| Key | Why |
+|---|---|
+| `BULK_SMS_PASSWORD=...` | **REQUIRED.** The in-source default was removed (it was a secret in git). Without it SMS sends fail with "not configured". Rotate it on the BulkSMS dashboard and put the new value here. |
+| `CACHE_URL=dbcache://jd_erp_cache` | DRF throttles + login buckets live in Django's cache; LocMem is per gunicorn worker (3×), so set a shared store. Run `createcachetable` once. `redis://127.0.0.1:6379/1` also works if the `redis` package is installed. |
+| `DRF_NUM_PROXIES=1` (default) | Throttle IPs are read from the LAST `X-Forwarded-For` hop. Confirm the nginx site has `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` and `proxy_set_header X-Forwarded-Proto $scheme;`. If nginx does NOT set XFF, set `DRF_NUM_PROXIES=0`. |
+| `SECURE_SSL_REDIRECT=True` (optional) | Django-side HTTPS redirect backstop. Only after confirming `X-Forwarded-Proto` is forwarded, else every request loops. |
+
+### nginx checklist (verify on the box, `nginx -T`)
+
+```nginx
+server_tokens off;
+client_max_body_size 60m;                      # matches DATA_UPLOAD_MAX_MEMORY_SIZE
+location ~ /\.(env|git|ht) { deny all; }
+location /media/ {
+    alias /var/www/jd-erp/media/;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Content-Security-Policy "sandbox" always;   # uploaded files can't run script on this origin
+    add_header Content-Disposition "attachment";           # optional: force download instead of render
+}
+```
+
+### Private media (`/media/` is no longer public)
+
+Stored files are reached only through signed, expiring links
+(`/api/media/<token>/`, `apps/common/media_urls.py`, 2 h by default via
+`MEDIA_LINK_TTL_SECONDS`). Django answers with `X-Accel-Redirect` and
+nginx streams the bytes from an `internal` location. New uploads also get
+random names (`apps/common/upload_paths.py`). The ONE public exception is
+`/media/institute/logos/` — logos are embedded in outgoing e-mail.
+
+`.env`: `MEDIA_ACCEL_PREFIX=/protected-media/`
+
+nginx (replace the old `location /media/` block):
+
+```nginx
+# Public: institute logos only (e-mail embeds them).
+location /media/institute/logos/ {
+    alias /var/www/jd-erp/media/institute/logos/;
+    add_header X-Content-Type-Options "nosniff" always;
+}
+# Everything else under /media/ is private — 404 to the outside world.
+location /media/ { return 404; }
+# Reached only via X-Accel-Redirect from /api/media/<token>/.
+location /protected-media/ {
+    internal;
+    alias /var/www/jd-erp/media/;
+    add_header X-Content-Type-Options "nosniff" always;
+}
+```
+
+Then `nginx -t && systemctl reload nginx`. Check: `curl -I https://<host>/media/students/photos/<anything>` → 404, while a
+photo on a student page still renders.
+
+Migrations in this release (`manage.py migrate`): academics, admissions,
+courseware, employees, leads 0021, master 0030, student_documents, tasks
+(upload_to), payments 0008 (`PaymentOrder.review_note`). Then
+`manage.py migrate_permissions` for the new `academics.marks.view_all_campuses`
+key (back-filled onto roles holding certificate / student campus-wide keys
+or transcript.view_any — review on Admin → Roles).
+
+### Django admin
+
+Recommendation: turn the raw model admin OFF in production
+(`ADMIN_SITE_ENABLED=False`). The React app is the ERP's admin; the Django
+admin is session-authenticated, has no 2FA, exposes every model, and is a
+standing brute-force target at a guessable path. For the rare one-off use
+`manage.py shell` over SSH. If it must stay on, set `ADMIN_URL_PATH` to a
+random segment (e.g. `ADMIN_URL_PATH=ops-7f3a9c/`) and add 2FA
+(`django-otp` + `django-otp-admin`) before exposing it.
+
+### Behaviour changes to know about
+
+- Uploads everywhere are validated by magic bytes (`apps/common/file_validation.py`).
+  Office files sniff as zip and plain text as octet-stream when libmagic
+  is missing, so **libmagic1 must stay installed on the VPS** (it is in §13).
+- Courseware attachments no longer accept `.svg`.
+- Deactivating a user (Admin → Users), a dropout, an admin password reset,
+  a self-service password change and a forgot-password reset all revoke
+  the account's refresh tokens (other devices are signed out; the
+  change-password response hands the current session a fresh pair).
+- Browser tokens live in sessionStorage: a new tab needs a fresh login.
+- Enrollment edit can no longer change `status` / `campus` / `student`
+  (Drop Out / Transfer actions only). Students cannot change name, DOB,
+  Aadhaar or gender once enrolled.
+- Marks are campus-scoped (new key `academics.marks.view_all_campuses`).
+- Gateway-settled receipts: money fields and reference are locked;
+  Lead "mark fee paid" / "clear" refuse when a gateway payment exists.
+- Payments: an order paid on a CANCELLED request, with a different amount,
+  or as a second payment on a PAID request is NOT booked — it is flagged
+  on the order (`review_note`, visible under the lead's online payments)
+  for Accounts. Refund / void events cancel the receipt and reopen the fee.
+- Tasks: staff accounts only (students / parents can't create or be assigned).
+- Entrance exam: server enforces duration (+2 min grace).
+- Application form link: locked at enrolment; expires
+  `APPLICATION_LINK_VALID_DAYS` (90) after last send / re-open.
+- Portal-account provisioning with roles and Designation→role links need
+  `accounts.user.assign_roles` (grant it to the HR role if HR does this).
+- `/api/auth/me/` refuses an email that belongs to any Employee record.
+- Lead intake + website webhook are throttled per IP before the API key
+  check (bad keys are throttled too).
+- New auditlog coverage: OtherFee, PaymentOrder status, EntranceExam(+Attempt),
+  DailyReportAccess, RelievingManager, Role permissions/users m2m, User.campuses.

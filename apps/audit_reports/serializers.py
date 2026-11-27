@@ -125,6 +125,8 @@ class CourseEndReportSerializer(serializers.ModelSerializer):
     # A report's program is its batch's program — not stored separately.
     program = serializers.IntegerField(source="batch.program_id", read_only=True)
     program_name = serializers.CharField(source="batch.program.name", read_only=True)
+    report_type_label = serializers.CharField(
+        source="get_report_type_display", read_only=True)
 
     class Meta:
         model = CourseEndReport
@@ -134,7 +136,7 @@ class CourseEndReportSerializer(serializers.ModelSerializer):
             "program", "program_name",
             "subject", "subject_code",
             "batch", "batch_name",
-            "completed_on",
+            "completed_on", "report_type", "report_type_label",
             "summary", "learning_outcomes", "challenges", "suggestions",
             "avg_attendance_pct", "avg_marks_pct",
             "hod_status", "hod_remarks", "hod_reviewed_at", "hod_reviewed_by",
@@ -142,7 +144,7 @@ class CourseEndReportSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id", "instructor_name", "subject_code", "batch_name",
-            "program_name",
+            "program_name", "report_type_label",
             "hod_status", "hod_remarks", "hod_reviewed_at", "hod_reviewed_by",
             "submitted_by", "created_at", "updated_at",
         ]

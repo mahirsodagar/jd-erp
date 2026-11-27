@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from apps.common.media_urls import signed_media_url
 
 from .models import CoursewareAttachment, CoursewareTopic
 
@@ -15,7 +16,7 @@ class CoursewareAttachmentSerializer(serializers.ModelSerializer):
         if not obj.file:
             return None
         request = self.context.get("request")
-        return request.build_absolute_uri(obj.file.url) if request else obj.file.url
+        return signed_media_url(request, obj.file)
 
 
 class CoursewareTopicSerializer(serializers.ModelSerializer):
@@ -42,8 +43,7 @@ class CoursewareTopicSerializer(serializers.ModelSerializer):
         if not obj.image:
             return None
         request = self.context.get("request")
-        return (request.build_absolute_uri(obj.image.url)
-                if request else obj.image.url)
+        return signed_media_url(request, obj.image)
 
 
 class PublishTopicSerializer(serializers.Serializer):

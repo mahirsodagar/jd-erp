@@ -18,3 +18,8 @@ class LeadsConfig(AppConfig):
         auditlog.register(LeadStatusHistory)
         auditlog.register(LeadUtm)
         auditlog.register(Counsellor)
+        # Entrance exams: grading and the pass/fail decision are
+        # admissions-relevant and were unaudited.
+        from .exam_models import EntranceExam, EntranceExamAttempt
+        auditlog.register(EntranceExam)
+        auditlog.register(EntranceExamAttempt)

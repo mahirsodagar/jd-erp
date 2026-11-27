@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from apps.common.media_urls import signed_media_url
+
 from apps.academics.models import (
     Assignment, AssignmentSubmission, Test, TestAttempt, TestQuestion,
     TestResponse,
@@ -46,7 +48,7 @@ class PortalProfileSerializer(serializers.ModelSerializer):
         if not obj.photo:
             return None
         request = self.context.get("request")
-        return request.build_absolute_uri(obj.photo.url) if request else obj.photo.url
+        return signed_media_url(request, obj.photo)
 
 
 class ChangePasswordSerializer(serializers.Serializer):
@@ -77,13 +79,13 @@ class PortalAssignmentSerializer(serializers.ModelSerializer):
         if not obj.attachment:
             return None
         request = self.context.get("request")
-        return request.build_absolute_uri(obj.attachment.url) if request else obj.attachment.url
+        return signed_media_url(request, obj.attachment)
 
     def get_image_url(self, obj):
         if not obj.image:
             return None
         request = self.context.get("request")
-        return request.build_absolute_uri(obj.image.url) if request else obj.image.url
+        return signed_media_url(request, obj.image)
 
     def get_submission(self, obj):
         sub = self.context.get("submissions_by_assignment", {}).get(obj.id)
@@ -92,8 +94,7 @@ class PortalAssignmentSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         file_url = None
         if sub.file:
-            file_url = (request.build_absolute_uri(sub.file.url)
-                        if request else sub.file.url)
+            file_url = signed_media_url(request, sub.file)
         return {
             "id": sub.id,
             "status": sub.status,
@@ -144,8 +145,7 @@ class PortalCoursewareTopicSerializer(serializers.ModelSerializer):
         if not obj.image:
             return None
         request = self.context.get("request")
-        return (request.build_absolute_uri(obj.image.url)
-                if request else obj.image.url)
+        return signed_media_url(request, obj.image)
 
     def get_attachments(self, obj):
         """View-only (client, 2026-11-25): the portal never gets the
@@ -314,7 +314,7 @@ class PortalQualificationSerializer(serializers.ModelSerializer):
         if not obj.file:
             return None
         request = self.context.get("request")
-        return request.build_absolute_uri(obj.file.url) if request else obj.file.url
+        return signed_media_url(request, obj.file)
 
 
 # --- Parent provisioning (admin side) ------------------------------

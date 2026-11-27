@@ -16,6 +16,7 @@ from rest_framework.views import APIView
 from apps.admissions.application_terms import institute_code_for_student, terms_for
 from apps.admissions.models import Student, StudentDocument
 from apps.admissions.services_application_pdf import render_application_pdf
+from apps.common.media_urls import signed_media_url
 
 from .permissions import IsStudentOrParent
 from apps.common.filenames import content_disposition
@@ -30,9 +31,7 @@ _DOC_HEADER = dict(StudentDocument.Header.choices)
 
 
 def _file_url(request, filefield):
-    if not filefield:
-        return None
-    return request.build_absolute_uri(filefield.url)
+    return signed_media_url(request, filefield)
 
 
 def _student_for(ctx) -> Student:

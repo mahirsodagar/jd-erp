@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from apps.common.upload_paths import task_attachment_path
 
 
 class Task(models.Model):
@@ -36,7 +37,7 @@ class Task(models.Model):
         help_text="Notes from the assignee while working on the task.",
     )
     attachment = models.FileField(
-        upload_to="tasks/attachments/%Y/%m/", blank=True, null=True,
+        upload_to=task_attachment_path, blank=True, null=True,
         help_text="Optional reference file (image, PDF or Office document) "
                   "the creator attaches when assigning.",
     )

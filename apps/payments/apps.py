@@ -9,8 +9,12 @@ class PaymentsConfig(AppConfig):
     def ready(self):
         from auditlog.registry import auditlog
 
-        from .models import PaymentRequest
+        from .models import PaymentOrder, PaymentRequest
 
-        # Orders and webhook events are append-only and already carry
-        # their own raw payloads — auditing them would duplicate the row.
         auditlog.register(PaymentRequest)
+        # Orders carry their raw gateway payload already; audit only the
+        # state transition so "who/when marked this paid" is on record.
+        # Webhook events stay unaudited (append-only).
+        auditlog.register(
+            PaymentOrder, include_fields=["status", "charged_at", "txn_id"],
+        )

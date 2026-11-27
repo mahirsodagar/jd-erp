@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Task
+from .serializers import TaskPatchSerializer, is_portal_account
 from .serializers import (
     CompleteTaskSerializer, LateStatusSerializer, TaskCreateSerializer,
     TaskSerializer,
@@ -65,6 +66,11 @@ class TaskListCreateView(APIView):
         return Response(TaskSerializer(qs, many=True, context={"request": request}).data)
 
     def post(self, request):
+        # Tasks are a staff tool: student / parent portal logins can
+        # neither raise them nor be assigned one (2026-11-27).
+        if is_portal_account(request.user):
+            return Response({"detail": "Tasks are available to staff accounts only."},
+                            status=http.HTTP_403_FORBIDDEN)
         s = TaskCreateSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         task = Task.objects.create(
@@ -127,11 +133,13 @@ class TaskDetailView(APIView):
                 status=http.HTTP_403_FORBIDDEN,
             )
 
+        # Validate through a serializer: raw request values used to be
+        # setattr'd (an int `assignee` 500'd, `end_date` was unparsed).
+        s = TaskPatchSerializer(task, data=data, partial=True)
+        s.is_valid(raise_exception=True)
         old_assignee_id = task.assignee_id
-        for f in ("name", "description", "end_date",
-                  "assignee_remarks", "assignee"):
-            if f in data:
-                setattr(task, f, data[f])
+        for f, v in s.validated_data.items():
+            setattr(task, f, v)
         task.save()
         if task.assignee_id != old_assignee_id:
             task.refresh_from_db()

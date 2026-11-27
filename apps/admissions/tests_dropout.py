@@ -142,18 +142,17 @@ class DropoutTests(TestCase):
         user.refresh_from_db()
         self.assertTrue(user.is_active)
 
-    def test_manual_drop_from_edit_enrollment_deactivates_login(self):
+    def test_enrollment_edit_cannot_change_status(self):
+        """Since 2026-11-27 `status` is read-only on the enrollment edit:
+        dropping out is the Drop Out action only, so a plain PATCH
+        neither drops the student nor touches the portal login."""
         user = self._portal_user()
         res = self.client.patch(
             reverse("enrollment-detail", args=[self.live.pk]),
             {"status": S.DROPPED}, format="json")
         self.assertEqual(res.status_code, 200, res.data)
-        user.refresh_from_db()
-        self.assertFalse(user.is_active)
-        res = self.client.patch(
-            reverse("enrollment-detail", args=[self.live.pk]),
-            {"status": S.ACTIVE}, format="json")
-        self.assertEqual(res.status_code, 200, res.data)
+        self.live.refresh_from_db()
+        self.assertEqual(self.live.status, S.ACTIVE)
         user.refresh_from_db()
         self.assertTrue(user.is_active)
 

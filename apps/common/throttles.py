@@ -19,15 +19,36 @@ class LoginRateThrottle(AnonRateThrottle):
 
 
 class LeadIntakeThrottle(SimpleRateThrottle):
-    """Throttle the public lead-intake endpoint by API key + IP. When
-    no API key is present, falls back to IP alone (a misconfigured
-    caller can still be rate-limited)."""
+    """Throttle the public lead-intake endpoint per IP.
+
+    The bucket used to include the presented API key, so a caller could
+    reset it by changing the key — and since DRF checks permissions
+    before throttles, guessing keys was never throttled at all. Views
+    using this throttle run it before the key check (see
+    `ThrottleBeforePermissionMixin`)."""
     scope = "lead_intake"
 
     def get_cache_key(self, request, view):
-        api_key = request.headers.get("X-API-Key") or "no-key"
-        ident = f"{api_key}:{self.get_ident(request)}"
-        return self.cache_format % {"scope": self.scope, "ident": ident}
+        return self.cache_format % {
+            "scope": self.scope, "ident": self.get_ident(request),
+        }
+
+
+class ThrottleBeforePermissionMixin:
+    """APIView mixin: run throttles BEFORE permission checks so that a
+    flood of bad API keys / tokens is rate-limited too. DRF's default
+    order (permissions, then throttles) only ever throttles callers
+    who are already authorised."""
+
+    def initial(self, request, *args, **kwargs):
+        self.format_kwarg = self.get_format_suffix(**kwargs)
+        neg = self.perform_content_negotiation(request)
+        request.accepted_renderer, request.accepted_media_type = neg
+        version, scheme = self.determine_version(request, *args, **kwargs)
+        request.version, request.versioning_scheme = version, scheme
+        self.perform_authentication(request)
+        self.check_throttles(request)
+        self.check_permissions(request)
 
 
 class WebsiteWebhookThrottle(AnonRateThrottle):

@@ -202,6 +202,10 @@ class PaymentOrder(models.Model):
     #: and the application fee is configured for auto-capture.
     PAID_STATUSES = frozenset({Status.CHARGED})
 
+    #: Money that moved and then came back: a paid order landing in one
+    #: of these has its settlement reversed (receipt cancelled).
+    REFUND_STATUSES = frozenset({Status.AUTO_REFUNDED, Status.VOIDED})
+
     #: Nothing further will happen to an order in one of these.
     TERMINAL_STATUSES = frozenset({
         Status.CHARGED, Status.AUTHENTICATION_FAILED,
@@ -256,6 +260,12 @@ class PaymentOrder(models.Model):
 
     #: Last full order body seen, from either the webhook or /orders/.
     last_payload = models.JSONField(null=True, blank=True)
+
+    #: Set when money moved but the ERP refused to book it automatically
+    #: (paid on a cancelled request, amount differs from what we asked,
+    #: a second payment on an already-paid request, a refund). Accounts
+    #: resolve these by hand; the UI shows the note on the order.
+    review_note = models.CharField(max_length=300, blank=True)
 
     created_on = models.DateTimeField(auto_now_add=True)
     updated_on = models.DateTimeField(auto_now=True)

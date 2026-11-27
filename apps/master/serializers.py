@@ -1,5 +1,8 @@
 from rest_framework import serializers
 
+from apps.common.file_validation import IMAGE_MIMES, SecureFileField
+from apps.common.media_urls import public_media_url, signed_media_url
+
 from .models import (
     AcademicYear, Batch, Campus, City, Classroom, Course, CurriculumMapping,
     Degree, FeeTemplate, Institute, LeadSource, Program, Semester,
@@ -32,6 +35,11 @@ class CampusSerializer(serializers.ModelSerializer):
         ]
         extra_kwargs = {"image": {"write_only": True, "required": False}}
 
+    image = SecureFileField(
+        allowed_mimes=IMAGE_MIMES, max_size_mb=5, write_only=True,
+        required=False, allow_null=True,
+    )
+
     def get_institutes(self, obj):
         return [{"id": i.id, "code": i.code, "name": i.name}
                 for i in obj.institutes]
@@ -46,10 +54,7 @@ class CampusSerializer(serializers.ModelSerializer):
     def get_image_url(self, obj):
         """Absolute URL so the SPA can use it directly. Mirrors
         `EmployeeSerializer.get_photo_url` — needs `request` in context."""
-        request = self.context.get("request")
-        if obj.image and request:
-            return request.build_absolute_uri(obj.image.url)
-        return obj.image.url if obj.image else None
+        return signed_media_url(self.context.get("request"), obj.image)
 
 
 class ProgramSerializer(serializers.ModelSerializer):
@@ -114,6 +119,16 @@ class InstituteSerializer(serializers.ModelSerializer):
     logo_url = serializers.SerializerMethodField()
     signature_url = serializers.SerializerMethodField()
     handbook_pdf_url = serializers.SerializerMethodField()
+    # Real image bytes only (they are drawn onto PDFs with Pillow) and a
+    # sane cap; a renamed .html would otherwise sit on public /media/.
+    logo = SecureFileField(
+        allowed_mimes=IMAGE_MIMES, max_size_mb=2, write_only=True,
+        required=False, allow_null=True,
+    )
+    signature = SecureFileField(
+        allowed_mimes=IMAGE_MIMES, max_size_mb=2, write_only=True,
+        required=False, allow_null=True,
+    )
 
     class Meta:
         model = Institute
@@ -126,8 +141,6 @@ class InstituteSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "logo_url", "signature_url",
                             "handbook_pdf_url", "created_at", "updated_at"]
         extra_kwargs = {
-            "logo": {"write_only": True, "required": False},
-            "signature": {"write_only": True, "required": False},
             "handbook_pdf": {"write_only": True, "required": False},
         }
 
@@ -143,13 +156,11 @@ class InstituteSerializer(serializers.ModelSerializer):
         return f
 
     def _abs(self, field):
-        if not field:
-            return None
-        request = self.context.get("request")
-        return request.build_absolute_uri(field.url) if request else field.url
+        return signed_media_url(self.context.get("request"), field)
 
     def get_logo_url(self, obj):
-        return self._abs(obj.logo)
+        # Logos stay on the public prefix: they are embedded in e-mail.
+        return public_media_url(self.context.get("request"), obj.logo)
 
     def get_signature_url(self, obj):
         return self._abs(obj.signature)

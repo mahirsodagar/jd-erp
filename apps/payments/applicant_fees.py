@@ -260,8 +260,8 @@ def request_for(student, kind: FeeKind, *, amount: Decimal | None = None,
             and existing.account == route.account
         ):
             return existing
-        existing.status = PaymentRequest.Status.CANCELLED
-        existing.save(update_fields=["status", "updated_on"])
+        from .services import cancel_request
+        cancel_request(existing)
 
     return PaymentRequest.objects.create(
         purpose=kind.purpose,

@@ -11,8 +11,9 @@ from rest_framework.test import APIClient
 from apps.academics.models import Attendance, MarksEntry, ScheduleSlot
 from apps.academics.tests_electives import make_faculty
 from apps.academics.transcript_pdf import (
-    MARKS_CARD_SCALE, TRANSCRIPT_SCALE, grade_for, marks_card_document,
-    render_marks_card_pdf, render_transcript_pdf, transcript_document,
+    MARKS_CARD_SCALE, TRANSCRIPT_SCALE, NoTranscriptYear, grade_for,
+    marks_card_document, render_marks_card_pdf, render_transcript_pdf,
+    roman, transcript_document, year_of_semester,
 )
 from apps.admissions.models import Enrollment, Student
 from apps.master.models import (
@@ -112,13 +113,25 @@ class TranscriptPdfTests(TestCase):
 
     # --- grading ---------------------------------------------------------
 
-    def test_grade_bands_match_legacy(self):
-        self.assertEqual(grade_for(78, TRANSCRIPT_SCALE), "C")
+    def test_grade_bands(self):
+        """Transcript = the client's 2026-11-27 eight-band scale (P is
+        exactly 40 %); marks card keeps the legacy bands."""
+        self.assertEqual(grade_for(78, TRANSCRIPT_SCALE), "A")
         self.assertEqual(grade_for(78, MARKS_CARD_SCALE), "A")
-        self.assertEqual(grade_for(100, TRANSCRIPT_SCALE), "A")
-        self.assertEqual(grade_for(49, TRANSCRIPT_SCALE), "F")
+        self.assertEqual(grade_for(100, TRANSCRIPT_SCALE), "O")
+        self.assertEqual(grade_for(80, TRANSCRIPT_SCALE), "A+")
+        self.assertEqual(grade_for(49, TRANSCRIPT_SCALE), "C")
+        self.assertEqual(grade_for(41, TRANSCRIPT_SCALE), "C")
+        self.assertEqual(grade_for(40, TRANSCRIPT_SCALE), "P")
+        self.assertEqual(grade_for(39, TRANSCRIPT_SCALE), "F")
         self.assertEqual(grade_for(44, MARKS_CARD_SCALE), "F")
         self.assertEqual(grade_for(None, MARKS_CARD_SCALE), "NA")
+
+    def test_year_of_semester(self):
+        self.assertEqual([year_of_semester(n) for n in range(1, 7)],
+                         [1, 1, 2, 2, 3, 3])
+        self.assertEqual([roman(n) for n in (1, 2, 3, 4, 5, 9)],
+                         ["I", "II", "III", "IV", "V", "IX"])
 
     def test_transcript_document_groups_by_semester_published_only(self):
         doc = transcript_document(self.student)
@@ -126,17 +139,22 @@ class TranscriptPdfTests(TestCase):
         self.assertEqual(doc["campus_name"], "Bangalore")
         self.assertEqual(doc["registration_no"], "AF-1")
         self.assertEqual([s["semester_number"] for s in doc["semesters"]], [1, 2])
+        # Both semesters sit on the Year I sheet.
+        self.assertEqual([(y["year"], y["label"]) for y in doc["years"]],
+                         [(1, "Year I")])
+        self.assertEqual(
+            [s["semester_number"] for s in doc["years"][0]["semesters"]], [1, 2])
         sem1 = {r["subject_code"]: r for r in doc["semesters"][0]["rows"]}
-        # Marks only: 62/80 -> 78 -> C.
+        # Marks only: 62/80 -> 78 -> A.
         self.assertEqual(sem1["CORE"]["score"], 78)
-        self.assertEqual(sem1["CORE"]["grade"], "C")
+        self.assertEqual(sem1["CORE"]["grade"], "A")
         self.assertNotIn("attendance_pct", sem1["CORE"])
         # No attendance on file does not block the grade.
         self.assertEqual(sem1["THEO"]["score"], 50)
-        self.assertEqual(sem1["THEO"]["grade"], "E")
+        self.assertEqual(sem1["THEO"]["grade"], "B")
         self.assertNotIn("DRAW", sem1)  # the draft row is excluded
         sem2 = {r["subject_code"]: r for r in doc["semesters"][1]["rows"]}
-        self.assertEqual(sem2["DRAW"]["grade"], "A")
+        self.assertEqual(sem2["DRAW"]["grade"], "O")
         # A missing IA still grades NA — that is missing marks, not
         # missing attendance.
         self.assertIsNone(sem2["CORE"]["score"])
@@ -157,7 +175,7 @@ class TranscriptPdfTests(TestCase):
                     render_marks_card_pdf(self.student)):
             text = _pdf_text(pdf)
             self.assertNotIn("Attendance", text)
-            self.assertNotIn("80%", text)
+            self.assertNotIn("Overall", text)
             self.assertIn("Grade", text)
 
     def test_pdfs_render(self):
@@ -178,24 +196,55 @@ class TranscriptPdfTests(TestCase):
                        "Principal", "Bangalore"):
             self.assertIn(needle, text, needle)
 
-    def test_transcript_overflows_onto_a_second_page(self):
-        """Many semesters push the tables past the fixed bottom block,
-        which then moves to a continuation page."""
-        for n in range(3, 12):
+    def test_one_sheet_per_year_of_study(self):
+        """Semesters 1..11 = six years = six sheets; `year=` picks one.
+        A semester the program defines but has nothing published yet
+        (12, paired with 11) still gets its box on the Year VI sheet;
+        a year with nothing published at all is skipped."""
+        program = self.core.program
+        for n in range(3, 13):
             sem = Semester.objects.create(name=f"Sem {n}", number=n,
-                                          program=self.core.program)
-            for k in range(4):
+                                          program=program)
+            if n == 12:
+                continue
+            if n in (7, 8):   # Year IV: defined, nothing published
+                continue
+            for k in range(4 + (10 if n == 5 else 0)):   # Sem 5 overflows
                 subj = Subject.objects.create(
-                    name=f"S{n}-{k}", code=f"S{n}{k}", program=self.core.program)
+                    name=f"S{n}-{k}", code=f"S{n}{k}", program=program)
                 MarksEntry.objects.create(
                     student=self.student, subject=subj, batch=self.batch,
                     semester=sem, ia_marks=D(30), ea_marks=D(30),
                     ia_max=D(40), ea_max=D(40), published=True)
+        doc = transcript_document(self.student)
+        self.assertEqual([y["year"] for y in doc["years"]], [1, 2, 3, 5, 6])
         pdf = render_transcript_pdf(self.student)
-        self.assertGreaterEqual(pdf.count(b"/Type /Page\n"), 2)
+        self.assertEqual(pdf.count(b"/Type /Page\n"), 5)
         text = _pdf_text(pdf)
         self.assertIn("SEMESTER 11", text)
-        self.assertIn("GRADE SYSTEM", text)
+        self.assertIn("SEMESTER 12", text)
+        self.assertIn("B.DES - Year VI", text)
+        self.assertEqual(text.count("GRADE SYSTEM"), 5)
+
+        pdf = render_transcript_pdf(self.student, year=2)
+        self.assertEqual(pdf.count(b"/Type /Page\n"), 1)
+        text = _pdf_text(pdf)
+        self.assertIn("B.DES - Year II", text)
+        self.assertIn("SEMESTER 3", text)
+        self.assertIn("SEMESTER 4", text)
+        self.assertNotIn("SEMESTER 1\n", text)
+        with self.assertRaises(NoTranscriptYear):
+            render_transcript_pdf(self.student, year=4)
+
+    def test_year_query_param_on_the_endpoint(self):
+        c = APIClient()
+        c.force_authenticate(self.admin)
+        url = reverse("transcript-student-pdf", args=[self.student.pk])
+        r = c.get(url, {"year": 1})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("Year_I", r["Content-Disposition"])
+        self.assertEqual(c.get(url, {"year": 2}).status_code, 404)
+        self.assertEqual(c.get(url, {"year": "x"}).status_code, 400)
 
     # --- endpoints -------------------------------------------------------
 

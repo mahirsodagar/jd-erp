@@ -29,6 +29,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import has_perm
 from apps.admissions.models import Enrollment
+from apps.common.media_urls import signed_media_url
 
 from .models import AcademicYear, Campus
 
@@ -94,10 +95,7 @@ class CampusCardsView(APIView):
                     "name": c.name,
                     "code": c.code,
                     "city": c.city,
-                    "image_url": (
-                        request.build_absolute_uri(c.image.url)
-                        if c.image else None
-                    ),
+                    "image_url": signed_media_url(request, c.image),
                     "student_count": counts.get(c.pk, 0),
                 }
                 for c in campuses
@@ -162,10 +160,7 @@ class CampusBatchesView(APIView):
                 "name": campus.name,
                 "code": campus.code,
                 "city": campus.city,
-                "image_url": (
-                    request.build_absolute_uri(campus.image.url)
-                    if campus.image else None
-                ),
+                "image_url": signed_media_url(request, campus.image),
             },
             "academic_year": year.code if year else None,
             "academic_year_name": (year.full_name or year.code) if year else "",

@@ -3,6 +3,7 @@ import csv
 from django.db import transaction
 from django.db.models import Q
 from django.http import Http404, HttpResponse
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import status as http
@@ -63,14 +64,14 @@ class LeaveTypeDetailView(APIView):
     perm_base = "leaves.type"
 
     def patch(self, request, pk):
-        obj = LeaveType.objects.get(pk=pk)
+        obj = get_object_or_404(LeaveType, pk=pk)
         s = LeaveTypeSerializer(obj, data=request.data, partial=True)
         s.is_valid(raise_exception=True)
         s.save()
         return Response(s.data)
 
     def delete(self, request, pk):
-        obj = LeaveType.objects.get(pk=pk)
+        obj = get_object_or_404(LeaveType, pk=pk)
         obj.is_active = False
         obj.save(update_fields=["is_active"])
         return Response(status=http.HTTP_204_NO_CONTENT)

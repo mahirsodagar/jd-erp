@@ -16,7 +16,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.admissions.models import Student
+from apps.admissions.models import Enrollment, Student
 from apps.master.models import Batch
 
 from . import closing_report as reports
@@ -88,6 +88,9 @@ class ClosingAwardSaveView(APIView):
             student = Student.objects.get(pk=student_id)
         except Student.DoesNotExist as e:
             raise Http404 from e
+        if not Enrollment.objects.filter(student=student, batch=batch).exists():
+            return Response({"detail": "Student is not enrolled in this batch."},
+                            status=http.HTTP_400_BAD_REQUEST)
 
         fields = {k: data[k] for k in ("awards", "portfolio", "remarks")
                   if k in data}

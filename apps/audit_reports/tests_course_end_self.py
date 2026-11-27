@@ -80,6 +80,25 @@ class CourseEndSelfOnlyTests(TestCase):
                    self._payload(self.me), format="json")
         self.assertEqual(r.status_code, 201, r.content)
         self.assertEqual(r.data["instructor"], self.me.pk)
+        self.assertEqual(r.data["report_type"], "END_MODULE")  # default
+
+    def test_mid_and_end_module_reports_may_coexist(self):
+        c = APIClient()
+        c.force_authenticate(self.fac_user)
+        r = c.post(reverse("course-end-list-create"),
+                   {**self._payload(self.me), "report_type": "MID_MODULE"},
+                   format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.data["report_type_label"], "Mid Module")
+        r = c.post(reverse("course-end-list-create"),
+                   {**self._payload(self.me), "report_type": "END_MODULE"},
+                   format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        # Same type twice is still one-per-(instructor, subject, batch).
+        r = c.post(reverse("course-end-list-create"),
+                   {**self._payload(self.me), "report_type": "END_MODULE"},
+                   format="json")
+        self.assertEqual(r.status_code, 400, r.content)
 
     def test_view_all_holder_may_file_for_a_colleague(self):
         c = APIClient()
@@ -88,3 +107,48 @@ class CourseEndSelfOnlyTests(TestCase):
                    self._payload(self.other), format="json")
         self.assertEqual(r.status_code, 201, r.content)
         self.assertEqual(r.data["instructor"], self.other.pk)
+
+    # --- Edit & resend a RETURNED report ------------------------------
+
+    def _returned(self, instructor):
+        return CourseEndReport.objects.create(
+            instructor=instructor, subject=self.subject, batch=self.batch,
+            completed_on=date(2026, 11, 20), summary="v1",
+            hod_status="RETURNED", hod_remarks="Add outcomes",
+            hod_reviewed_by=self.hod_user,
+        )
+
+    def test_author_resends_returned_report_and_it_goes_pending(self):
+        rep = self._returned(self.me)
+        c = APIClient()
+        c.force_authenticate(self.fac_user)
+        r = c.post(reverse("course-end-resubmit", args=[rep.pk]),
+                   {"summary": "v2", "learning_outcomes": "Sketching",
+                    "instructor": self.other.pk}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        rep.refresh_from_db()
+        self.assertEqual(rep.hod_status, "PENDING")
+        self.assertEqual(rep.summary, "v2")
+        self.assertEqual(rep.learning_outcomes, "Sketching")
+        self.assertEqual(rep.instructor_id, self.me.pk)   # not re-pointable
+        self.assertEqual(rep.hod_remarks, "Add outcomes")  # history kept
+        self.assertIsNone(rep.hod_reviewed_at)
+        self.assertIsNone(rep.hod_reviewed_by)
+
+    def test_resend_refused_unless_returned(self):
+        rep = self._returned(self.me)
+        rep.hod_status = "PENDING"
+        rep.save(update_fields=["hod_status"])
+        c = APIClient()
+        c.force_authenticate(self.fac_user)
+        r = c.post(reverse("course-end-resubmit", args=[rep.pk]),
+                   {"summary": "v2"}, format="json")
+        self.assertEqual(r.status_code, 400, r.content)
+
+    def test_resend_refused_for_someone_elses_report(self):
+        rep = self._returned(self.other)
+        c = APIClient()
+        c.force_authenticate(self.fac_user)
+        r = c.post(reverse("course-end-resubmit", args=[rep.pk]),
+                   {"summary": "v2"}, format="json")
+        self.assertEqual(r.status_code, 403, r.content)

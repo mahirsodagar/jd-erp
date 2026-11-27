@@ -99,6 +99,10 @@ _BUILTIN_SIGNATURES: list[tuple[bytes, int, str]] = [
     (b"<!DOCTYPE html", 0, "text/html"),
     (b"<html", 0, "text/html"),
     (b"PK\x03\x04", 0, "application/zip"),  # also docx/xlsx/pptx
+    (b"<svg", 0, "image/svg+xml"),
+    (b"<?xml", 0, "text/xml"),
+    (b"\x1aE\xdf\xa3", 0, "video/webm"),  # Matroska / WebM
+    (b"OggS", 0, "video/ogg"),
 ]
 
 
@@ -108,7 +112,19 @@ def _builtin_detect(head: bytes) -> str:
             # RIFF disambiguation: WEBP files have "WEBP" at offset 8.
             if mime == "image/webp" and head[8:12] != b"WEBP":
                 continue
+            # ISO-BMFF brands: HEIC/HEIF vs MP4/MOV/M4V share "ftyp".
+            if mime == "video/mp4":
+                brand = head[8:12]
+                if brand in (b"heic", b"heix", b"hevc", b"heim", b"heis", b"mif1", b"msf1"):
+                    return "image/heic"
+                if brand in (b"qt  ",):
+                    return "video/quicktime"
             return mime
+    # Leading whitespace / comments before an HTML or SVG root still make
+    # the browser render markup: treat any such text as html.
+    lowered = head.lstrip().lower()
+    if lowered.startswith((b"<!doctype html", b"<html", b"<script", b"<svg")):
+        return "text/html"
     return "application/octet-stream"
 
 
@@ -145,8 +161,18 @@ def detect_mime(f: IO[bytes]) -> str:
 # ---------------------------------------------------------------------
 
 IMAGE_MIMES = frozenset({"image/jpeg", "image/png", "image/webp"})
+# Anything Pillow opens without a plugin — for photos that get drawn
+# onto PDFs (ID cards, transcripts). No HEIC here.
+PILLOW_IMAGE_MIMES = IMAGE_MIMES | frozenset({"image/gif", "image/bmp"})
+# Phone cameras: HEIC/HEIF (libmagic reports either); GIF/BMP for the
+# few places that accept "any picture" (courseware, entrance exam).
+PHOTO_MIMES = IMAGE_MIMES | frozenset({"image/heic", "image/heif", "image/gif", "image/bmp"})
 PDF_MIMES = frozenset({"application/pdf"})
 IMAGE_OR_PDF_MIMES = IMAGE_MIMES | PDF_MIMES
+PHOTO_OR_PDF_MIMES = PHOTO_MIMES | PDF_MIMES
+VIDEO_MIMES = frozenset({
+    "video/mp4", "video/webm", "video/ogg", "video/quicktime", "video/x-m4v",
+})
 
 # Office docs land here. Note: docx/xlsx/pptx all serialize as zip; if
 # you allow them you implicitly allow any zip. Keep this conservative.
@@ -268,6 +294,21 @@ def validate_document(f, *, max_size_mb: int = DEFAULT_DOC_MAX_MB, field: str = 
         f, allowed_mimes=DOCUMENT_MIMES,
         max_size_bytes=max_size_mb * _MB, field=field,
     )
+
+
+def validate_upload_for_api(f, *, allowed_mimes, max_size_mb: int, field: str = "file") -> str:
+    """`validate_file` for views that take `request.FILES` directly (no
+    serializer): re-raises as a DRF ValidationError so the client gets
+    a field-scoped 400 instead of a 500."""
+    try:
+        return validate_file(
+            f, allowed_mimes=allowed_mimes,
+            max_size_bytes=max_size_mb * _MB, field=field,
+        )
+    except ValidationError as e:
+        raise serializers.ValidationError(
+            {field: e.message_dict.get(field, e.messages)},
+        )
 
 
 # ---------------------------------------------------------------------

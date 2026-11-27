@@ -4,7 +4,33 @@ from .models import (
     Counsellor, CounsellorRotation,
     Lead, LeadCommunication, LeadFollowup, LeadStatusHistory, LeadUtm,
     WebsiteLeadEvent, WebsiteValueMap,
+    InboundLeadEmail, LeadMailRule, LeadMailSyncState,
 )
+
+
+@admin.register(LeadMailRule)
+class LeadMailRuleAdmin(admin.ModelAdmin):
+    list_display = ("priority", "name", "match_from", "match_subject", "parser",
+                    "source", "default_campus", "is_active")
+    list_filter = ("parser", "is_active")
+
+
+@admin.register(LeadMailSyncState)
+class LeadMailSyncStateAdmin(admin.ModelAdmin):
+    list_display = ("mailbox", "last_uid", "last_run_at", "last_success_at",
+                    "fetched_total", "last_error")
+
+
+@admin.register(InboundLeadEmail)
+class InboundLeadEmailAdmin(admin.ModelAdmin):
+    list_display = ("sent_at", "from_address", "subject", "parser", "status", "lead")
+    list_filter = ("status", "parser")
+    search_fields = ("subject", "from_address", "text_body")
+    readonly_fields = [f.name for f in InboundLeadEmail._meta.fields]
+    date_hierarchy = "sent_at"
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(WebsiteValueMap)

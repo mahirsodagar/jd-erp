@@ -998,6 +998,23 @@ class StatusChangeError(Exception):
     pass
 
 
+def lock_application_form_on_enrolment(student: Student, *, actor=None) -> bool:
+    """Close the public application form of the lead this student came
+    from. Returns True when it was open. A counsellor can still re-open it
+    from the lead page (LeadApplicationOpenView)."""
+    lead = getattr(student, "lead_origin", None)
+    if lead is None or lead.application_locked_for_student:
+        return False
+    lead.application_locked_for_student = True
+    lead.application_locked_at = timezone.now()
+    lead.application_locked_by = actor if getattr(actor, "pk", None) else None
+    lead.save(update_fields=[
+        "application_locked_for_student", "application_locked_at",
+        "application_locked_by", "updated_at",
+    ])
+    return True
+
+
 def sync_portal_access(student: Student) -> bool | None:
     """Keep the student's portal login in step with their status: a
     dropout's account is deactivated (client rule 2026-11-26: a student
@@ -1018,6 +1035,9 @@ def sync_portal_access(student: Student) -> bool | None:
         return None
     user.is_active = should_be_active
     user.save(update_fields=["is_active"])
+    if not should_be_active:
+        from apps.accounts.tokens import revoke_all_refresh_tokens
+        revoke_all_refresh_tokens(user)
     return should_be_active
 
 

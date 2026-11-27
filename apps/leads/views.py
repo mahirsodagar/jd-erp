@@ -1,4 +1,6 @@
 from django.core.exceptions import ImproperlyConfigured
+from django.http import Http404
+from django.shortcuts import get_object_or_404
 from django.utils.dateparse import parse_date
 from django.utils.timezone import now
 from rest_framework import status as http
@@ -9,7 +11,7 @@ from rest_framework.views import APIView
 from apps.accounts.permissions import HasPerm
 from apps.common.csv_export import csv_response, fmt_date, wants_csv
 from apps.common.pagination import StandardPagination
-from apps.common.throttles import LeadIntakeThrottle
+from apps.common.throttles import LeadIntakeThrottle, ThrottleBeforePermissionMixin
 
 from .intake_auth import HasIntakeApiKey
 from .models import (
@@ -212,7 +214,7 @@ class LeadDetailView(APIView):
     permission_classes = [IsAuthenticated, LeadVisibility]
 
     def _get(self, request, pk):
-        lead = Lead.objects.get(pk=pk)
+        lead = get_object_or_404(Lead, pk=pk)
         self.check_object_permissions(request, lead)
         return lead
 
@@ -235,7 +237,7 @@ class LeadStatusView(APIView):
     required_perm = "leads.lead.change_status"
 
     def post(self, request, pk):
-        lead = Lead.objects.get(pk=pk)
+        lead = get_object_or_404(Lead, pk=pk)
         self.check_object_permissions(request, lead)
 
         # F.4 guard — outcome must be logged before stage moves.
@@ -285,7 +287,11 @@ class LeadReassignView(APIView):
     required_perm = "leads.lead.reassign"
 
     def post(self, request, pk):
-        lead = Lead.objects.select_related("campus").get(pk=pk)
+        lead = get_object_or_404(Lead.objects.select_related("campus"), pk=pk)
+        # Same visibility rule as every other lead action: you reassign
+        # leads you can see (your own, or all with leads.lead.view_all).
+        if not can_see_all_leads(request.user) and lead.assign_to_id != request.user.id:
+            return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         s = ReassignSerializer(data=request.data, context={"lead": lead})
         s.is_valid(raise_exception=True)
         lead.assign_to = s.validated_data["assign_to"]
@@ -298,7 +304,7 @@ class LeadHistoryView(APIView):
     required_perm = "leads.lead.view_history"
 
     def get(self, request, pk):
-        lead = Lead.objects.get(pk=pk)
+        lead = get_object_or_404(Lead, pk=pk)
         self.check_object_permissions(request, lead)
         return Response(StatusHistorySerializer(lead.status_history.all(), many=True).data)
 
@@ -315,7 +321,7 @@ class LeadApplicationCloseView(APIView):
 
     def post(self, request, pk):
         from django.utils import timezone
-        lead = Lead.objects.get(pk=pk)
+        lead = get_object_or_404(Lead, pk=pk)
         lead.application_locked_for_student = True
         lead.application_locked_at = timezone.now()
         lead.application_locked_by = request.user
@@ -332,11 +338,15 @@ class LeadApplicationOpenView(APIView):
     required_perm = "leads.application_form.lock"
 
     def post(self, request, pk):
-        lead = Lead.objects.get(pk=pk)
+        lead = get_object_or_404(Lead, pk=pk)
         lead.application_locked_for_student = False
         lead.application_locked_at = None
         lead.application_locked_by = None
+        # Re-opening restarts the link's validity window.
+        from django.utils import timezone
+        lead.application_token_sent_at = timezone.now()
         lead.save(update_fields=[
+            "application_token_sent_at",
             "application_locked_for_student",
             "application_locked_at", "application_locked_by", "updated_at",
         ])
@@ -350,7 +360,7 @@ class LeadFollowupListCreateView(APIView):
     perm_base = "leads.followup"
 
     def _lead(self, request, pk):
-        lead = Lead.objects.get(pk=pk)
+        lead = get_object_or_404(Lead, pk=pk)
         self.check_object_permissions(request, lead)
         return lead
 
@@ -372,7 +382,7 @@ class LeadFollowupDetailView(APIView):
     perm_base = "leads.followup"
 
     def patch(self, request, pk):
-        f = LeadFollowup.objects.select_related("lead").get(pk=pk)
+        f = get_object_or_404(LeadFollowup.objects.select_related("lead"), pk=pk)
         if not can_see_all_leads(request.user) and f.lead.assign_to_id != request.user.id:
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         s = LeadFollowupSerializer(f, data=request.data, partial=True)
@@ -381,7 +391,7 @@ class LeadFollowupDetailView(APIView):
         return Response(s.data)
 
     def delete(self, request, pk):
-        f = LeadFollowup.objects.select_related("lead").get(pk=pk)
+        f = get_object_or_404(LeadFollowup.objects.select_related("lead"), pk=pk)
         if not can_see_all_leads(request.user) and f.lead.assign_to_id != request.user.id:
             return Response({"detail": "Permission denied."}, status=http.HTTP_403_FORBIDDEN)
         f.delete()
@@ -395,7 +405,7 @@ class LeadCommunicationListCreateView(APIView):
     required_perm = "leads.communication.log"
 
     def _lead(self, request, pk):
-        lead = Lead.objects.get(pk=pk)
+        lead = get_object_or_404(Lead, pk=pk)
         self.check_object_permissions(request, lead)
         return lead
 
@@ -719,6 +729,26 @@ class LeadSendWelcomeView(_SendLinkBase):
         return Response(result, status=http.HTTP_201_CREATED)
 
 
+def _gateway_settled_fee_guard(lead):
+    """The application fee that the gateway settled is the gateway's
+    record: a manual mark-paid must not overwrite its reference and a
+    manual clear must not hide a real payment (2026-11-27). Refunds are
+    reversed automatically from the gateway event instead."""
+    from apps.payments.models import PaymentRequest
+    paid = PaymentRequest.objects.filter(
+        lead=lead, purpose=PaymentRequest.Purpose.APPLICATION_FEE,
+        status=PaymentRequest.Status.PAID,
+    ).select_related("paid_order").first()
+    if paid is None:
+        return None
+    ref = paid.paid_order.order_id if paid.paid_order_id else paid.receipt_no
+    return Response(
+        {"detail": f"This application fee was paid online (gateway order {ref}); "
+                   f"it cannot be recorded or cleared by hand."},
+        status=http.HTTP_409_CONFLICT,
+    )
+
+
 class LeadMarkFeePaidView(_SendLinkBase):
     required_perm = "leads.application_fee.record"
 
@@ -735,6 +765,8 @@ class LeadMarkFeePaidView(_SendLinkBase):
 
         lead, err = self._resolve(request, pk)
         if err:
+            return err
+        if (err := _gateway_settled_fee_guard(lead)) is not None:
             return err
 
         from django.utils import timezone
@@ -792,6 +824,8 @@ class LeadClearFeePaidView(_SendLinkBase):
         lead, err = self._resolve(request, pk)
         if err:
             return err
+        if (err := _gateway_settled_fee_guard(lead)) is not None:
+            return err
 
         lead.application_fee_paid_at = None
         lead.application_fee_amount = None
@@ -807,12 +841,12 @@ class LeadClearFeePaidView(_SendLinkBase):
         return Response(status=http.HTTP_204_NO_CONTENT)
 
 
-class LeadIntakeView(APIView):
+class LeadIntakeView(ThrottleBeforePermissionMixin, APIView):
     """Public endpoint for automated lead sources (website forms, ad
     platforms, etc.). Auth via static API key, NOT JWT.
 
-    Rate-limited per (API key, IP) — 120/hour by default. Override via
-    THROTTLE_LEAD_INTAKE env var."""
+    Rate-limited per IP — 120/hour by default, applied before the key
+    check so bad keys are throttled too. Override via THROTTLE_LEAD_INTAKE."""
 
     authentication_classes = []
     permission_classes = [HasIntakeApiKey]

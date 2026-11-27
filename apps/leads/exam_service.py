@@ -4,6 +4,7 @@ score finalization, mapping to leads, reporting.
 Mirrors apps/academics/test_service.py, retargeted to leads.Lead.
 """
 
+from datetime import timedelta
 from decimal import Decimal
 
 from django.db import transaction
@@ -202,6 +203,10 @@ def _notify_result(attempt: EntranceExamAttempt, *, actor=None) -> None:
 
 # --- Window helpers --------------------------------------------------
 
+#: Slack after `started_at + duration_min` for the browser's auto-submit
+#: to reach us (slow networks, clock skew).
+EXAM_SUBMIT_GRACE = timedelta(minutes=2)
+
 def can_attempt_now(attempt: EntranceExamAttempt) -> tuple[bool, str]:
     now = timezone.now()
     if attempt.exam.status != EntranceExam.Status.PUBLISHED:
@@ -210,6 +215,15 @@ def can_attempt_now(attempt: EntranceExamAttempt) -> tuple[bool, str]:
         return False, "Window has not opened yet."
     if now > attempt.end_dt:
         return False, "Window has closed."
+    # The timer is enforced here too, not only in the browser: once
+    # started, answers are accepted until duration + a short grace for
+    # the auto-submit round trip (2026-11-27).
+    if attempt.started_at and attempt.exam.duration_min:
+        deadline = (attempt.started_at
+                    + timedelta(minutes=attempt.exam.duration_min)
+                    + EXAM_SUBMIT_GRACE)
+        if now > deadline:
+            return False, "Time is up for this attempt."
     if attempt.status == EntranceExamAttempt.Status.SUBMITTED:
         return False, "Already submitted."
     if attempt.status == EntranceExamAttempt.Status.GRADED:
