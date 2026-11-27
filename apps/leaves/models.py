@@ -27,6 +27,15 @@ class LeaveType(models.Model):
     def __str__(self):
         return f"{self.code} ({self.name})"
 
+    # The special leave kinds are matched by canonical code OR by name.
+    # Production HR created the catalogue with numeric codes ("001" =
+    # "casual leave", "003" = "Comp Off", ...) and codes can't be edited
+    # after creation, so a code-only match left the CL dashboard and the
+    # comp-off pool at zero for everyone.
+
+    def _norm_name(self) -> str:
+        return "".join(ch for ch in (self.name or "").lower() if ch.isalpha())
+
     @property
     def is_permission(self) -> bool:
         """Legacy "Permission" type: taken in one of two fixed time slots
@@ -35,6 +44,25 @@ class LeaveType(models.Model):
         with a different code still gets the slot picker."""
         return (self.code or "").upper() == "PERMISSION" \
             or "permission" in (self.name or "").lower()
+
+    @property
+    def is_casual(self) -> bool:
+        """Casual Leave — the type the Apply-page CL tiles report on."""
+        return (self.code or "").upper() == "CASUAL" \
+            or "casual" in self._norm_name()
+
+    @property
+    def is_comp_off(self) -> bool:
+        """Compensatory off — spent from the lifetime pool earned via
+        approved comp-off requests; has no allocation."""
+        n = self._norm_name()
+        return (self.code or "").upper() == "COMP_OFF" \
+            or "compoff" in n or "compensatory" in n
+
+    @property
+    def is_saturday_off(self) -> bool:
+        return (self.code or "").upper() == "SATURDAY_OFF" \
+            or "saturday" in self._norm_name()
 
 
 class LeaveAllocation(models.Model):

@@ -31,6 +31,7 @@ from .serializers import (
     LeaveTypeSerializer,
 )
 from .services import guards, notifications
+from .services import balance as balance_service
 from .services.balance import all_balances, cl_dashboard, compute_balance
 from .services.day_count import count_days
 
@@ -628,9 +629,8 @@ class CompOffBalanceView(APIView):
         if me is None:
             return Response({"detail": "No employee profile linked."},
                             status=http.HTTP_400_BAD_REQUEST)
-        try:
-            comp_off_type = LeaveType.objects.get(code="COMP_OFF")
-        except LeaveType.DoesNotExist:
+        comp_off_type = balance_service.comp_off_type()
+        if comp_off_type is None:
             return Response({"earned": "0.0", "used": "0.0", "balance": "0.0"})
         return Response(compute_balance(me, comp_off_type))
 

@@ -27,8 +27,37 @@ from apps.leaves.models import (
 )
 
 
+# Canonical codes (what ``seed_leave_types`` creates). Matching is done
+# through ``LeaveType.is_casual`` / ``is_comp_off`` which also accept the
+# name, because production's HR-created catalogue uses numeric codes.
 COMP_OFF_CODE = "COMP_OFF"
 CASUAL_CODE = "CASUAL"
+
+
+def _types_where(pred) -> list[LeaveType]:
+    """Leave types satisfying ``pred``, canonical code first, then by id
+    so ``[0]`` is a stable "the" type."""
+    hits = [lt for lt in LeaveType.objects.order_by("id") if pred(lt)]
+    hits.sort(key=lambda lt: (not lt.is_active, lt.code.upper() not in (CASUAL_CODE, COMP_OFF_CODE), lt.id))
+    return hits
+
+
+def casual_types() -> list[LeaveType]:
+    return _types_where(lambda lt: lt.is_casual)
+
+
+def comp_off_types() -> list[LeaveType]:
+    return _types_where(lambda lt: lt.is_comp_off)
+
+
+def casual_type() -> LeaveType | None:
+    hits = casual_types()
+    return hits[0] if hits else None
+
+
+def comp_off_type() -> LeaveType | None:
+    hits = comp_off_types()
+    return hits[0] if hits else None
 
 # The leave year runs 1 June – 31 May. Legacy leave_apply.php hard-coded
 # one such window ('2025-06-01'..'2026-05-31') and needed a yearly edit;
@@ -87,16 +116,20 @@ def compute_balance(employee, leave_type: LeaveType, on_date=None) -> dict:
         "leave_type_id": leave_type.id,
         "leave_type_code": leave_type.code,
         "leave_type_name": leave_type.name,
+        # Lets the Balances page pick the comp-off card layout without
+        # depending on the literal code.
+        "is_comp_off": leave_type.is_comp_off,
     }
 
-    if leave_type.code == COMP_OFF_CODE:
+    if leave_type.is_comp_off:
         earned = (
             CompOffApplication.objects
             .filter(employee=employee, status=CompOffApplication.Status.APPROVED)
             .aggregate(s=Sum("count"))["s"] or _zero()
         )
         spend = LeaveApplication.objects.filter(
-            employee=employee, leave_type__code=COMP_OFF_CODE,
+            employee=employee,
+            leave_type_id__in=[lt.id for lt in comp_off_types()],
         )
         used = (
             spend.filter(status=LeaveApplication.Status.APPROVED)
@@ -187,15 +220,15 @@ def cl_dashboard(employee, on_date=None) -> dict:
         .aggregate(s=Sum("count"))["s"] or _zero()
     )
     total_cl = (
-        approved.filter(leave_type__code=CASUAL_CODE)
+        approved.filter(leave_type_id__in=[lt.id for lt in casual_types()])
         .aggregate(s=Sum("count"))["s"] or _zero()
     )
     total_compoff = (
-        approved.filter(leave_type__code=COMP_OFF_CODE)
+        approved.filter(leave_type_id__in=[lt.id for lt in comp_off_types()])
         .aggregate(s=Sum("count"))["s"] or _zero()
     )
 
-    cl_type = LeaveType.objects.filter(code=CASUAL_CODE).first()
+    cl_type = casual_type()
     cl_balance = (
         compute_balance(employee, cl_type, on_date)["balance"]
         if cl_type is not None else _zero()

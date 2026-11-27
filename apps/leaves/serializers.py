@@ -17,13 +17,15 @@ class LeaveTypeSerializer(serializers.ModelSerializer):
         model = LeaveType
         fields = ["id", "code", "name", "category",
                   "half_day_allowed", "enforce_balance", "is_active",
-                  "is_permission", "created_at", "updated_at"]
-        read_only_fields = ["id", "is_permission", "created_at", "updated_at"]
+                  "is_permission", "is_casual", "is_comp_off",
+                  "is_saturday_off", "created_at", "updated_at"]
+        read_only_fields = ["id", "is_permission", "is_casual", "is_comp_off",
+                            "is_saturday_off", "created_at", "updated_at"]
 
     def validate_code(self, value):
         # CASUAL / COMP_OFF / SATURDAY_OFF / PERMISSION are matched by
-        # literal code in the balance, dashboard and apply rules, so a
-        # code can't change once the type exists.
+        # code or name (LeaveType.is_*) in the balance, dashboard and
+        # apply rules; keeping the code immutable keeps old rows' meaning.
         if self.instance is not None and value != self.instance.code:
             raise serializers.ValidationError(
                 "Code cannot be changed after creation; create a new type instead."
@@ -142,7 +144,7 @@ class LeaveApplyInputSerializer(serializers.Serializer):
                 {"from_session": "Permission leaves use Session 1 "
                                  "(9:30–11:00 AM) or Session 2 (4:00–5:30 PM)."}
             )
-        if lt.code == "SATURDAY_OFF" and attrs["from_session"] != 2:
+        if lt.is_saturday_off and attrs["from_session"] != 2:
             raise serializers.ValidationError(
                 {"from_session": "Saturday Off must be a full day."}
             )

@@ -12,7 +12,7 @@ from decimal import Decimal
 from django.utils import timezone
 
 from apps.leaves.models import CompOffApplication, LeaveApplication, LeaveType
-from apps.leaves.services.balance import COMP_OFF_CODE, compute_balance
+from apps.leaves.services.balance import compute_balance
 
 
 FULL_DAY = 2
@@ -100,7 +100,7 @@ def has_allocation_for(employee, leave_type: LeaveType, on_date) -> bool:
     """False when a balance-enforced, allocation-based type has no
     allocation window covering ``on_date``. Comp-off and unenforced
     types always pass."""
-    if not leave_type.enforce_balance or leave_type.code == COMP_OFF_CODE:
+    if not leave_type.enforce_balance or leave_type.is_comp_off:
         return True
     if leave_type.category != LeaveType.Category.LEAVE:
         return True

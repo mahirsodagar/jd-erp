@@ -70,3 +70,54 @@ class ClDashboardWindowTests(TestCase):
         self.assertEqual(d["leave_year_end"], "2027-05-31")
         self.assertEqual(d["total_cl_taken"], Decimal("2"))
         self.assertEqual(d["cl_balance"], Decimal("10"))
+
+
+class ProdStyleCatalogueTests(TestCase):
+    """Production HR created the leave types with numeric codes ("001" =
+    "casual leave", "003" = "Comp Off"). The CL tiles and the comp-off
+    pool must still find them by name."""
+
+    @classmethod
+    def setUpTestData(cls):
+        institute = Institute.objects.create(name="JDIFT", code="JDIFT")
+        campus = Campus.objects.create(name="Main", code="MAIN")
+        cls.emp = make_employee("SODA", institute=institute, campus=campus)
+        cls.cl = LeaveType.objects.create(
+            code="001", name="casual leave", category=LeaveType.Category.LEAVE,
+            enforce_balance=True,
+        )
+        cls.co = LeaveType.objects.create(
+            code="003", name="Comp Off", category=LeaveType.Category.LEAVE,
+            enforce_balance=True,
+        )
+        for count, end in ((15, date(2027, 5, 1)), (12, date(2027, 5, 31)),
+                           (12, date(2026, 12, 31))):
+            LeaveAllocation.objects.create(
+                employee=cls.emp, leave_type=cls.cl, count=Decimal(count),
+                start_date=date(2026, 6, 1), end_date=end,
+            )
+        LeaveApplication.objects.create(
+            employee=cls.emp, leave_type=cls.cl,
+            from_date=date(2026, 12, 1), to_date=date(2026, 12, 15),
+            from_session=2, count=Decimal("15"), reason="x",
+            status=LeaveApplication.Status.PENDING,
+        )
+
+    def test_flags(self):
+        self.assertTrue(self.cl.is_casual)
+        self.assertFalse(self.cl.is_comp_off)
+        self.assertTrue(self.co.is_comp_off)
+        self.assertFalse(self.co.is_casual)
+
+    def test_cl_balance_nets_pending_against_all_covering_allocations(self):
+        d = cl_dashboard(self.emp, on_date=date(2026, 11, 27))
+        self.assertEqual(d["cl_balance"], Decimal("24"))
+        self.assertEqual(d["total_cl_taken"], Decimal("0"))
+
+    def test_comp_off_is_a_derived_pool_not_an_allocation(self):
+        from apps.leaves.services.balance import compute_balance
+        from apps.leaves.services.guards import has_allocation_for
+        row = compute_balance(self.emp, self.co, date(2026, 11, 27))
+        self.assertIn("earned", row)
+        self.assertTrue(row["is_comp_off"])
+        self.assertTrue(has_allocation_for(self.emp, self.co, date(2026, 11, 27)))
